@@ -1,9 +1,9 @@
 [
   {
     "id": 1,
-    "title": "Пиздец",
+    "title": "Тест",
     "text": "Добавлена вкладка Скрипты",
-    "active": false
+    "active": true
   }
 ]
 [
