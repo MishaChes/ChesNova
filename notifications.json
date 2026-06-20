@@ -3,7 +3,7 @@
     "id": 1,
     "title": "Тест",
     "text": "Добавлена вкладка Скрипты",
-    "active": true
+    "active": false
   }
 ]
 [
@@ -11,6 +11,6 @@
     "id": 2,
     "title": "Важно",
     "text": "Ахк обновлен до версии 1.3.3",
-    "active": true
+    "active": false
   }
 ]
