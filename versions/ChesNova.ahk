@@ -2,6 +2,18 @@
 #SingleInstance Off
 FileEncoding "CP0"
 
+launchedByLauncher := false
+for arg in A_Args {
+    if (arg = "--launched-by-chesnova-launcher") {
+        launchedByLauncher := true
+        break
+    }
+}
+if !launchedByLauncher {
+    MsgBox("Не запускайте ChesNova напрямую.`n`nИспользуйте ChesNovaLauncher.", "ChesNova", "Icon!")
+    ExitApp()
+}
+
 chesNovaMutex := DllCall("CreateMutex", "Ptr", 0, "Int", false, "Str", "ChesNova_AHK_v2_SingleInstance", "Ptr")
 if (A_LastError = 183) {
     MsgBox("ChesNova уже запущена.", "ChesNova", "Icon!")
@@ -55,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.2.1"
+CURRENT_VERSION := "10.2.2"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -70,7 +82,7 @@ DirCreate(backupPath)
 ; 📁 FILES
 ; =========================
 saveFile := dataPath "\pm_count.txt"
-settingsFile := dataPath "\settings.ini"
+settingsFile := basePath "\settings.ini"
 historyFile := dataPath "\pm_history.csv"
 punishmentsFile := dataPath "\punishments_history.csv"
 pmLogsFile := dataPath "\pm_logs.csv"
@@ -102,6 +114,7 @@ norm := 250
 autoResetEnabled := 0
 bindsEnabled := 0
 checkUpdatesOnStartup := 1
+startWithWindows := 0
 resetHour := 0
 resetMinute := 0
 lastResetDate := ""
@@ -145,6 +158,7 @@ if FileExist(settingsFile)
         autoResetEnabled := IniRead(settingsFile, "Main", "autoResetEnabled", 0)
         bindsEnabled := IniRead(settingsFile, "Main", "bindsEnabled", 0)
         checkUpdatesOnStartup := IniRead(settingsFile, "Updates", "checkOnStartup", 1)
+        startWithWindows := IniRead(settingsFile, "Launcher", "startWithWindows", 0)
         resetHour := IniRead(settingsFile, "Main", "resetHour", 0)
         resetMinute := IniRead(settingsFile, "Main", "resetMinute", 0)
         lastResetDate := IniRead(settingsFile, "Main", "lastResetDate", "")
@@ -164,6 +178,7 @@ norm += 0
 autoResetEnabled += 0
 bindsEnabled += 0
 checkUpdatesOnStartup += 0
+startWithWindows += 0
 
 cloudAccessState := "unknown"
 cloudAccessMessage := "Ожидает проверки"
@@ -214,6 +229,7 @@ SetCenterKeyCtrl := ""
 SetHideKeyCtrl := ""
 SetAutoResetCtrl := ""
 SetCheckUpdatesCtrl := ""
+SetStartupCtrl := ""
 SetResetHourCtrl := ""
 SetResetMinuteCtrl := ""
 LogFileTextCtrl := ""
@@ -2575,6 +2591,90 @@ OpenUpdateDownload(downloadUrl, dlg, *) {
     }
 }
 
+ManualUpdateChesNova(*) {
+    global basePath, backupPath
+
+    mainScript := basePath "\ChesNova.ahk"
+    newScript := basePath "\ChesNova_new.ahk"
+    updateUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/ChesNova.ahk"
+
+    try {
+        if !FileExist(mainScript)
+            throw Error("Текущий файл ChesNova.ahk не найден.")
+
+        if FileExist(newScript)
+            FileDelete(newScript)
+
+        ; The working file remains untouched until the complete new file is on disk.
+        Download(updateUrl, newScript)
+        if !FileExist(newScript) || FileGetSize(newScript) = 0
+            throw Error("Загруженный файл пустой.")
+
+        DirCreate(backupPath)
+        backupFile := backupPath "\ChesNova_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".ahk"
+        FileCopy(mainScript, backupFile, 0)
+
+        try {
+            FileDelete(mainScript)
+            FileMove(newScript, mainScript, 0)
+        } catch as installErr {
+            ; If replacing fails, immediately restore the known-working backup.
+            if !FileExist(mainScript) && FileExist(backupFile)
+                FileCopy(backupFile, mainScript, 1)
+            throw installErr
+        }
+    } catch as err {
+        if FileExist(newScript)
+            try FileDelete(newScript)
+        LogError("ManualUpdateChesNova", "Не удалось установить обновление", err.Message)
+        MsgBox("Не удалось загрузить обновление.`n`nПроверьте подключение к интернету.", "ChesNova", "Iconx")
+        return
+    }
+
+    ShowUpdateInstalledDialog()
+}
+
+ShowUpdateInstalledDialog() {
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
+
+    dlg := Gui("+ToolWindow +AlwaysOnTop +Border", "Обновление ChesNova")
+    dlg.BackColor := colorBg
+    dlg.MarginX := 0
+    dlg.MarginY := 0
+    dlg.Add("Text", "x0 y0 w560 h208 Background" colorBg)
+    dlg.Add("Text", "x18 y18 w524 h126 Background" colorCard)
+    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
+    dlg.Add("Text", "x38 y34 w460 h26 Background" colorCard, "✅ Обновление успешно загружено.")
+    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    dlg.Add("Text", "x38 y74 w460 h42 Background" colorCard, "Для применения изменений необходимо перезапустить ChesNova.")
+    dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
+    laterButton := dlg.Add("Text", "x250 y160 w108 h30 +0x200 Center Background" colorCardAlt, "Позже")
+    laterButton.OnEvent("Click", (*) => dlg.Destroy())
+    restartButton := dlg.Add("Text", "x370 y160 w172 h30 +0x200 Center Background" colorAccent, "Перезапустить сейчас")
+    restartButton.OnEvent("Click", RestartChesNova.Bind(dlg))
+    dlg.OnEvent("Close", (*) => dlg.Destroy())
+    dlg.Show("w560 h208")
+}
+
+RestartChesNova(dlg, *) {
+    global basePath
+
+    launcherPath := basePath "\ChesNovaLauncher.ahk"
+    if !FileExist(launcherPath) {
+        MsgBox("Не найден ChesNovaLauncher.ahk в папке Documents\ChesNova.", "ChesNova", "Iconx")
+        return
+    }
+
+    try {
+        Run('"' A_AhkPath '" "' launcherPath '" --restart')
+        dlg.Destroy()
+        ExitApp()
+    } catch as err {
+        LogError("RestartChesNova", "Не удалось перезапустить ChesNova", err.Message)
+        MsgBox("Не удалось перезапустить ChesNova.", "ChesNova", "Iconx")
+    }
+}
+
 LoadNotificationsCache() {
     global notificationsCacheFile, notifications
 
@@ -2597,7 +2697,7 @@ LoadNotificationStates() {
         part := StrSplit(line, "|")
         if (part.Length < 3 || Trim(part[1]) = "")
             continue
-        notificationStates[part[1]] := Map("received", part[2], "read", (part[3] + 0) ? 1 : 0)
+        notificationStates[part[1]] := Map("received", part[2], "read", (part[3] + 0) ? 1 : 0, "dismissed", (part.Length >= 4 && part[4] + 0) ? 1 : 0)
     }
 }
 
@@ -2607,7 +2707,8 @@ SaveNotificationStates() {
     try {
         file := FileOpen(notificationsStateFile, "w", "UTF-8")
         for id, state in notificationStates
-            file.WriteLine(id "|" state["received"] "|" state["read"])
+            dismissed := state.Has("dismissed") ? state["dismissed"] : 0
+            file.WriteLine(id "|" state["received"] "|" state["read"] "|" dismissed)
         file.Close()
     } catch as err {
         LogError("SaveNotificationStates", "Не удалось сохранить статусы уведомлений", err.Message)
@@ -2661,7 +2762,7 @@ JsonNotificationField(objectText, field, defaultValue := "") {
 CheckNotifications(*) {
     global notificationsUrl, notificationsCacheFile, notifications, notificationStates
 
-    tempFile := A_Temp "\ChesNova_notifications_" A_TickCount ".json"
+    tempFile := notificationsCacheFile ".download"
     try {
         Download(notificationsUrl, tempFile)
         jsonText := FileRead(tempFile, "UTF-8")
@@ -2672,7 +2773,7 @@ CheckNotifications(*) {
         for _, notification in notifications {
             id := notification["id"]
             if !notificationStates.Has(id) {
-                notificationStates[id] := Map("received", A_Now, "read", 0)
+                notificationStates[id] := Map("received", A_Now, "read", 0, "dismissed", 0)
                 statesChanged := true
             }
         }
@@ -2692,7 +2793,7 @@ HasUnreadNotifications() {
 
     for _, notification in notifications {
         id := notification["id"]
-        if !notificationStates.Has(id) || !notificationStates[id]["read"]
+        if !notificationStates.Has(id) || (!notificationStates[id]["read"] && !notificationStates[id].Get("dismissed", 0))
             return true
     }
     return false
@@ -2714,7 +2815,7 @@ MarkNotificationsRead() {
     for _, notification in notifications {
         id := notification["id"]
         if !notificationStates.Has(id) {
-            notificationStates[id] := Map("received", A_Now, "read", 1)
+            notificationStates[id] := Map("received", A_Now, "read", 1, "dismissed", 0)
             changed := true
         } else if !notificationStates[id]["read"] {
             notificationStates[id]["read"] := 1
@@ -2726,9 +2827,28 @@ MarkNotificationsRead() {
         SaveNotificationStates()
 }
 
+ClearNotifications(*) {
+    global notifications, notificationStates, NotificationsGui
+
+    for _, notification in notifications {
+        id := notification["id"]
+        if !notificationStates.Has(id)
+            notificationStates[id] := Map("received", A_Now, "read", 1, "dismissed", 1)
+        else {
+            notificationStates[id]["read"] := 1
+            notificationStates[id]["dismissed"] := 1
+        }
+    }
+
+    SaveNotificationStates()
+    UpdateNotificationIndicator()
+    SafeDestroyGui(&NotificationsGui)
+    OpenNotifications()
+}
+
 OpenNotifications(*) {
     global NotificationsGui, notifications, notificationStates
-    global colorBg, colorCard, colorCardAlt, colorText, colorMuted
+    global colorBg, colorCard, colorCardAlt, colorRed, colorText, colorMuted
 
     MarkNotificationsRead()
     UpdateNotificationIndicator()
@@ -2751,17 +2871,27 @@ OpenNotifications(*) {
     list.ModifyCol(3, 100)
     list.ModifyCol(4, 140)
 
-    if (notifications.Length = 0) {
+    visibleNotifications := []
+    for _, notification in notifications {
+        if !notificationStates.Has(notification["id"]) || !notificationStates[notification["id"]].Get("dismissed", 0)
+            visibleNotifications.Push(notification)
+    }
+
+    if (visibleNotifications.Length = 0) {
         NotificationsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
         NotificationsGui.Add("Text", "x42 y120 w500 h24 Background" colorCard, "Уведомлений пока нет.")
     } else {
-        for _, notification in notifications {
+        for _, notification in visibleNotifications {
             state := notificationStates.Has(notification["id"]) ? notificationStates[notification["id"]] : Map("received", A_Now, "read", 1)
+            if state.Get("dismissed", 0)
+                continue
             received := FormatTime(state["received"], "dd.MM.yyyy HH:mm")
             list.Add(, notification["title"], notification["text"], notification["type"], received)
         }
     }
 
+    clearButton := NotificationsGui.Add("Text", "x390 y344 w130 h28 +0x200 Center Background" colorRed " c" colorText, "Очистить")
+    clearButton.OnEvent("Click", ClearNotifications)
     closeButton := NotificationsGui.Add("Text", "x536 y344 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Закрыть")
     closeButton.OnEvent("Click", (*) => SafeDestroyGui(&NotificationsGui))
     NotificationsGui.OnEvent("Close", (*) => SafeDestroyGui(&NotificationsGui))
@@ -2890,6 +3020,8 @@ OpenScriptTopic(url, *) {
 }
 
 InstallScriptPackage(packageId, *) {
+    global dataPath
+
     package := GetScriptPackageById(packageId)
     if !IsObject(package) {
         ShowAppDialog("Скрипты", "Пакет скрипта не найден.")
@@ -2920,9 +3052,11 @@ InstallScriptPackage(packageId, *) {
     }
 
     downloadedFiles := []
+    downloadsPath := dataPath "\downloads"
+    DirCreate(downloadsPath)
     try {
         for index, file in package["files"] {
-            tempFile := A_Temp "\ChesNova_" package["id"] "_" A_TickCount "_" index ".tmp"
+            tempFile := downloadsPath "\ChesNova_" package["id"] "_" A_TickCount "_" index ".tmp"
             Download(file["url"], tempFile)
             downloadedFiles.Push(Map("temp", tempFile, "file", file))
         }
@@ -3740,9 +3874,9 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, logFile
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, logFile
     global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl
-    global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
+    global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
 
     view := "Settings"
     AddViewControl(view, "Text", "x250 y34 w560 h34 Background0E1116 cFFFFFF", "Настройки")
@@ -3780,7 +3914,10 @@ SettingsView() {
     SetCheckUpdatesCtrl := AddViewControl(view, "Checkbox", "vSetCheckUpdates x610 y374 Checked" checkUpdatesOnStartup " cFFFFFF Background0E1116", "Проверять обновления при запуске")
     checkUpdatesButton := AddViewControl(view, "Button", "x610 y406 w240 h28", "Проверить обновления")
     checkUpdatesButton.OnEvent("Click", CheckForUpdatesManual)
-    saveButton := AddViewControl(view, "Button", "x610 y448 w240 h34", "Сохранить настройки")
+    updateButton := AddViewControl(view, "Button", "x610 y440 w240 h28", "🔄 Обновить ChesNova")
+    updateButton.OnEvent("Click", ManualUpdateChesNova)
+    SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x610 y478 Checked" startWithWindows " cFFFFFF Background0E1116", "Запускать ChesNova вместе с Windows")
+    saveButton := AddViewControl(view, "Button", "x610 y512 w240 h34", "Сохранить настройки")
     saveButton.OnEvent("Click", SaveSettings)
 }
 
@@ -4210,7 +4347,7 @@ CloseHelp(*) {
 ; =========================
 SaveSettings(*) {
     global SettingsGui
-    global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, resetHour, resetMinute
+    global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
     global menuKey, resetKey, centerKey, hideKey, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
 
     SaveMenuPosition()
@@ -4220,6 +4357,7 @@ SaveSettings(*) {
     norm := values.SetNorm + 0
     autoResetEnabled := values.SetAutoReset
     checkUpdatesOnStartup := values.SetCheckUpdates
+    startWithWindows := values.SetStartup
     resetHour := values.SetResetHour
     resetMinute := values.SetResetMinute
     menuKey := values.SetMenuKey
@@ -4234,6 +4372,7 @@ SaveSettings(*) {
         IniWrite(autoResetEnabled, settingsFile, "Main", "autoResetEnabled")
         IniWrite(bindsEnabled, settingsFile, "Main", "bindsEnabled")
         IniWrite(checkUpdatesOnStartup, settingsFile, "Updates", "checkOnStartup")
+        IniWrite(startWithWindows, settingsFile, "Launcher", "startWithWindows")
         IniWrite(resetHour, settingsFile, "Main", "resetHour")
         IniWrite(resetMinute, settingsFile, "Main", "resetMinute")
         IniWrite(lastResetDate, settingsFile, "Main", "lastResetDate")
@@ -4245,6 +4384,7 @@ SaveSettings(*) {
         IniWrite(guiY, settingsFile, "GUI", "guiY")
         IniWrite(menuX, settingsFile, "GUI", "menuX")
         IniWrite(menuY, settingsFile, "GUI", "menuY")
+        SetWindowsStartup(startWithWindows)
     } catch as err {
         LogError("SaveSettings", "Ошибка записи settings.ini", err.Message)
         MsgBox("Не удалось сохранить настройки.`n`n" err.Message, "Ошибка", "Iconx")
@@ -4260,6 +4400,17 @@ SaveSettings(*) {
     RegisterHotkeys()
 
     UpdatePMDisplay()
+}
+
+SetWindowsStartup(enabled) {
+    launcherPath := A_MyDocuments "\ChesNova\ChesNovaLauncher.ahk"
+    runKey := "HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+
+    if enabled
+        RegWrite(launcherPath, "REG_SZ", runKey, "ChesNova")
+    else {
+        try RegDelete(runKey, "ChesNova")
+    }
 }
 
 ; =========================
