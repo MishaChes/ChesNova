@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.2.2"
+CURRENT_VERSION := "10.2.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -2592,7 +2592,7 @@ OpenUpdateDownload(downloadUrl, dlg, *) {
 }
 
 ManualUpdateChesNova(*) {
-    global basePath, backupPath
+    global basePath, backupPath, CURRENT_VERSION
 
     mainScript := basePath "\ChesNova.ahk"
     newScript := basePath "\ChesNova_new.ahk"
@@ -2601,6 +2601,14 @@ ManualUpdateChesNova(*) {
     try {
         if !FileExist(mainScript)
             throw Error("Текущий файл ChesNova.ahk не найден.")
+
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        if (versionInfo["latest"] = "")
+            throw Error("В version.json отсутствует поле latest.")
+        if (CompareVersions(versionInfo["latest"], CURRENT_VERSION) <= 0) {
+            ShowAppDialog("Обновления", "У вас уже установлена последняя версия: v" CURRENT_VERSION ".")
+            return
+        }
 
         if FileExist(newScript)
             FileDelete(newScript)
