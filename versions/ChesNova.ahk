@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.2.3"
+CURRENT_VERSION := "10.3"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -122,13 +122,14 @@ menuKey := "F10"
 resetKey := "F9"
 centerKey := "F5"
 hideKey := "F2"
-colorBg := "0E1116"
-colorSidebar := "151A21"
-colorCard := "171C23"
-colorCardAlt := "262D36"
-colorAccent := "3B82F6"
-colorText := "F4F7FB"
-colorMuted := "A8B0BC"
+; Тёмная оболочка; макет определяет расположение элементов.
+colorBg := "0B0E14"
+colorSidebar := "10151E"
+colorCard := "171D28"
+colorCardAlt := "222A37"
+colorAccent := "6C63FF"
+colorText := "F5F7FB"
+colorMuted := "939CAC"
 colorGreen := "41D07A"
 colorRed := "FF5B6B"
 colorYellow := "F6A623"
@@ -220,6 +221,7 @@ lastMenuOpenTick := 0
 SettingsTabCtrl := ""
 GuiViewCtrls := Map()
 NavButtonCtrls := Map()
+NavIndicatorCtrls := Map()
 CurrentView := ""
 SetNickCtrl := ""
 SetNormCtrl := ""
@@ -2243,7 +2245,7 @@ OpenMenu(*) {
         if (A_TickCount - lastMenuOpenTick < 500)
             return
         if (settingsMenuHidden) {
-            SettingsGui.Show("w900 h560 x" menuX " y" menuY)
+            SettingsGui.Show("w920 h" Max(590, 174 + GetScriptPackages().Length * 250) " x" menuX " y" menuY)
             settingsMenuHidden := false
             lastMenuOpenTick := A_TickCount
             return
@@ -2256,8 +2258,8 @@ OpenMenu(*) {
 }
 
 BuildMainWindow(initialView := "Dashboard") {
-    global SettingsGui, settingsMenuHidden, settingsMenuBuilding, lastMenuOpenTick, GuiViewCtrls, NavButtonCtrls, CurrentView
-    global menuX, menuY, appVersion, colorBg, colorSidebar, colorText, colorMuted, colorCardAlt, colorRed
+    global SettingsGui, settingsMenuHidden, settingsMenuBuilding, lastMenuOpenTick, GuiViewCtrls, NavButtonCtrls, NavIndicatorCtrls, CurrentView
+    global menuX, menuY, appVersion, colorBg, colorSidebar, colorText, colorMuted, colorCard, colorCardAlt, colorRed, colorGreen
     global NotificationButtonCtrl, NotificationIndicatorCtrl
 
     if (settingsMenuBuilding)
@@ -2274,6 +2276,7 @@ BuildMainWindow(initialView := "Dashboard") {
     ResetNotificationControls()
     GuiViewCtrls := Map()
     NavButtonCtrls := Map()
+    NavIndicatorCtrls := Map()
     CurrentView := ""
 
     SettingsGui := Gui("+Border -Caption", "ChesNova " appVersion)
@@ -2283,35 +2286,39 @@ BuildMainWindow(initialView := "Dashboard") {
     SettingsGui.MarginY := 0
     SettingsGui.SetFont("s10 c" colorText, "Segoe UI")
 
-    windowHeight := Max(560, 174 + GetScriptPackages().Length * 250)
-    SettingsGui.Add("Text", "x0 y0 w230 h" windowHeight " Background" colorSidebar)
-    SettingsGui.Add("Text", "x230 y0 w670 h" windowHeight " Background" colorBg)
-    SettingsGui.SetFont("s16 Bold c" colorText, "Segoe UI")
-    SettingsGui.Add("Text", "x18 y20 w180 h28 Background" colorSidebar, "ChesNova")
-    SettingsGui.SetFont("s8 Norm c" colorMuted, "Segoe UI")
-    SettingsGui.Add("Text", "x20 y49 w70 h16 Background" colorSidebar, appVersion)
-    SettingsGui.Add("Text", "x18 y104 w180 h1 Background2A3340")
+    windowHeight := Max(590, 174 + GetScriptPackages().Length * 250)
+    ; Верхняя строка и левая панель повторяют структуру макета.
+    SettingsGui.Add("Text", "x0 y0 w920 h28 Background" colorCard)
+    SettingsGui.Add("Text", "x0 y28 w216 h" (windowHeight - 28) " Background" colorSidebar)
+    SettingsGui.Add("Text", "x216 y28 w704 h" (windowHeight - 28) " Background" colorBg)
+    SettingsGui.Add("Text", "x0 y27 w920 h1 Background2B3443")
+    SettingsGui.Add("Text", "x215 y28 w1 h" (windowHeight - 28) " Background2B3443")
     SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
-    hideWindowBtn := SettingsGui.Add("Text", "x810 y12 w32 h24 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x2212))
-    hideWindowBtn.OnEvent("Click", HideSettingsMenu)
-    closeWindowBtn := SettingsGui.Add("Text", "x850 y12 w32 h24 +0x200 Center Background" colorRed " c" colorText, Chr(0x00D7))
-    closeWindowBtn.OnEvent("Click", CloseSettings)
-    NotificationButtonCtrl := SettingsGui.Add("Text", "x770 y12 w32 h24 +0x200 Center Background" colorCardAlt " c" colorText, "🔔")
+    SettingsGui.Add("Text", "x18 y5 w300 h18 Background" colorCard, "ChesNova " appVersion)
+    SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
+    cloudBtn := SettingsGui.Add("Text", "x704 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "☁")
+    cloudBtn.OnEvent("Click", (*) => ShowView("Cloud"))
+    settingsBtn := SettingsGui.Add("Text", "x738 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "⚙")
+    settingsBtn.OnEvent("Click", (*) => ShowView("Settings"))
+    NotificationButtonCtrl := SettingsGui.Add("Text", "x772 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "🔔")
     NotificationButtonCtrl.OnEvent("Click", OpenNotifications)
-    NotificationButtonCtrl.SetFont("s11 Norm c" colorText, "Segoe UI Emoji")
-    NotificationIndicatorCtrl := SettingsGui.Add("Text", "x794 y11 w7 h9 +0x200 Center Background" colorCardAlt " c" colorGreen, "●")
-    NotificationIndicatorCtrl.SetFont("s7 Bold c" colorGreen, "Segoe UI")
+    NotificationButtonCtrl.SetFont("s10 Norm c" colorText, "Segoe UI Emoji")
+    NotificationIndicatorCtrl := SettingsGui.Add("Text", "x794 y2 w7 h8 +0x200 Center Background" colorCardAlt " c" colorGreen, "●")
+    NotificationIndicatorCtrl.SetFont("s6 Bold c" colorGreen, "Segoe UI")
+    hideWindowBtn := SettingsGui.Add("Text", "x846 y3 w32 h22 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x2212))
+    hideWindowBtn.OnEvent("Click", HideSettingsMenu)
+    closeWindowBtn := SettingsGui.Add("Text", "x882 y3 w32 h22 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x00D7))
+    closeWindowBtn.OnEvent("Click", CloseSettings)
 
-    BuildNavButton("Dashboard", "🏠 Главная", 124)
-    BuildNavButton("PMLogs", "📨 PM Логи", 164)
-    BuildNavButton("Punishments", "⚖️ Наказания", 204)
-    BuildNavButton("NormHistory", "📈 История нормы", 244)
-    BuildNavButton("DaysOff", "🏖 Отгулы", 284)
-    BuildNavButton("Binds", "⌨️ Бинды", 324)
-    BuildNavButton("Settings", "⚙️ Настройки", 364)
-    BuildNavButton("Help", "❓ Помощь", 404)
-    BuildNavButton("Cloud", "☁️ Cloud", 464)
-    BuildNavButton("Scripts", "🛠️ Скрипты", 504)
+    BuildNavButton("Dashboard", "⌂   Главная", 48)
+    BuildNavButton("Punishments", "⚖   Наказания", 88)
+    BuildNavButton("NormHistory", "◷   Норма", 128)
+    BuildNavButton("DaysOff", "☀   Отгулы", 168)
+    BuildNavButton("PMLogs", "▤   PM логи", 208)
+    BuildNavButton("Binds", "⌨   Бинды", 248)
+    BuildNavButton("Scripts", "✦   Скрипты", 288)
+    BuildNavButton("Updates", "↻   Обновления", windowHeight - 82)
+    BuildNavButton("Help", "?   Помощь", windowHeight - 42)
 
     DashboardView()
     PMLogsView()
@@ -2320,15 +2327,16 @@ BuildMainWindow(initialView := "Dashboard") {
     DaysOffView()
     BindsView()
     SettingsView()
+    UpdatesView()
     HelpView()
     CloudView()
     ScriptsView()
     UpdateNotificationIndicator()
 
     if (menuX = "Center")
-        SettingsGui.Show("w900 h" windowHeight " xCenter yCenter")
+        SettingsGui.Show("w920 h" windowHeight " xCenter yCenter")
     else
-        SettingsGui.Show("w900 h" windowHeight " x" menuX " y" menuY)
+        SettingsGui.Show("w920 h" windowHeight " x" menuX " y" menuY)
     ShowView(initialView)
     lastMenuOpenTick := A_TickCount
     settingsMenuBuilding := false
@@ -2336,12 +2344,23 @@ BuildMainWindow(initialView := "Dashboard") {
 }
 
 BuildNavButton(viewName, label, y) {
-    global SettingsGui, NavButtonCtrls, colorMuted
+    global SettingsGui, NavButtonCtrls, NavIndicatorCtrls, colorSidebar, colorMuted
 
     SettingsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
-    ctrl := SettingsGui.Add("Text", "x16 y" y " w186 h32 +0x200 Background1A2029", "  " label)
+    ctrl := SettingsGui.Add("Text", "x24 y" y " w178 h34 +0x200 Background" colorSidebar, "  " label)
     ctrl.OnEvent("Click", (*) => ShowView(viewName))
     NavButtonCtrls[viewName] := ctrl
+    indicator := SettingsGui.Add("Text", "x14 y" (y + 6) " w3 h22 Background" colorSidebar)
+    NavIndicatorCtrls[viewName] := indicator
+    return ctrl
+}
+
+BuildSidebarActionButton(label, y, callback) {
+    global SettingsGui, colorCard, colorMuted
+
+    SettingsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
+    ctrl := SettingsGui.Add("Text", "x24 y" y " w178 h34 +0x200 Background" colorCard, "  " label)
+    ctrl.OnEvent("Click", callback)
     return ctrl
 }
 
@@ -2357,10 +2376,10 @@ AddViewControl(viewName, controlType, options, text := "") {
 }
 
 ShowView(viewName, *) {
-    global GuiViewCtrls, NavButtonCtrls, CurrentView
+    global GuiViewCtrls, NavButtonCtrls, NavIndicatorCtrls, CurrentView
     global selectedPunishmentDays, selectedPunishmentType, punishmentSearch
     global PmLogsTextCtrl, PMLogsSearchCtrl
-    global colorAccent, colorText, colorMuted
+    global colorAccent, colorText, colorMuted, colorSidebar, colorCardAlt
 
     if (!GuiViewCtrls.Has(viewName))
         return
@@ -2372,11 +2391,15 @@ ShowView(viewName, *) {
 
     for name, ctrl in NavButtonCtrls {
         if (name = viewName) {
-            ctrl.Opt("Background" colorAccent " c" colorText)
+            ctrl.Opt("Background" colorCardAlt " c" colorText)
             ctrl.SetFont("s10 Bold c" colorText, "Segoe UI")
+            if NavIndicatorCtrls.Has(name)
+                NavIndicatorCtrls[name].Opt("Background" colorAccent)
         } else {
-            ctrl.Opt("Background1A2029 c" colorMuted)
+            ctrl.Opt("Background" colorSidebar " c" colorMuted)
             ctrl.SetFont("s10 Norm c" colorMuted, "Segoe UI")
+            if NavIndicatorCtrls.Has(name)
+                NavIndicatorCtrls[name].Opt("Background" colorSidebar)
         }
     }
 
@@ -2397,6 +2420,8 @@ ShowView(viewName, *) {
         RefreshBindsList()
     else if (viewName = "Settings")
         RefreshSettingsView()
+    else if (viewName = "Updates")
+        RefreshUpdatesView()
     else if (viewName = "Help")
         RefreshErrorsLogView()
     else if (viewName = "Cloud")
@@ -2924,6 +2949,7 @@ ScriptsView() {
     for index, package in GetScriptPackages() {
         cardY := 154 + ((index - 1) * 250)
         AddViewControl(view, "Text", "x250 y" cardY " w600 h230 Background" colorCard)
+        AddViewControl(view, "Text", "x250 y" cardY " w4 h230 Background" colorAccent)
         AddViewControl(view, "Text", "x272 y" (cardY + 18) " w250 h28 Background" colorCard " c" colorText, package["title"])
         ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x532 y" (cardY + 22) " w296 h22 Background" colorCard " c" colorRed, "")
         AddViewControl(view, "Text", "x272 y" (cardY + 52) " w450 h38 Background" colorCard " c" colorMuted, package["description"])
@@ -2936,9 +2962,9 @@ ScriptsView() {
             filesText .= "✔ " file["name"] "`n"
         AddViewControl(view, "Text", "x570 y" (cardY + 116) " w180 h64 Background" colorCard " c" colorGreen, RTrim(filesText, "`n"))
 
-        topicButton := AddViewControl(view, "Text", "x272 y" (cardY + 172) " w250 h28 +0x200 Center Background" colorCardAlt " c" colorText, "🌐 Официальная тема")
+        topicButton := AddViewControl(view, "Text", "x272 y" (cardY + 190) " w268 h28 +0x200 Center Background" colorCardAlt " c" colorText, "🌐 Официальная тема")
         topicButton.OnEvent("Click", OpenScriptTopic.Bind(package["topic"]))
-        installButton := AddViewControl(view, "Text", "x632 y" (cardY + 172) " w196 h28 +0x200 Center Background" colorAccent " c" colorText, "📥 Установить")
+        installButton := AddViewControl(view, "Text", "x550 y" (cardY + 190) " w278 h28 +0x200 Center Background" colorAccent " c" colorText, "📥 Установить")
         installButton.OnEvent("Click", InstallScriptPackage.Bind(package["id"]))
     }
 
@@ -3885,48 +3911,81 @@ SettingsView() {
     global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, logFile
     global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "Settings"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background0E1116 cFFFFFF", "Настройки")
-    AddViewControl(view, "Text", "x250 y84 w270 Background0E1116 c7aa2ff", "Пользователь")
-    AddViewControl(view, "Text", "x250 y114 w130 Background0E1116 cFFFFFF", "Ник администратора")
-    SetNickCtrl := AddViewControl(view, "Edit", "vSetNick x400 y110 w170 h22 c000000 BackgroundEDEDED", nick)
-    AddViewControl(view, "Text", "x250 y148 w130 Background0E1116 cFFFFFF", "Норма PM")
-    SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x400 y144 w170 h22 Number c000000 BackgroundEDEDED", norm)
+    AddViewControl(view, "Text", "x250 y34 w560 h30 Background" colorBg " c" colorText, "Настройки")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
 
-    AddViewControl(view, "Text", "x250 y196 w270 Background0E1116 c7aa2ff", "Горячие клавиши")
-    AddViewControl(view, "Text", "x250 y226 w130 Background0E1116 cFFFFFF", "Открыть меню")
-    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x400 y222 w170 h22 c000000 BackgroundEDEDED", menuKey)
-    AddViewControl(view, "Text", "x250 y258 w130 Background0E1116 cFFFFFF", "Сброс PM")
-    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x400 y254 w170 h22 c000000 BackgroundEDEDED", resetKey)
-    AddViewControl(view, "Text", "x250 y290 w130 Background0E1116 cFFFFFF", "Центр HUD")
-    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x400 y286 w170 h22 c000000 BackgroundEDEDED", centerKey)
-    AddViewControl(view, "Text", "x250 y322 w130 Background0E1116 cFFFFFF", "Скрыть HUD")
-    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x400 y318 w170 h22 c000000 BackgroundEDEDED", hideKey)
+    ; Левая колонка: профиль и горячие клавиши.
+    AddViewControl(view, "Text", "x250 y88 w280 h102 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y104 w220 h22 Background" colorCard " c" colorText, "Пользователь")
+    AddViewControl(view, "Text", "x270 y136 w110 h22 Background" colorCard " c" colorMuted, "Ник")
+    SetNickCtrl := AddViewControl(view, "Edit", "vSetNick x390 y132 w120 h26 c" colorText " Background151A22", nick)
+    AddViewControl(view, "Text", "x270 y166 w110 h22 Background" colorCard " c" colorMuted, "Норма PM")
+    SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background151A22", norm)
 
-    AddViewControl(view, "Text", "x610 y84 w240 Background0E1116 c7aa2ff", "Автосброс нормы")
-    SetAutoResetCtrl := AddViewControl(view, "Checkbox", "vSetAutoReset x610 y112 Checked" autoResetEnabled " cFFFFFF Background0E1116", "Включить автосброс")
-    AddViewControl(view, "Text", "x610 y148 w50 Background0E1116 cFFFFFF", "Часы")
-    SetResetHourCtrl := AddViewControl(view, "Edit", "vSetResetHour x665 y144 w50 h22 c000000 BackgroundEDEDED", resetHour)
-    AddViewControl(view, "Text", "x730 y148 w60 Background0E1116 cFFFFFF", "Минуты")
-    SetResetMinuteCtrl := AddViewControl(view, "Edit", "vSetResetMinute x795 y144 w50 h22 c000000 BackgroundEDEDED", resetMinute)
+    AddViewControl(view, "Text", "x250 y206 w280 h204 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y222 w220 h22 Background" colorCard " c" colorText, "Горячие клавиши")
+    AddViewControl(view, "Text", "x270 y258 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
+    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y254 w120 h26 c" colorText " Background151A22", menuKey)
+    AddViewControl(view, "Text", "x270 y294 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
+    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w120 h26 c" colorText " Background151A22", resetKey)
+    AddViewControl(view, "Text", "x270 y330 w110 h22 Background" colorCard " c" colorMuted, "Центр HUD")
+    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w120 h26 c" colorText " Background151A22", centerKey)
+    AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
+    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w120 h26 c" colorText " Background151A22", hideKey)
 
-    AddViewControl(view, "Text", "x610 y196 w240 Background0E1116 c7aa2ff", "Файл логов")
+    ; Правая колонка: автоматизация и источник логов.
+    AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
+    AddViewControl(view, "Text", "x570 y104 w220 h22 Background" colorCard " c" colorText, "Автосброс нормы")
+    SetAutoResetCtrl := AddViewControl(view, "Checkbox", "vSetAutoReset x570 y136 Checked" autoResetEnabled " c" colorText " Background" colorCard, "Включить автосброс")
+    AddViewControl(view, "Text", "x570 y172 w60 h22 Background" colorCard " c" colorMuted, "Часы")
+    SetResetHourCtrl := AddViewControl(view, "Edit", "vSetResetHour x635 y168 w58 h26 Number c" colorText " Background151A22", resetHour)
+    AddViewControl(view, "Text", "x708 y172 w64 h22 Background" colorCard " c" colorMuted, "Минуты")
+    SetResetMinuteCtrl := AddViewControl(view, "Edit", "vSetResetMinute x782 y168 w48 h26 Number c" colorText " Background151A22", resetMinute)
+
+    AddViewControl(view, "Text", "x550 y246 w300 h180 Background" colorCard)
+    AddViewControl(view, "Text", "x570 y262 w220 h22 Background" colorCard " c" colorText, "Файл логов")
     logText := logFile
     if (logText = "")
         logText := "Файл не выбран"
-    LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x610 y224 w240 h62 ReadOnly -Wrap Background20242b cFFFFFF", logText)
-    selectLogButton := AddViewControl(view, "Button", "x610 y302 w240 h28", "Выбрать chatlog.txt")
+    LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x570 y292 w260 h58 ReadOnly -Wrap c" colorText " Background151A22", logText)
+    selectLogButton := AddViewControl(view, "Text", "x570 y366 w260 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Выбрать chatlog.txt")
     selectLogButton.OnEvent("Click", SelectLogFile)
-    AddViewControl(view, "Text", "x610 y348 w240 Background0E1116 c7aa2ff", "Обновления")
-    SetCheckUpdatesCtrl := AddViewControl(view, "Checkbox", "vSetCheckUpdates x610 y374 Checked" checkUpdatesOnStartup " cFFFFFF Background0E1116", "Проверять обновления при запуске")
-    checkUpdatesButton := AddViewControl(view, "Button", "x610 y406 w240 h28", "Проверить обновления")
-    checkUpdatesButton.OnEvent("Click", CheckForUpdatesManual)
-    updateButton := AddViewControl(view, "Button", "x610 y440 w240 h28", "🔄 Обновить ChesNova")
-    updateButton.OnEvent("Click", ManualUpdateChesNova)
-    SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x610 y478 Checked" startWithWindows " cFFFFFF Background0E1116", "Запускать ChesNova вместе с Windows")
-    saveButton := AddViewControl(view, "Button", "x610 y512 w240 h34", "Сохранить настройки")
+
+    AddViewControl(view, "Text", "x550 y442 w300 h72 Background" colorCard)
+    SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x570 y464 Checked" startWithWindows " c" colorText " Background" colorCard, "Запускать вместе с Windows")
+    saveButton := AddViewControl(view, "Text", "x550 y528 w300 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Сохранить настройки")
     saveButton.OnEvent("Click", SaveSettings)
+}
+
+UpdatesView() {
+    global appVersion, checkUpdatesOnStartup, SetCheckUpdatesCtrl
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
+
+    view := "Updates"
+    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "Обновления")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y94 w600 h116 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y116 w250 h24 Background" colorCard " c" colorText, "ChesNova " appVersion)
+    AddViewControl(view, "Text", "x274 y148 w430 h24 Background" colorCard " c" colorMuted, "Проверяйте новые версии и управляйте обновлением приложения.")
+    SetCheckUpdatesCtrl := AddViewControl(view, "Checkbox", "vSetCheckUpdates x274 y176 Checked" checkUpdatesOnStartup " c" colorText " Background" colorCard, "Проверять обновления при запуске")
+    checkButton := AddViewControl(view, "Text", "x250 y236 w292 h34 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить обновления")
+    checkButton.OnEvent("Click", CheckForUpdatesManual)
+    updateButton := AddViewControl(view, "Text", "x558 y236 w292 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Обновить ChesNova")
+    updateButton.OnEvent("Click", ManualUpdateChesNova)
+    AddViewControl(view, "Text", "x250 y294 w600 h86 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y314 w530 h20 Background" colorCard " c" colorMuted, "Настройка сохраняется вместе с основными настройками приложения.")
+    saveButton := AddViewControl(view, "Text", "x558 y338 w292 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сохранить настройки")
+    saveButton.OnEvent("Click", SaveSettings)
+}
+
+RefreshUpdatesView(*) {
+    global checkUpdatesOnStartup, SetCheckUpdatesCtrl
+
+    if IsObject(SetCheckUpdatesCtrl)
+        SetCheckUpdatesCtrl.Value := checkUpdatesOnStartup
 }
 
 RefreshSettingsView() {
