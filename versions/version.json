@@ -1,9 +1,8 @@
 {
   "latest": "10.3",
-  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/ChesNova_v10.2.1.zip",
+  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v10.3.1.zip",
   "changelog": [
-    "Добавлена система уведомлений",
-    "Добавлен колокольчик уведомлений",
+    "Доработана система уведомлений",
     "Исправлены мелкие ошибки"
   ],
   "required": false
