@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.3"
+CURRENT_VERSION := "10.3.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -2881,54 +2881,140 @@ ClearNotifications(*) {
 
 OpenNotifications(*) {
     global NotificationsGui, notifications, notificationStates
-    global colorBg, colorCard, colorCardAlt, colorRed, colorText, colorMuted
+    global colorBg, colorCardAlt, colorAccent, colorText, colorMuted
 
     MarkNotificationsRead()
     UpdateNotificationIndicator()
     SafeDestroyGui(&NotificationsGui)
+
+    visibleNotifications := GetVisibleNotifications()
+    visibleNotificationCount := CountVisibleNotifications()
 
     NotificationsGui := Gui("+ToolWindow +AlwaysOnTop +Border", "Уведомления")
     NotificationsGui.BackColor := colorBg
     NotificationsGui.MarginX := 0
     NotificationsGui.MarginY := 0
     NotificationsGui.SetFont("s10 c" colorText, "Segoe UI")
-    NotificationsGui.Add("Text", "x0 y0 w690 h390 Background" colorBg)
+    NotificationsGui.Add("Text", "x0 y0 w560 h530 Background" colorBg)
     NotificationsGui.SetFont("s14 Bold c" colorText, "Segoe UI")
-    NotificationsGui.Add("Text", "x24 y20 w400 h28 Background" colorBg, "🔔 Уведомления")
+    NotificationsGui.Add("Text", "x24 y20 w400 h28 Background" colorBg, "🔔 Уведомления (" visibleNotificationCount ")")
     NotificationsGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    NotificationsGui.Add("Text", "x24 y54 w620 h20 Background" colorBg, "Все новые уведомления отмечены как прочитанные.")
-
-    list := NotificationsGui.Add("ListView", "x24 y88 w642 h240 Background" colorCard " c" colorText, ["Заголовок", "Текст", "Тип", "Получено"])
-    list.ModifyCol(1, 145)
-    list.ModifyCol(2, 255)
-    list.ModifyCol(3, 100)
-    list.ModifyCol(4, 140)
-
-    visibleNotifications := []
-    for _, notification in notifications {
-        if !notificationStates.Has(notification["id"]) || !notificationStates[notification["id"]].Get("dismissed", 0)
-            visibleNotifications.Push(notification)
-    }
+    NotificationsGui.Add("Text", "x24 y54 w500 h20 Background" colorBg, "Последние 10 уведомлений. Новые отображаются сверху.")
 
     if (visibleNotifications.Length = 0) {
         NotificationsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
-        NotificationsGui.Add("Text", "x42 y120 w500 h24 Background" colorCard, "Уведомлений пока нет.")
+        NotificationsGui.Add("Text", "x24 y112 w512 h350 +0x200 Center Background" colorBg, "Уведомлений пока нет.")
     } else {
-        for _, notification in visibleNotifications {
-            state := notificationStates.Has(notification["id"]) ? notificationStates[notification["id"]] : Map("received", A_Now, "read", 1)
-            if state.Get("dismissed", 0)
-                continue
-            received := FormatTime(state["received"], "dd.MM.yyyy HH:mm")
-            list.Add(, notification["title"], notification["text"], notification["type"], received)
-        }
+        NotificationsGui.SetFont("s10 Norm c" colorText, "Segoe UI")
+        feedText := BuildNotificationsFeed(visibleNotifications)
+        NotificationsGui.Add("Edit", "x24 y88 w512 h374 +ReadOnly +VScroll -HScroll Background" colorBg " c" colorText, feedText)
     }
 
-    clearButton := NotificationsGui.Add("Text", "x390 y344 w130 h28 +0x200 Center Background" colorRed " c" colorText, "Очистить")
+    clearButton := NotificationsGui.Add("Text", "x270 y478 w126 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
     clearButton.OnEvent("Click", ClearNotifications)
-    closeButton := NotificationsGui.Add("Text", "x536 y344 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Закрыть")
+    closeButton := NotificationsGui.Add("Text", "x408 y478 w128 h30 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
     closeButton.OnEvent("Click", (*) => SafeDestroyGui(&NotificationsGui))
     NotificationsGui.OnEvent("Close", (*) => SafeDestroyGui(&NotificationsGui))
-    NotificationsGui.Show("w690 h390")
+    NotificationsGui.Show("w560 h530")
+}
+
+CountVisibleNotifications() {
+    global notifications, notificationStates
+
+    count := 0
+    for _, notification in notifications {
+        id := notification["id"]
+        if !notificationStates.Has(id) || !notificationStates[id].Get("dismissed", 0)
+            count += 1
+    }
+    return count
+}
+
+GetVisibleNotifications() {
+    global notifications, notificationStates
+
+    sorted := []
+    for _, notification in notifications {
+        id := notification["id"]
+        if notificationStates.Has(id) && notificationStates[id].Get("dismissed", 0)
+            continue
+
+        fallbackDate := notificationStates.Has(id) ? notificationStates[id]["received"] : A_Now
+        item := Map(
+            "notification", notification,
+            "date", notification["date"] != "" ? notification["date"] : fallbackDate,
+            "sortKey", GetNotificationSortKey(notification["date"], fallbackDate)
+        )
+
+        inserted := false
+        for index, existingItem in sorted {
+            if (item["sortKey"] >= existingItem["sortKey"]) {
+                sorted.InsertAt(index, item)
+                inserted := true
+                break
+            }
+        }
+        if !inserted
+            sorted.Push(item)
+    }
+
+    while (sorted.Length > 10)
+        sorted.Pop()
+    return sorted
+}
+
+BuildNotificationsFeed(items) {
+    feedText := ""
+    for index, item in items {
+        notification := item["notification"]
+        if (index > 1)
+            feedText .= "`r`n`r`n──────────────────────────`r`n`r`n"
+        feedText .= StrUpper(notification["title"]) "`r`n"
+        feedText .= TruncateNotificationText(notification["text"]) "`r`n`r`n"
+        feedText .= FormatNotificationDate(item["date"])
+    }
+    return feedText
+}
+
+TruncateNotificationText(text, maxLines := 3, charsPerLine := 54) {
+    text := RegExReplace(Trim(StrReplace(text, "`r", " ")), "\s+", " ")
+    maxLength := maxLines * charsPerLine
+    wasTruncated := (StrLen(text) > maxLength)
+    if wasTruncated
+        text := RTrim(SubStr(text, 1, maxLength - 3)) "..."
+
+    result := ""
+    while (StrLen(text) > charsPerLine) {
+        breakAt := 0
+        Loop charsPerLine {
+            position := charsPerLine - A_Index + 1
+            if (SubStr(text, position, 1) = " ") {
+                breakAt := position
+                break
+            }
+        }
+        if (breakAt = 0)
+            breakAt := charsPerLine
+        result .= Trim(SubStr(text, 1, breakAt)) "`r`n"
+        text := LTrim(SubStr(text, breakAt + 1))
+    }
+    return result text
+}
+
+GetNotificationSortKey(dateValue, fallbackDate) {
+    if RegExMatch(dateValue, "(\d{4})[-./](\d{2})[-./](\d{2}).*?(\d{2}):(\d{2})", &match)
+        return match[1] match[2] match[3] match[4] match[5] "00"
+    if RegExMatch(dateValue, "(\d{2})[.\-/](\d{2})[.\-/](\d{4}).*?(\d{2}):(\d{2})", &match)
+        return match[3] match[2] match[1] match[4] match[5] "00"
+    return RegExReplace(fallbackDate, "\D")
+}
+
+FormatNotificationDate(dateValue) {
+    if RegExMatch(dateValue, "(\d{4})[-./](\d{2})[-./](\d{2}).*?(\d{2}):(\d{2})", &match)
+        return match[3] "." match[2] "." match[1] " • " match[4] ":" match[5]
+    if RegExMatch(dateValue, "(\d{2})[.\-/](\d{2})[.\-/](\d{4}).*?(\d{2}):(\d{2})", &match)
+        return match[1] "." match[2] "." match[3] " • " match[4] ":" match[5]
+    return FormatTime(dateValue, "dd.MM.yyyy • HH:mm")
 }
 
 ScriptsView() {
