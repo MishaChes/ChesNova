@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.3.1"
+CURRENT_VERSION := "10.4"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -121,7 +121,8 @@ lastResetDate := ""
 menuKey := "F10"
 resetKey := "F9"
 centerKey := "F5"
-hideKey := "F2"
+ hideKey := "F2"
+ hudDesign := "Compact"
 ; Тёмная оболочка; макет определяет расположение элементов.
 colorBg := "0B0E14"
 colorSidebar := "10151E"
@@ -167,6 +168,7 @@ if FileExist(settingsFile)
         guiY := IniRead(settingsFile, "GUI", "guiY", "Center")
         menuX := IniRead(settingsFile, "GUI", "menuX", "Center")
         menuY := IniRead(settingsFile, "GUI", "menuY", "Center")
+        hudDesign := IniRead(settingsFile, "GUI", "hudDesign", "Compact")
     } catch as err {
         LogError("LoadSettings", "Повреждён settings.ini или ошибка чтения настроек", err.Message)
         MsgBox("Повреждён settings.ini или не удалось прочитать настройки.`nБудут использованы значения по умолчанию.`n`n" err.Message, "ChesNova", "Iconx")
@@ -205,6 +207,18 @@ pmCount := 0
 lastSize := 0
 isFirstRun := true
 beepPlayed := false
+punishmentRecordCache := Map()
+pmLogRecordCache := Map()
+punishmentTotalsDate := ""
+maxErrorLogBytes := 2 * 1024 * 1024
+maxHistoryFileBytes := 10 * 1024 * 1024
+historyKeepRecords := 10000
+viewHistoryScanLimit := 2000
+viewHistoryDisplayLimit := 200
+diagnosticLastCheckMs := 0
+diagnosticLastProcessedLines := 0
+diagnosticLastPmChanges := 0
+diagnosticLastLogSize := 0
 guiHidden := false
 selectedPunishmentDate := ""
 selectedPunishmentType := "ban"
@@ -214,6 +228,8 @@ punishmentSearch := ""
 MainGui := ""
 StatusDotCtrl := ""
 PMCountTextCtrl := ""
+HudNickCtrl := ""
+HudStatsCtrl := ""
 SettingsGui := ""
 settingsMenuHidden := false
 settingsMenuBuilding := false
@@ -229,6 +245,7 @@ SetMenuKeyCtrl := ""
 SetResetKeyCtrl := ""
 SetCenterKeyCtrl := ""
 SetHideKeyCtrl := ""
+SetHudDesignCtrl := ""
 SetAutoResetCtrl := ""
 SetCheckUpdatesCtrl := ""
 SetStartupCtrl := ""
@@ -288,6 +305,7 @@ CloudNickCtrl := ""
 CloudStatusCtrl := ""
 CloudAccessTextCtrl := ""
 CloudLastCheckCtrl := ""
+DiagnosticTextCtrl := ""
 ScriptsGamePathCtrl := ""
 ScriptPackageStatusCtrls := Map()
 NotificationButtonCtrl := ""
@@ -303,6 +321,9 @@ if FileExist(saveFile)
     pmCount := FileRead(saveFile)
     pmCount += 0
 }
+LoadRecordCache(punishmentsFile, punishmentRecordCache, "LoadPunishmentRecordCache")
+LoadRecordCache(pmLogsFile, pmLogRecordCache, "LoadPmLogRecordCache")
+punishmentTotals := LoadPunishmentTotals()
 if (logFile != "" && FileExist(logFile))
     lastSize := FileGetSize(logFile)
 
@@ -322,6 +343,8 @@ if (guiX = "Center")
 else
     MainGui.Show("w90 h24 x" guiX " y" guiY)
 
+BuildMainHud()
+
 OnMessage(0x201, WM_LBUTTONDOWN)
 OnMessage(0x84, WM_NCHITTEST)
 
@@ -330,7 +353,7 @@ OnMessage(0x84, WM_NCHITTEST)
 ; =========================
 RegisterHotkeys()
 InitializeBinds()
-SetTimer(CheckLog, 500)
+SetTimer(CheckLog, 1000)
 SetTimer(CheckAutoReset, 30000)
 
 UpdatePMDisplay()
@@ -352,7 +375,7 @@ GetNormMultiplier() {
 }
 
 UpdatePMDisplay() {
-    global PMCountTextCtrl, StatusDotCtrl, pmCount, norm, dotGreen, dotRed
+    global PMCountTextCtrl, StatusDotCtrl, HudNickCtrl, HudStatsCtrl, nick, pmCount, norm, dotGreen, dotRed
 
     if IsObject(PMCountTextCtrl)
         PMCountTextCtrl.Text := "PM: " pmCount
@@ -360,7 +383,59 @@ UpdatePMDisplay() {
         StatusDotCtrl.Text := "●"
         StatusDotCtrl.SetFont("c" ((pmCount >= norm) ? dotGreen : dotRed))
     }
+    if IsObject(HudNickCtrl)
+        HudNickCtrl.Text := nick
+    if IsObject(HudStatsCtrl)
+        HudStatsCtrl.Text := BuildHudPunishmentStats()
     RefreshDashboardView()
+}
+
+BuildMainHud() {
+    global MainGui, StatusDotCtrl, PMCountTextCtrl, HudNickCtrl, HudStatsCtrl
+    global hudDesign, guiX, guiY, colorCard, colorAccent, colorText, colorMuted, dotRed, nick, pmCount
+
+    if IsObject(MainGui)
+        try MainGui.Destroy()
+
+    StatusDotCtrl := ""
+    PMCountTextCtrl := ""
+    HudNickCtrl := ""
+    HudStatsCtrl := ""
+    MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow +Border", "PM Counter")
+    MainGui.BackColor := colorCard
+    MainGui.MarginX := 6
+    MainGui.MarginY := 4
+
+    if (hudDesign = "Expanded") {
+        MainGui.SetFont("s8 c" colorText, "Segoe UI")
+        HudNickCtrl := MainGui.Add("Text", "x4 y4 w142 h17 Center c" colorText, nick)
+        MainGui.Add("Text", "x4 y23 w142 h1 Background2B3443")
+        PMCountTextCtrl := MainGui.Add("Text", "x4 y29 w142 h19 Center c" colorText, "PM: " pmCount)
+        MainGui.Add("Text", "x48 y51 w54 h2 Background" colorAccent)
+        HudStatsCtrl := MainGui.Add("Text", "x4 y58 w142 h45 Center c" colorMuted, BuildHudPunishmentStats())
+        if (guiX = "Center")
+            MainGui.Show("w150 h108 xCenter yCenter")
+        else
+            MainGui.Show("w150 h108 x" guiX " y" guiY)
+    } else {
+        MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
+        StatusDotCtrl := MainGui.Add("Text", "x6 y5 c" dotRed, "●")
+        PMCountTextCtrl := MainGui.Add("Text", "x20 y4 w68 c" colorText, "PM: " pmCount)
+        if (guiX = "Center")
+            MainGui.Show("w90 h24 xCenter yCenter")
+        else
+            MainGui.Show("w90 h24 x" guiX " y" guiY)
+    }
+}
+
+BuildHudPunishmentStats() {
+    global punishmentTotals
+
+    EnsureHudPunishmentDay()
+    text := "K = " punishmentTotals["kick"] " | J = " punishmentTotals["jail"] " | W = " punishmentTotals["warn"] "`n"
+    text .= "M = " punishmentTotals["mute"] " | V = " punishmentTotals["vmute"] " | R = " punishmentTotals["rmute"] "`n"
+    text .= "G = " punishmentTotals["gunban"] " | B = " punishmentTotals["ban"] " | SB = " punishmentTotals["sban"]
+    return text
 }
 
 GetNormProgressPercent() {
@@ -583,7 +658,7 @@ ParsePunishmentLine(line, &punishmentTime, &admin, &player, &punishmentType, &re
 }
 
 SavePunishmentFromLine(line) {
-    global punishmentsFile
+    global punishmentsFile, punishmentRecordCache, punishmentTotals, punishmentTotalsDate, HudStatsCtrl
 
     if !ParsePunishmentLine(line, &punishmentTime, &admin, &player, &punishmentType, &reason, &duration)
         return
@@ -603,13 +678,20 @@ SavePunishmentFromLine(line) {
         duration := "не указано"
     record := punishmentDate "|" punishmentTime "|" admin "|" player "|" punishmentType "|" reason "|" duration
 
-    if FileExist(punishmentsFile) {
-        savedPunishments := SafeFileRead(punishmentsFile, "SavePunishmentFromLine")
-        if InStr(savedPunishments, record)
-            return
+    if punishmentRecordCache.Has(record)
+        return
+    if TryFileAppend(record "`n", punishmentsFile, "SavePunishmentFromLine", "Не удалось записать историю наказаний") {
+        punishmentRecordCache[record] := true
+        EnsureHudPunishmentDay()
+        if punishmentTotals.Has(punishmentType)
+            punishmentTotals[punishmentType] += 1
+        if IsObject(HudStatsCtrl)
+            HudStatsCtrl.Text := BuildHudPunishmentStats()
+        ArchiveDataFileIfNeeded(punishmentsFile, "punishments")
     }
+    return
 
-    TryFileAppend(record "`n", punishmentsFile, "SavePunishmentFromLine", "Ошибка записи истории наказаний")
+
 }
 
 GetPunishmentTypes() {
@@ -650,6 +732,40 @@ GetPunishmentPeriodText(days) {
     return "последние " days " дней"
 }
 
+CreatePunishmentTotals() {
+    return Map("kick", 0, "jail", 0, "warn", 0, "mute", 0, "vmute", 0, "rmute", 0, "gunban", 0, "ban", 0, "sban", 0)
+}
+
+LoadPunishmentTotals() {
+    global punishmentsFile, punishmentTotalsDate
+
+    totals := CreatePunishmentTotals()
+    punishmentTotalsDate := FormatTime(A_Now, "dd.MM.yyyy")
+    if !FileExist(punishmentsFile)
+        return totals
+
+    for _, line in ReadFileLines(punishmentsFile, "LoadPunishmentTotals") {
+        part := StrSplit(line, "|")
+        if (part.Length < 5 || part[1] != punishmentTotalsDate || !IsCurrentAdminPunishment(part[3]))
+            continue
+        type := NormalizePunishmentType(part[5])
+        if totals.Has(type)
+            totals[type] += 1
+    }
+    return totals
+}
+
+EnsureHudPunishmentDay() {
+    global punishmentTotals, punishmentTotalsDate
+
+    today := FormatTime(A_Now, "dd.MM.yyyy")
+    if (punishmentTotalsDate = today)
+        return
+
+    punishmentTotalsDate := today
+    punishmentTotals := CreatePunishmentTotals()
+}
+
 CountPunishmentsByType(type, days, search := "") {
     global punishmentsFile
 
@@ -684,14 +800,15 @@ CountPunishmentsByType(type, days, search := "") {
 }
 
 BuildPunishmentTypeDetails(type, days := 10, search := "") {
-    global punishmentsFile
+    global punishmentsFile, viewHistoryScanLimit, viewHistoryDisplayLimit
 
     type := NormalizePunishmentType(type)
     noDurationTypes := PunishmentNoDurationTypes()
     details := ""
+    displayed := 0
 
     if FileExist(punishmentsFile) {
-        lines := SortRecordsNewestFirst(ReadFileLines(punishmentsFile), "punishment")
+        lines := SortRecordsNewestFirst(ReadRecentLines(punishmentsFile, viewHistoryScanLimit, "BuildPunishmentTypeDetails"), "punishment")
         for _, line in lines
         {
             if (Trim(line) = "")
@@ -710,6 +827,10 @@ BuildPunishmentTypeDetails(type, days := 10, search := "") {
                 continue
             if !PunishmentMatchesSearch(part[3], part[4], part[6], search)
                 continue
+
+            displayed++
+            if (displayed > viewHistoryDisplayLimit)
+                break
 
             if (rowType = "vmute") {
                 details .= BuildVmuteDetailsLine(part) "`n`n"
@@ -897,7 +1018,7 @@ AppendPmLog(action, details := "") {
 }
 
 SavePmLogFromLine(line) {
-    global pmLogsFile
+    global pmLogsFile, pmLogRecordCache
 
     if !RegExMatch(line, "^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$", &match)
         return
@@ -907,38 +1028,30 @@ SavePmLogFromLine(line) {
     details := CleanPunishmentField(match[2])
     record := logDate "|" logTime "|PM|" details
 
-    if FileExist(pmLogsFile) {
-        savedPmLogs := SafeFileRead(pmLogsFile, "SavePmLogFromLine")
-        if InStr(savedPmLogs, record)
-            return
+    if pmLogRecordCache.Has(record)
+        return
+    if TryFileAppend(record "`n", pmLogsFile, "SavePmLogFromLine", "Не удалось записать PM-лог") {
+        pmLogRecordCache[record] := true
+        ArchiveDataFileIfNeeded(pmLogsFile, "pm_logs")
     }
+    return
 
-    TryFileAppend(record "`n", pmLogsFile, "SavePmLogFromLine", "Ошибка записи PM-лога")
+
 }
 
 BuildPmLogsText(search := "") {
-    global pmLogsFile
+    global pmLogsFile, viewHistoryDisplayLimit
 
-    lines := []
     logsText := ""
     search := Trim(search)
-
-    if FileExist(pmLogsFile) {
-        for _, line in ReadFileLines(pmLogsFile)
-        {
-            if (Trim(line) != "" && (search = "" || InStr(line, search, false)))
-                lines.Push(line)
-        }
-    }
-
-    lines := SortRecordsNewestFirst(lines, "pipe")
+    lines := ReadRecentMatchingLines(pmLogsFile, viewHistoryDisplayLimit, search, "BuildPmLogsText")
     total := lines.Length
     if (total > 0) {
-        displayTotal := Min(total, 200)
+        displayTotal := total
 
         Loop displayTotal
         {
-            line := lines[A_Index]
+            line := lines[total - A_Index + 1]
             part := StrSplit(line, "|")
             if (part.Length >= 4)
                 logsText .= "[" part[1] " " part[2] "] " part[3] ": " JoinArrayFrom(part, 4, "|") "`n`n"
@@ -952,6 +1065,7 @@ BuildPmLogsText(search := "") {
 }
 
 ConfirmClearData(filePath, title, refreshCallback := "") {
+    global punishmentTotals
     message := "Очистить данные раздела " . Chr(34) . title . Chr(34) . "?`nЭто действие нельзя отменить."
     result := ShowAppDialog("Подтверждение очистки", message, "OKCancel")
     if (result != "OK")
@@ -973,8 +1087,11 @@ ConfirmClearData(filePath, title, refreshCallback := "") {
         RefreshPMLogsAfterClear()
     else if (refreshCallback = "FillNormHistoryList")
         FillNormHistoryList()
-    else if (refreshCallback = "RenderPunishmentView")
+    else if (refreshCallback = "RenderPunishmentView") {
+        punishmentTotals := CreatePunishmentTotals()
         RenderPunishmentView()
+        UpdatePMDisplay()
+    }
 }
 
 CreateBackupBeforeClear(filePath) {
@@ -2102,6 +2219,10 @@ ExecuteBindSendMessage(argsText) {
 CheckLog(*) {
     global nick, norm, pmCount, lastSize, isFirstRun, beepPlayed, logFile
     global saveFile, dotGreen, dotRed, StatusDotCtrl, PMCountTextCtrl
+    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize
+    checkLogStartedAt := A_TickCount
+    processedLineCount := 0
+    pmCountChanged := false
     if (logFile = "" || !FileExist(logFile))
         return
 
@@ -2135,8 +2256,12 @@ CheckLog(*) {
             line := file.ReadLine()
             if (!line)
                 continue
+            processedLineCount++
+            if !InStr(line, nick)
+                continue
             if RegExMatch(line, "^\[\d{2}:\d{2}:\d{2}\] Администратор " . nick . "\[\d+\] для ") {
                 pmCount++
+                pmCountChanged := true
                 SavePmLogFromLine(line)
             }
             SavePunishmentFromLine(line)
@@ -2148,6 +2273,14 @@ CheckLog(*) {
         LogError("CheckLog", "Ошибка чтения chatlog.txt", err.Message)
         return
     }
+
+    diagnosticLastCheckMs := A_TickCount - checkLogStartedAt
+    diagnosticLastProcessedLines := processedLineCount
+    diagnosticLastPmChanges := pmCountChanged ? 1 : 0
+    diagnosticLastLogSize := currentSize
+
+    if !pmCountChanged
+        return
 
     TryFileDelete(saveFile, "CheckLog", "Ошибка удаления pm_count.txt перед сохранением")
     if !TryFileAppend(pmCount, saveFile, "CheckLog", "Ошибка записи pm_count.txt")
@@ -2286,7 +2419,7 @@ BuildMainWindow(initialView := "Dashboard") {
     SettingsGui.MarginY := 0
     SettingsGui.SetFont("s10 c" colorText, "Segoe UI")
 
-    windowHeight := Max(590, 174 + GetScriptPackages().Length * 250)
+    windowHeight := 590
     ; Верхняя строка и левая панель повторяют структуру макета.
     SettingsGui.Add("Text", "x0 y0 w920 h28 Background" colorCard)
     SettingsGui.Add("Text", "x0 y28 w216 h" (windowHeight - 28) " Background" colorSidebar)
@@ -2298,6 +2431,8 @@ BuildMainWindow(initialView := "Dashboard") {
     SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
     cloudBtn := SettingsGui.Add("Text", "x704 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "☁")
     cloudBtn.OnEvent("Click", (*) => ShowView("Cloud"))
+    diagnosticsBtn := SettingsGui.Add("Text", "x670 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "D")
+    diagnosticsBtn.OnEvent("Click", (*) => ShowView("Diagnostics"))
     settingsBtn := SettingsGui.Add("Text", "x738 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "⚙")
     settingsBtn.OnEvent("Click", (*) => ShowView("Settings"))
     NotificationButtonCtrl := SettingsGui.Add("Text", "x772 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "🔔")
@@ -2330,7 +2465,8 @@ BuildMainWindow(initialView := "Dashboard") {
     UpdatesView()
     HelpView()
     CloudView()
-    ScriptsView()
+    DiagnosticsView()
+    ScriptsViewCompact()
     UpdateNotificationIndicator()
 
     if (menuX = "Center")
@@ -2426,6 +2562,8 @@ ShowView(viewName, *) {
         RefreshErrorsLogView()
     else if (viewName = "Cloud")
         RefreshCloudView()
+    else if (viewName = "Diagnostics")
+        RefreshDiagnosticsView()
     else if (viewName = "Scripts")
         RefreshScriptsView()
 }
@@ -2439,16 +2577,30 @@ GetScriptPackages() {
     return [
         Map(
             "id", "atools",
+            "displayTitle", "aTools",
+            "author", "Anthony Fernandez",
             "title", "🛠️ aTools",
             "description", "Установка необходимых файлов для работы aTools и _otools.",
             "authors", "aTools — Anthony Fernandez`n_otools — Takumi Onishi",
             "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
             "files", [
-                Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
-                Map("name", "aTools.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/aTools.asi", "relativePath", "aTools.asi"),
-                Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
+                Map("name", "aTools.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/aTools.asi", "relativePath", "aTools.asi")
             ],
             "activationCommands", "//loader add script scripts/_otools.js`n//loader reload"
+        ),
+        Map(
+            "id", "onishi",
+            "displayTitle", "Onishi",
+            "author", "Takumi Onishi",
+            "title", "Onishi",
+            "description", "Onishi script with loader.",
+            "authors", "Takumi Onishi",
+            "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
+            "files", [
+                Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
+                Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
+            ],
+            "activationCommands", ""
         )
     ]
 }
@@ -3057,6 +3209,39 @@ ScriptsView() {
     RefreshScriptsView()
 }
 
+ScriptsViewCompact() {
+    global ScriptsGamePathCtrl, ScriptPackageStatusCtrls, scriptsGamePath
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
+
+    view := "Scripts"
+    ScriptPackageStatusCtrls := Map()
+    AddViewControl(view, "Text", "x250 y34 w560 h30 Background" colorBg " c" colorText, "Скрипты")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y88 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры — автоматический поиск не используется.")
+    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w330 h26 cFFFFFF Background151A22", scriptsGamePath)
+    pathButton := AddViewControl(view, "Text", "x592 y112 w126 h26 +0x200 Center Background" colorCardAlt " c" colorText, "Папка")
+    pathButton.OnEvent("Click", SelectScriptsGamePath)
+    checkButton := AddViewControl(view, "Text", "x726 y112 w124 h26 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить")
+    checkButton.OnEvent("Click", CheckScriptPackages)
+
+    for index, package in GetScriptPackages() {
+        cardY := 154 + ((index - 1) * 118)
+        AddViewControl(view, "Text", "x250 y" cardY " w600 h104 Background" colorCard)
+        AddViewControl(view, "Text", "x250 y" cardY " w4 h104 Background" colorAccent)
+        AddViewControl(view, "Text", "x272 y" (cardY + 14) " w150 h24 Background" colorCard " c" colorText, package["displayTitle"])
+        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x432 y" (cardY + 16) " w160 h20 Background" colorCard " c" colorRed, "●")
+        installButton := AddViewControl(view, "Text", "x660 y" (cardY + 12) " w168 h28 +0x200 Center Background" colorAccent " c" colorText, "Установить")
+        installButton.OnEvent("Click", InstallScriptPackage.Bind(package["id"]))
+        note := (package["id"] = "onishi") ? "Loader входит в установку" : "Отдельный пакет"
+        AddViewControl(view, "Text", "x272 y" (cardY + 42) " w340 h18 Background" colorCard " c" colorMuted, note)
+        AddViewControl(view, "Text", "x272 y" (cardY + 72) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
+        topicButton := AddViewControl(view, "Text", "x590 y" (cardY + 68) " w238 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Прямая ссылка")
+        topicButton.OnEvent("Click", OpenScriptTopic.Bind(package["topic"]))
+    }
+
+    RefreshScriptsView()
+}
+
 SelectScriptsGamePath(*) {
     global ScriptsGamePathCtrl, scriptsGamePath, settingsFile
 
@@ -3108,7 +3293,7 @@ RefreshScriptsView(*) {
 
         status := GetScriptPackageInstallStatus(package)
         ctrl := ScriptPackageStatusCtrls[package["id"]]
-        ctrl.Text := status["text"]
+        ctrl.Text := status["installed"] ? "● Установлен" : "● Не установлен"
         ctrl.SetFont("s9 Bold c" status["color"], "Segoe UI")
     }
 }
@@ -3994,8 +4179,8 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, hudDesign, logFile
+    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetHudDesignCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
@@ -4022,6 +4207,11 @@ SettingsView() {
     AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
     SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w120 h26 c" colorText " Background151A22", hideKey)
 
+    AddViewControl(view, "Text", "x250 y442 w280 h72 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y456 w120 h20 Background" colorCard " c" colorMuted, "Дизайн HUD")
+    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y480 w240 c000000 BackgroundEDEDED", ["Компактный", "Расширенный"])
+    SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : 1)
+
     ; Правая колонка: автоматизация и источник логов.
     AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
     AddViewControl(view, "Text", "x570 y104 w220 h22 Background" colorCard " c" colorText, "Автосброс нормы")
@@ -4039,7 +4229,6 @@ SettingsView() {
     LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x570 y292 w260 h58 ReadOnly -Wrap c" colorText " Background151A22", logText)
     selectLogButton := AddViewControl(view, "Text", "x570 y366 w260 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Выбрать chatlog.txt")
     selectLogButton.OnEvent("Click", SelectLogFile)
-
     AddViewControl(view, "Text", "x550 y442 w300 h72 Background" colorCard)
     SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x570 y464 Checked" startWithWindows " c" colorText " Background" colorCard, "Запускать вместе с Windows")
     saveButton := AddViewControl(view, "Text", "x550 y528 w300 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Сохранить настройки")
@@ -4154,6 +4343,56 @@ VK: @m.ches
     clearErrorsButton := AddViewControl(view, "Button", "x730 y338 w120 h28", "Очистить лог")
     clearErrorsButton.OnEvent("Click", ClearErrorsLog)
     ErrorsLogTextCtrl := AddViewControl(view, "Edit", "vErrorsLogText x250 y376 w600 h108 ReadOnly -Wrap +WantReturn +VScroll Background20242b cFFFFFF", GetLastErrorLogLines())
+}
+
+DiagnosticsView() {
+    global DiagnosticTextCtrl, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
+
+    view := "Diagnostics"
+    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "Диагностика")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y94 w600 h330 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y116 w530 h24 Background" colorCard " c" colorMuted, "Метрики по запросу. Фоновая диагностика отключена.")
+    refreshButton := AddViewControl(view, "Text", "x660 y446 w190 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
+    refreshButton.OnEvent("Click", RefreshDiagnosticsView)
+    DiagnosticTextCtrl := AddViewControl(view, "Edit", "x274 y150 w530 h270 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildDiagnosticsText())
+}
+
+BuildDiagnosticsText() {
+    global logFile, pmLogsFile, punishmentsFile, errorsLogFile
+    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize
+
+    text := "Интервал CheckLog: 1000 мс`n"
+    text .= "Время последнего CheckLog: " diagnosticLastCheckMs " мс`n"
+    text .= "Обработано строк: " diagnosticLastProcessedLines "`n"
+    text .= "Новых PM: " diagnosticLastPmChanges "`n"
+    text .= "Размер chatlog при проверке: " FormatDiagnosticBytes(diagnosticLastLogSize) "`n`n"
+    text .= "chatlog.txt: " FormatDiagnosticFileSize(logFile) "`n"
+    text .= "pm_logs.csv: " FormatDiagnosticFileSize(pmLogsFile) "`n"
+    text .= "punishments_history.csv: " FormatDiagnosticFileSize(punishmentsFile) "`n"
+    text .= "errors.log: " FormatDiagnosticFileSize(errorsLogFile)
+    return text
+}
+
+FormatDiagnosticFileSize(filePath) {
+    if (filePath = "" || !FileExist(filePath))
+        return "не найден"
+    return FormatDiagnosticBytes(FileGetSize(filePath))
+}
+
+FormatDiagnosticBytes(bytes) {
+    if (bytes < 1024)
+        return bytes " B"
+    if (bytes < 1024 * 1024)
+        return Round(bytes / 1024, 1) " KB"
+    return Round(bytes / 1024 / 1024, 2) " MB"
+}
+
+RefreshDiagnosticsView(*) {
+    global DiagnosticTextCtrl
+
+    if IsObject(DiagnosticTextCtrl)
+        DiagnosticTextCtrl.Value := BuildDiagnosticsText()
 }
 
 CloudView() {
@@ -4501,7 +4740,7 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, centerKey, hideKey, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
+    global menuKey, resetKey, centerKey, hideKey, hudDesign, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
 
     SaveMenuPosition()
     values := SettingsGui.Submit()
@@ -4517,6 +4756,7 @@ SaveSettings(*) {
     resetKey := values.SetResetKey
     centerKey := values.SetCenterKey
     hideKey := values.SetHideKey
+    hudDesign := (values.SetHudDesign = "Расширенный") ? "Expanded" : "Compact"
 
     try {
         IniWrite(nick, settingsFile, "Main", "nick")
@@ -4537,6 +4777,7 @@ SaveSettings(*) {
         IniWrite(guiY, settingsFile, "GUI", "guiY")
         IniWrite(menuX, settingsFile, "GUI", "menuX")
         IniWrite(menuY, settingsFile, "GUI", "menuY")
+        IniWrite(hudDesign, settingsFile, "GUI", "hudDesign")
         SetWindowsStartup(startWithWindows)
     } catch as err {
         LogError("SaveSettings", "Ошибка записи settings.ini", err.Message)
@@ -4552,6 +4793,7 @@ SaveSettings(*) {
 
     RegisterHotkeys()
 
+    BuildMainHud()
     UpdatePMDisplay()
 }
 
@@ -4763,6 +5005,7 @@ LogError(source, message, extra := "") {
 
     try {
         DirCreate(logPath)
+        RotateErrorsLogIfNeeded()
         entry := "[" FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") "] [" source "]`n" message
         if (extra != "")
             entry .= "`n" extra
@@ -4770,6 +5013,46 @@ LogError(source, message, extra := "") {
         FileAppend(entry, errorsLogFile, "UTF-8")
     } catch {
         ; Логгер не должен вызывать сам себя при ошибке записи errors.log.
+    }
+}
+
+RotateErrorsLogIfNeeded() {
+    global errorsLogFile, backupPath, maxErrorLogBytes
+
+    try {
+        if !FileExist(errorsLogFile) || FileGetSize(errorsLogFile) < maxErrorLogBytes
+            return
+
+        DirCreate(backupPath)
+        archiveFile := backupPath "\\errors_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".log"
+        FileMove(errorsLogFile, archiveFile, 0)
+    }
+}
+
+ArchiveDataFileIfNeeded(filePath, archiveLabel) {
+    global backupPath, maxHistoryFileBytes, historyKeepRecords
+
+    try {
+        if !FileExist(filePath) || FileGetSize(filePath) < maxHistoryFileBytes
+            return
+
+        lines := ReadFileLines(filePath, "ArchiveDataFileIfNeeded")
+        if (lines.Length <= historyKeepRecords)
+            return
+
+        archiveCount := lines.Length - historyKeepRecords
+        DirCreate(backupPath)
+        archiveFile := backupPath "\\" archiveLabel "_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".csv"
+
+        archive := FileOpen(archiveFile, "w")
+        Loop archiveCount
+            archive.Write(lines[A_Index] "`n")
+        archive.Close()
+
+        active := FileOpen(filePath, "w")
+        Loop historyKeepRecords
+            active.Write(lines[archiveCount + A_Index] "`n")
+        active.Close()
     }
 }
 
@@ -5068,6 +5351,72 @@ ReadFileLines(filePath, source := "ReadFileLines") {
     }
     file.Close()
     return lines
+}
+
+ReadRecentLines(filePath, limit, source := "ReadRecentLines") {
+    lines := []
+    if !FileExist(filePath)
+        return lines
+
+    try file := FileOpen(filePath, "r")
+    catch as err {
+        LogError(source, "Не удалось открыть файл: " filePath, err.Message)
+        return lines
+    }
+
+    try {
+        while (!file.AtEOF) {
+            line := RTrim(file.ReadLine(), "`r`n")
+            lines.Push(line)
+            if (lines.Length > limit)
+                lines.RemoveAt(1)
+        }
+        file.Close()
+    } catch as err {
+        try file.Close()
+        LogError(source, "Не удалось прочитать файл: " filePath, err.Message)
+    }
+
+    return lines
+}
+
+ReadRecentMatchingLines(filePath, limit, search := "", source := "ReadRecentMatchingLines") {
+    lines := []
+    if !FileExist(filePath)
+        return lines
+
+    try file := FileOpen(filePath, "r")
+    catch as err {
+        LogError(source, "Не удалось открыть файл: " filePath, err.Message)
+        return lines
+    }
+
+    try {
+        while (!file.AtEOF) {
+            line := RTrim(file.ReadLine(), "`r`n")
+            if (Trim(line) = "" || (search != "" && !InStr(line, search, false)))
+                continue
+            lines.Push(line)
+            if (lines.Length > limit)
+                lines.RemoveAt(1)
+        }
+        file.Close()
+    } catch as err {
+        try file.Close()
+        LogError(source, "Не удалось прочитать файл: " filePath, err.Message)
+    }
+
+    return lines
+}
+
+LoadRecordCache(filePath, recordCache, source := "LoadRecordCache") {
+    if !FileExist(filePath)
+        return
+
+    for _, record in ReadFileLines(filePath, source) {
+        if (record != "")
+            recordCache[record] := true
+    }
 }
 
 
