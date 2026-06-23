@@ -1,6 +1,6 @@
 {
   "latest": "10.4",
-  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v10.4.zip",
+  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v10.4.ahk.zip",
   "changelog": [
     "Оптимизация производительности: снижена нагрузка на FPS, CPU и диск.",
     "Добавлена диагностика работы скрипта.",
