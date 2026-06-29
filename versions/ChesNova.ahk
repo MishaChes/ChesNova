@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.4"
+CURRENT_VERSION := "10.4.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -122,7 +122,11 @@ menuKey := "F10"
 resetKey := "F9"
 centerKey := "F5"
  hideKey := "F2"
- hudDesign := "Compact"
+menuKeyEnabled := 1
+resetKeyEnabled := 1
+centerKeyEnabled := 1
+hideKeyEnabled := 1
+hudDesign := "Compact"
 ; Тёмная оболочка; макет определяет расположение элементов.
 colorBg := "0B0E14"
 colorSidebar := "10151E"
@@ -157,6 +161,10 @@ if FileExist(settingsFile)
         resetKey := IniRead(settingsFile, "Keys", "resetKey", "F9")
         centerKey := IniRead(settingsFile, "Keys", "centerKey", "F5")
         hideKey := IniRead(settingsFile, "Keys", "hideKey", "F2")
+        menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
+        resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
+        centerKeyEnabled := IniRead(settingsFile, "Keys", "centerKeyEnabled", 1)
+        hideKeyEnabled := IniRead(settingsFile, "Keys", "hideKeyEnabled", 1)
         autoResetEnabled := IniRead(settingsFile, "Main", "autoResetEnabled", 0)
         bindsEnabled := IniRead(settingsFile, "Main", "bindsEnabled", 0)
         checkUpdatesOnStartup := IniRead(settingsFile, "Updates", "checkOnStartup", 1)
@@ -182,6 +190,10 @@ autoResetEnabled += 0
 bindsEnabled += 0
 checkUpdatesOnStartup += 0
 startWithWindows += 0
+menuKeyEnabled += 0
+resetKeyEnabled += 0
+centerKeyEnabled += 0
+hideKeyEnabled += 0
 
 cloudAccessState := "unknown"
 cloudAccessMessage := "Ожидает проверки"
@@ -219,6 +231,10 @@ diagnosticLastCheckMs := 0
 diagnosticLastProcessedLines := 0
 diagnosticLastPmChanges := 0
 diagnosticLastLogSize := 0
+diagnosticLastReadBytes := 0
+diagnosticCheckLogSamples := 0
+diagnosticCheckLogTotalMs := 0
+diagnosticCheckLogMaxMs := 0
 guiHidden := false
 selectedPunishmentDate := ""
 selectedPunishmentType := "ban"
@@ -245,6 +261,10 @@ SetMenuKeyCtrl := ""
 SetResetKeyCtrl := ""
 SetCenterKeyCtrl := ""
 SetHideKeyCtrl := ""
+SetMenuKeyEnabledCtrl := ""
+SetResetKeyEnabledCtrl := ""
+SetCenterKeyEnabledCtrl := ""
+SetHideKeyEnabledCtrl := ""
 SetHudDesignCtrl := ""
 SetAutoResetCtrl := ""
 SetCheckUpdatesCtrl := ""
@@ -280,6 +300,7 @@ BindCategoryInputCtrl := ""
 BindsSortColumn := 3
 BindsSortAscending := true
 RegisteredBindTriggers := []
+RegisteredStandardHotkeys := []
 DashboardNickCtrl := ""
 DashboardSystemStatusCtrl := ""
 DashboardCloudStatusCtrl := ""
@@ -401,7 +422,8 @@ BuildMainHud() {
     PMCountTextCtrl := ""
     HudNickCtrl := ""
     HudStatsCtrl := ""
-    MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow +Border", "PM Counter")
+    guiOptions := (hudDesign = "Safe") ? "+AlwaysOnTop -Caption +ToolWindow -Border +E0x08000000 +E0x20 -DPIScale" : "+AlwaysOnTop -Caption +ToolWindow +Border"
+    MainGui := Gui(guiOptions, "PM Counter")
     MainGui.BackColor := colorCard
     MainGui.MarginX := 6
     MainGui.MarginY := 4
@@ -417,6 +439,13 @@ BuildMainHud() {
             MainGui.Show("w150 h108 xCenter yCenter")
         else
             MainGui.Show("w150 h108 x" guiX " y" guiY)
+    } else if (hudDesign = "Safe") {
+        MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
+        PMCountTextCtrl := MainGui.Add("Text", "x2 y2 w64 h16 Center c" colorText, "PM: " pmCount)
+        if (guiX = "Center")
+            MainGui.Show("w68 h20 xCenter yCenter NA")
+        else
+            MainGui.Show("w68 h20 x" guiX " y" guiY " NA")
     } else {
         MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
         StatusDotCtrl := MainGui.Add("Text", "x6 y5 c" dotRed, "●")
@@ -2219,8 +2248,9 @@ ExecuteBindSendMessage(argsText) {
 CheckLog(*) {
     global nick, norm, pmCount, lastSize, isFirstRun, beepPlayed, logFile
     global saveFile, dotGreen, dotRed, StatusDotCtrl, PMCountTextCtrl
-    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize
-    checkLogStartedAt := A_TickCount
+    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
+    global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
+    checkLogStartedAt := GetHighResolutionMilliseconds()
     processedLineCount := 0
     pmCountChanged := false
     if (logFile = "" || !FileExist(logFile))
@@ -2244,6 +2274,8 @@ CheckLog(*) {
     }
     if (currentSize <= lastSize)
         return
+
+    bytesToRead := currentSize - lastSize
 
     try file := FileOpen(logFile, "r")
     catch as err {
@@ -2274,10 +2306,15 @@ CheckLog(*) {
         return
     }
 
-    diagnosticLastCheckMs := A_TickCount - checkLogStartedAt
+    diagnosticLastCheckMs := Round(GetHighResolutionMilliseconds() - checkLogStartedAt, 3)
     diagnosticLastProcessedLines := processedLineCount
     diagnosticLastPmChanges := pmCountChanged ? 1 : 0
     diagnosticLastLogSize := currentSize
+    diagnosticLastReadBytes := bytesToRead
+    diagnosticCheckLogSamples += 1
+    diagnosticCheckLogTotalMs += diagnosticLastCheckMs
+    if (diagnosticLastCheckMs > diagnosticCheckLogMaxMs)
+        diagnosticCheckLogMaxMs := diagnosticLastCheckMs
 
     if !pmCountChanged
         return
@@ -2586,7 +2623,7 @@ GetScriptPackages() {
             "files", [
                 Map("name", "aTools.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/aTools.asi", "relativePath", "aTools.asi")
             ],
-            "activationCommands", "//loader add script scripts/_otools.js`n//loader reload"
+            "activationCommands", ""
         ),
         Map(
             "id", "onishi",
@@ -2600,7 +2637,7 @@ GetScriptPackages() {
                 Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
                 Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
             ],
-            "activationCommands", ""
+            "activationCommands", "//loader add script scripts/_otools.js`n//loader reload"
         )
     ]
 }
@@ -2738,6 +2775,10 @@ ShowUpdateDialog(versionInfo) {
     dlg.Add("Text", "x38 y128 w180 h20 Background" colorCard, "Что нового:")
     dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
     dlg.Add("Text", "x38 y152 w430 h" (isRequired ? 100 : 76) " Background" colorCard, RTrim(changelogText, lineBreak))
+    startupLaterButton := dlg.Add("Text", "x206 y" (dlgHeight - 52) " w128 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Позже")
+    startupLaterButton.OnEvent("Click", (*) => dlg.Destroy())
+    startupUpdateButton := dlg.Add("Text", "x346 y" (dlgHeight - 52) " w136 h30 +0x200 Center Background" colorAccent " c" colorText, "Обновить")
+    startupUpdateButton.OnEvent("Click", StartManualUpdateFromDialog.Bind(dlg))
 
     if isRequired {
         dlg.SetFont("s9 Bold c" colorRed, "Segoe UI")
@@ -2750,10 +2791,18 @@ ShowUpdateDialog(versionInfo) {
     }
 
     downloadButton.OnEvent("Click", OpenUpdateDownload.Bind(versionInfo["download"], dlg))
+    downloadButton.Visible := false
+    if IsSet(laterButton)
+        laterButton.Visible := false
     dlg.Show("w520 h" dlgHeight)
 }
 
-OpenUpdateDownload(downloadUrl, dlg, *) {
+StartManualUpdateFromDialog(dlg, *) {
+    try dlg.Destroy()
+    ManualUpdateChesNova()
+}
+
+OpenUpdateDownload(downloadUrl, dlg := "", *) {
     if (downloadUrl = "") {
         ShowAppDialog("Обновления", "В version.json не указана ссылка для скачивания.")
         return
@@ -2761,10 +2810,21 @@ OpenUpdateDownload(downloadUrl, dlg, *) {
 
     try {
         Run(downloadUrl)
-        dlg.Destroy()
+        if IsObject(dlg)
+            dlg.Destroy()
     } catch as err {
         LogError("OpenUpdateDownload", "Не удалось открыть ссылку на обновление", err.Message)
         ShowAppDialog("Обновления", "Не удалось открыть ссылку для скачивания." Chr(10) Chr(10) err.Message)
+    }
+}
+
+DownloadLatestUpdate(*) {
+    try {
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        OpenUpdateDownload(versionInfo["download"])
+    } catch as err {
+        LogError("DownloadLatestUpdate", "Не удалось получить ссылку на обновление", err.Message)
+        ShowAppDialog("Обновления", "Не удалось получить ссылку на обновление." Chr(10) Chr(10) err.Message)
     }
 }
 
@@ -3390,7 +3450,8 @@ InstallScriptPackage(packageId, *) {
     }
 
     RefreshScriptsView()
-    ShowScriptInstallComplete(package)
+    if (package["activationCommands"] != "")
+        ShowScriptInstallComplete(package)
 }
 
 ShowScriptInstallComplete(package) {
@@ -4179,8 +4240,8 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, hudDesign, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetHudDesignCtrl
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, hudDesign, logFile
+    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetCenterKeyEnabledCtrl, SetHideKeyEnabledCtrl, SetHudDesignCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
@@ -4199,18 +4260,23 @@ SettingsView() {
     AddViewControl(view, "Text", "x250 y206 w280 h204 Background" colorCard)
     AddViewControl(view, "Text", "x270 y222 w220 h22 Background" colorCard " c" colorText, "Горячие клавиши")
     AddViewControl(view, "Text", "x270 y258 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
-    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y254 w120 h26 c" colorText " Background151A22", menuKey)
+    AddViewControl(view, "Text", "x494 y230 w28 h18 Background" colorCard " c" colorMuted, "Вкл.")
+    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y254 w98 h26 c" colorText " Background151A22", menuKey)
+    SetMenuKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetMenuKeyEnabled x496 y258 w20 h20 Checked" menuKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y294 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
-    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w120 h26 c" colorText " Background151A22", resetKey)
+    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w98 h26 c" colorText " Background151A22", resetKey)
+    SetResetKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetResetKeyEnabled x496 y294 w20 h20 Checked" resetKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y330 w110 h22 Background" colorCard " c" colorMuted, "Центр HUD")
-    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w120 h26 c" colorText " Background151A22", centerKey)
+    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w98 h26 c" colorText " Background151A22", centerKey)
+    SetCenterKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetCenterKeyEnabled x496 y330 w20 h20 Checked" centerKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
-    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w120 h26 c" colorText " Background151A22", hideKey)
+    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w98 h26 c" colorText " Background151A22", hideKey)
+    SetHideKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetHideKeyEnabled x496 y366 w20 h20 Checked" hideKeyEnabled " Background" colorCard)
 
     AddViewControl(view, "Text", "x250 y442 w280 h72 Background" colorCard)
     AddViewControl(view, "Text", "x270 y456 w120 h20 Background" colorCard " c" colorMuted, "Дизайн HUD")
-    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y480 w240 c000000 BackgroundEDEDED", ["Компактный", "Расширенный"])
-    SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : 1)
+    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y480 w240 c000000 BackgroundEDEDED", ["Компактный", "Расширенный", "Безопасный"])
+    SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : (hudDesign = "Safe" ? 3 : 1))
 
     ; Правая колонка: автоматизация и источник логов.
     AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
@@ -4246,14 +4312,20 @@ UpdatesView() {
     AddViewControl(view, "Text", "x274 y116 w250 h24 Background" colorCard " c" colorText, "ChesNova " appVersion)
     AddViewControl(view, "Text", "x274 y148 w430 h24 Background" colorCard " c" colorMuted, "Проверяйте новые версии и управляйте обновлением приложения.")
     SetCheckUpdatesCtrl := AddViewControl(view, "Checkbox", "vSetCheckUpdates x274 y176 Checked" checkUpdatesOnStartup " c" colorText " Background" colorCard, "Проверять обновления при запуске")
-    checkButton := AddViewControl(view, "Text", "x250 y236 w292 h34 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить обновления")
+    AddViewControl(view, "Text", "x250 y226 w600 h100 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y242 w260 h20 Background" colorCard " c" colorText, "Действия с обновлением")
+    checkButton := AddViewControl(view, "Text", "x274 y270 w268 h34 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить обновления")
     checkButton.OnEvent("Click", CheckForUpdatesManual)
-    updateButton := AddViewControl(view, "Text", "x558 y236 w292 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Обновить ChesNova")
+    updateButton := AddViewControl(view, "Text", "x558 y270 w268 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Обновить ChesNova")
     updateButton.OnEvent("Click", ManualUpdateChesNova)
-    AddViewControl(view, "Text", "x250 y294 w600 h86 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y314 w530 h20 Background" colorCard " c" colorMuted, "Настройка сохраняется вместе с основными настройками приложения.")
-    saveButton := AddViewControl(view, "Text", "x558 y338 w292 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сохранить настройки")
+    AddViewControl(view, "Text", "x250 y342 w600 h86 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y358 w530 h20 Background" colorCard " c" colorMuted, "Настройка проверки при запуске сохраняется отдельно.")
+    saveButton := AddViewControl(view, "Text", "x274 y388 w552 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сохранить настройки")
     saveButton.OnEvent("Click", SaveSettings)
+    AddViewControl(view, "Text", "x250 y444 w600 h72 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y458 w530 h18 Background" colorCard " c" colorMuted, "Если автоматическое обновление недоступно:")
+    downloadButton := AddViewControl(view, "Text", "x274 y484 w552 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать последнюю версию")
+    downloadButton.OnEvent("Click", DownloadLatestUpdate)
 }
 
 RefreshUpdatesView(*) {
@@ -4333,6 +4405,91 @@ F5 — центр
 VK: @m.ches
 ━━━━━━━━━━━━━━━━━━━━━━
 )"
+    helpText := "
+(
+НАСТРОЙКА
+
+1. Нажмите F10, чтобы открыть меню.
+2. Укажите игровой ник и норму PM.
+3. Выберите файл chatlog.txt.
+
+Обычно chatlog.txt находится здесь:
+Документы → RADMIR CRMP User Files → SAMP → chatlog.txt
+
+Счётчик автоматически обрабатывает только новые строки лога.
+
+━━━━━━━━━━━━━━━━━━━━━━
+ГОРЯЧИЕ КЛАВИШИ
+
+F10 — открыть меню
+F9 — сбросить PM вручную
+F5 — переместить HUD в центр
+F2 — скрыть или показать HUD
+
+Во вкладке «Настройки» можно изменить или отключить
+каждую стандартную горячую клавишу.
+
+━━━━━━━━━━━━━━━━━━━━━━
+HUD И FPS
+
+Компактный — основной небольшой счётчик.
+Расширенный — показывает больше информации.
+Безопасный — облегчённый HUD для случаев, когда окно
+счётчика влияет на FPS в игре.
+
+Если FPS снижается при показе HUD, выберите
+«Безопасный» дизайн в настройках.
+
+━━━━━━━━━━━━━━━━━━━━━━
+НОРМА И АВТОСБРОС
+
+Норму PM можно сбросить вручную клавишей F9 или
+автоматически в выбранное время.
+
+При включении автосброса после заданного времени
+норма не будет сброшена задним числом.
+
+━━━━━━━━━━━━━━━━━━━━━━
+БИНДЫ
+
+Во вкладке «Бинды» доступны текстовые бинды, хоткеи
+и макросы.
+
+Примеры: F1 — обычная клавиша; +1 — Shift + 1;
+^F5 — Ctrl + F5; !F2 — Alt + F2.
+
+━━━━━━━━━━━━━━━━━━━━━━
+НАКАЗАНИЯ
+
+HUD отображает наказания, выданные только за текущий день:
+Kick, Jail, Warn, Mute, Vmute, Rmute, Ban, Gunban и Sban.
+
+Полная история доступна во вкладке «Наказания».
+
+━━━━━━━━━━━━━━━━━━━━━━
+ДИАГНОСТИКА
+
+Вкладка «Диагностика» показывает интервал и время CheckLog,
+количество новых строк и размер файлов логов.
+
+При проблемах со счётчиком или FPS отправьте разработчику
+скриншот диагностики и файл errors.log.
+
+━━━━━━━━━━━━━━━━━━━━━━
+ОБНОВЛЕНИЯ И СКРИПТЫ
+
+Во вкладке «Обновления» можно проверить, установить или
+скачать последнюю версию вручную.
+
+Во вкладке «Скрипты» укажите папку игры и установите
+ChesNova, aTools или Onishi. Для Onishi также устанавливается Loader.
+
+━━━━━━━━━━━━━━━━━━━━━━
+ПОДДЕРЖКА
+
+Автор: Misha_Ches
+VK: vk.com/m.ches
+)"
     HelpEditCtrl := AddViewControl(view, "Edit", "vHelpEdit x250 y84 w600 h240 ReadOnly -Wrap +WantReturn +VScroll Background20242b cFFFFFF", helpText)
 
     AddViewControl(view, "Text", "x250 y342 w220 Background0E1116 c7aa2ff", "Последние ошибки")
@@ -4360,18 +4517,44 @@ DiagnosticsView() {
 
 BuildDiagnosticsText() {
     global logFile, pmLogsFile, punishmentsFile, errorsLogFile
-    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize
+    global hudDesign, diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
+    global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
 
     text := "Интервал CheckLog: 1000 мс`n"
+    text .= "Режим HUD: " GetHudDesignText() "`n"
     text .= "Время последнего CheckLog: " diagnosticLastCheckMs " мс`n"
+    text .= "Среднее CheckLog: " (diagnosticCheckLogSamples ? Round(diagnosticCheckLogTotalMs / diagnosticCheckLogSamples, 3) : 0) " мс`n"
+    text .= "Максимум CheckLog: " diagnosticCheckLogMaxMs " мс`n"
     text .= "Обработано строк: " diagnosticLastProcessedLines "`n"
     text .= "Новых PM: " diagnosticLastPmChanges "`n"
+    text .= "Прочитано из chatlog: " FormatDiagnosticBytes(diagnosticLastReadBytes) "`n"
     text .= "Размер chatlog при проверке: " FormatDiagnosticBytes(diagnosticLastLogSize) "`n`n"
     text .= "chatlog.txt: " FormatDiagnosticFileSize(logFile) "`n"
     text .= "pm_logs.csv: " FormatDiagnosticFileSize(pmLogsFile) "`n"
     text .= "punishments_history.csv: " FormatDiagnosticFileSize(punishmentsFile) "`n"
     text .= "errors.log: " FormatDiagnosticFileSize(errorsLogFile)
     return text
+}
+
+GetHudDesignText() {
+    global hudDesign
+
+    if (hudDesign = "Expanded")
+        return "Расширенный"
+    if (hudDesign = "Safe")
+        return "Безопасный"
+    return "Компактный"
+}
+
+GetHighResolutionMilliseconds() {
+    static frequency := 0
+
+    if !frequency
+        DllCall("QueryPerformanceFrequency", "Int64*", &frequency)
+
+    counter := 0
+    DllCall("QueryPerformanceCounter", "Int64*", &counter)
+    return (counter * 1000.0) / frequency
 }
 
 FormatDiagnosticFileSize(filePath) {
@@ -4740,10 +4923,11 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, centerKey, hideKey, hudDesign, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
+    global menuKey, resetKey, centerKey, hideKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, hudDesign, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
 
     SaveMenuPosition()
     values := SettingsGui.Submit()
+    wasAutoResetEnabled := autoResetEnabled
     nick := Trim(values.SetNick)
     userNick := nick
     norm := values.SetNorm + 0
@@ -4752,11 +4936,24 @@ SaveSettings(*) {
     startWithWindows := values.SetStartup
     resetHour := values.SetResetHour
     resetMinute := values.SetResetMinute
+
+    if (autoResetEnabled && !wasAutoResetEnabled) {
+        nowDate := FormatTime(A_Now, "yyyyMMdd")
+        nowKey := FormatTime(A_Now, "yyyyMMddHHmm")
+        targetKey := nowDate . Format("{:02}{:02}", resetHour, resetMinute)
+        if (nowKey >= targetKey)
+            lastResetDate := nowDate
+    }
+
     menuKey := values.SetMenuKey
     resetKey := values.SetResetKey
     centerKey := values.SetCenterKey
     hideKey := values.SetHideKey
-    hudDesign := (values.SetHudDesign = "Расширенный") ? "Expanded" : "Compact"
+    menuKeyEnabled := values.SetMenuKeyEnabled
+    resetKeyEnabled := values.SetResetKeyEnabled
+    centerKeyEnabled := values.SetCenterKeyEnabled
+    hideKeyEnabled := values.SetHideKeyEnabled
+    hudDesign := (values.SetHudDesign = "Расширенный") ? "Expanded" : ((values.SetHudDesign = "Безопасный") ? "Safe" : "Compact")
 
     try {
         IniWrite(nick, settingsFile, "Main", "nick")
@@ -4773,6 +4970,10 @@ SaveSettings(*) {
         IniWrite(resetKey, settingsFile, "Keys", "resetKey")
         IniWrite(centerKey, settingsFile, "Keys", "centerKey")
         IniWrite(hideKey, settingsFile, "Keys", "hideKey")
+        IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
+        IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
+        IniWrite(centerKeyEnabled, settingsFile, "Keys", "centerKeyEnabled")
+        IniWrite(hideKeyEnabled, settingsFile, "Keys", "hideKeyEnabled")
         IniWrite(guiX, settingsFile, "GUI", "guiX")
         IniWrite(guiY, settingsFile, "GUI", "guiY")
         IniWrite(menuX, settingsFile, "GUI", "menuX")
@@ -4870,12 +5071,29 @@ CenterGUI(*) {
 }
 
 RegisterHotkeys() {
-    global menuKey, resetKey, centerKey, hideKey
+    global menuKey, resetKey, centerKey, hideKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, RegisteredStandardHotkeys
 
-    Hotkey(menuKey, OpenMenu, "On")
-    Hotkey(resetKey, ResetPM, "On")
-    Hotkey(centerKey, CenterGUI, "On")
-    Hotkey(hideKey, ToggleGUI, "On")
+    for _, key in RegisteredStandardHotkeys {
+        try Hotkey(key, "Off")
+    }
+    RegisteredStandardHotkeys := []
+
+    if menuKeyEnabled {
+        Hotkey(menuKey, OpenMenu, "On")
+        RegisteredStandardHotkeys.Push(menuKey)
+    }
+    if resetKeyEnabled {
+        Hotkey(resetKey, ResetPM, "On")
+        RegisteredStandardHotkeys.Push(resetKey)
+    }
+    if centerKeyEnabled {
+        Hotkey(centerKey, CenterGUI, "On")
+        RegisteredStandardHotkeys.Push(centerKey)
+    }
+    if hideKeyEnabled {
+        Hotkey(hideKey, ToggleGUI, "On")
+        RegisteredStandardHotkeys.Push(hideKey)
+    }
 }
 
 WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
