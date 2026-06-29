@@ -1,12 +1,9 @@
 {
-  "latest": "10.4",
-  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v10.4.ahk.zip",
+  "latest": "10.4.1",
+  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v10.4.1.ahk.zip",
   "changelog": [
-    "Оптимизация производительности: снижена нагрузка на FPS, CPU и диск.",
-    "Добавлена диагностика работы скрипта.",
-    "Новый выбор дизайна HUD: компактный или расширенный.",
-    "Расширенный HUD показывает PM и наказания за текущий день.",
-    "Об этом и об остальном можно узнать в группе в ВК"
+    "Новая версия 10.4.1.",
+    "Подробнее можно узнать в группе в ВК"
   ],
   "required": false
 }
