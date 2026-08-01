@@ -1,1 +1,11 @@
-
+{
+  "latest": "10.5.1-test",
+  "download": "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk",
+  "changelog": [
+    "Тестовая сборка 10.5.2",
+    "Диагностика здоровья раз в минуту",
+    "Диалог проверки Cloud",
+    "Вкладка Тестировщик"
+  ],
+  "required": false
+}
