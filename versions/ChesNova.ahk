@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.4.1"
+CURRENT_VERSION := "10.5"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -138,6 +138,10 @@ colorMuted := "939CAC"
 colorGreen := "41D07A"
 colorRed := "FF5B6B"
 colorYellow := "F6A623"
+; Единые токены UI
+uiDivider := "2B3443"
+uiInputBg := "151A22"
+uiBtnH := 28
 dotRed := colorRed
 dotGreen := colorGreen
 guiX := "Center"
@@ -277,6 +281,7 @@ PunishmentTypeTitleCtrl := ""
 PunishmentSearchCtrl := ""
 PunishmentDetailsCtrl := ""
 PunishmentButtonCtrls := Map()
+PunishmentPeriodButtonCtrls := Map()
 PmLogsTextCtrl := ""
 PMLogsSearchCtrl := ""
 DaysOffDateCtrl := ""
@@ -311,6 +316,9 @@ NormHistoryEditOriginalDate := ""
 NormHistoryEditDateCtrl := ""
 NormHistoryEditPmCtrl := ""
 NormHistoryEditNormCtrl := ""
+NormMonthComboCtrl := ""
+NormYearEditCtrl := ""
+NormDaysOffInfoCtrl := ""
 DashboardVersionCtrl := ""
 DashboardNormTitleCtrl := ""
 DashboardNormPmCtrl := ""
@@ -336,6 +344,7 @@ HistoryGui := ""
 PunishmentsGui := ""
 HelpGui := ""
 ResetConfirmGui := ""
+ToastGui := ""
 
 if FileExist(saveFile)
 {
@@ -374,6 +383,7 @@ OnMessage(0x84, WM_NCHITTEST)
 ; =========================
 RegisterHotkeys()
 InitializeBinds()
+MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
 SetTimer(CheckAutoReset, 30000)
 
@@ -431,7 +441,7 @@ BuildMainHud() {
     if (hudDesign = "Expanded") {
         MainGui.SetFont("s8 c" colorText, "Segoe UI")
         HudNickCtrl := MainGui.Add("Text", "x4 y4 w142 h17 Center c" colorText, nick)
-        MainGui.Add("Text", "x4 y23 w142 h1 Background2B3443")
+        MainGui.Add("Text", "x4 y23 w142 h1 Background" uiDivider)
         PMCountTextCtrl := MainGui.Add("Text", "x4 y29 w142 h19 Center c" colorText, "PM: " pmCount)
         MainGui.Add("Text", "x48 y51 w54 h2 Background" colorAccent)
         HudStatsCtrl := MainGui.Add("Text", "x4 y58 w142 h45 Center c" colorMuted, BuildHudPunishmentStats())
@@ -931,11 +941,38 @@ UpdatePunishmentTypeButtons(days, search := "") {
     types := GetPunishmentTypes()
     for _, type in types
     {
-        controlName := PunishmentTypeControlName(type)
         buttonLabel := (type = "all") ? "Все" : type
         buttonText := buttonLabel " (" CountPunishmentsByType(type, days, search) ")"
         if (PunishmentButtonCtrls.Has(type) && IsObject(PunishmentButtonCtrls[type]))
             PunishmentButtonCtrls[type].Text := buttonText
+    }
+    UpdatePunishmentFilterStyles()
+}
+
+UpdatePunishmentFilterStyles() {
+    global PunishmentButtonCtrls, PunishmentPeriodButtonCtrls
+    global selectedPunishmentType, selectedPunishmentDays
+    global colorAccent, colorCardAlt, colorText
+
+    selectedType := NormalizePunishmentType(selectedPunishmentType)
+    for typeName, ctrl in PunishmentButtonCtrls {
+        if !IsObject(ctrl)
+            continue
+        bg := (typeName = selectedType) ? colorAccent : colorCardAlt
+        try {
+            ctrl.Opt("Background" bg " c" colorText)
+            ctrl.SetFont("s9 Bold c" colorText, "Segoe UI")
+        }
+    }
+
+    for daysKey, ctrl in PunishmentPeriodButtonCtrls {
+        if !IsObject(ctrl)
+            continue
+        bg := ((daysKey + 0) = (selectedPunishmentDays + 0)) ? colorAccent : colorCardAlt
+        try {
+            ctrl.Opt("Background" bg " c" colorText)
+            ctrl.SetFont("s9 Bold c" colorText, "Segoe UI")
+        }
     }
 }
 
@@ -1166,6 +1203,8 @@ GetBackupFileName(filePath) {
         return "pm_history_" timestamp ".csv"
     if (fileName = "punishments_history.csv")
         return "punishments_history_" timestamp ".csv"
+    if (fileName = "days_off.csv")
+        return "days_off_" timestamp ".csv"
 
     return ""
 }
@@ -1199,15 +1238,41 @@ NormalizeDayOffDate(value) {
     return ""
 }
 
-IsDayOff(date) {
+ParseDayOffRecord(line) {
+    part := StrSplit(line, "|")
+    dayOffDate := NormalizeDayOffDate(GetArrayValue(part, 1, ""))
+    if (dayOffDate = "")
+        return ""
+    forumUploaded := (part.Length >= 2 && part[2] + 0) ? 1 : 0
+    return Map("date", dayOffDate, "forumUploaded", forumUploaded)
+}
+
+FormatDayOffRecord(dayOffDate, forumUploaded := 0) {
+    return dayOffDate "|" (forumUploaded ? 1 : 0)
+}
+
+GetDayOffRecords() {
     global daysOffFile
 
-    date := NormalizeDayOffDate(date)
-    if (date = "" || !FileExist(daysOffFile))
-        return false
+    records := []
+    if !FileExist(daysOffFile)
+        return records
 
     for _, line in ReadFileLines(daysOffFile) {
-        if (NormalizeDayOffDate(line) = date)
+        record := ParseDayOffRecord(line)
+        if IsObject(record)
+            records.Push(record)
+    }
+    return records
+}
+
+IsDayOff(date) {
+    date := NormalizeDayOffDate(date)
+    if (date = "")
+        return false
+
+    for _, record in GetDayOffRecords() {
+        if (record["date"] = date)
             return true
     }
 
@@ -1215,25 +1280,78 @@ IsDayOff(date) {
 }
 
 CountDaysOffCurrentMonth() {
-    global daysOffFile
+    return CountDaysOffInMonth(FormatTime(A_Now, "yyyy"), FormatTime(A_Now, "MM"))
+}
 
-    count := 0
-    monthPrefix := FormatTime(A_Now, "yyyy-MM")
-
-    if !FileExist(daysOffFile)
+CountDaysOffInMonth(year, month) {
+    year := Trim(year)
+    month := Trim(month)
+    if !RegExMatch(year, "^\d{4}$")
+        return 0
+    if RegExMatch(month, "^\d{1}$")
+        month := "0" month
+    if !RegExMatch(month, "^\d{2}$")
         return 0
 
-    for _, line in ReadFileLines(daysOffFile) {
-        lineDate := NormalizeDayOffDate(line)
-        if (lineDate != "" && SubStr(lineDate, 1, 7) = monthPrefix)
+    monthPrefix := year "-" month
+    count := 0
+    for _, record in GetDayOffRecords() {
+        if (SubStr(record["date"], 1, 7) = monthPrefix)
             count++
     }
-
     return count
 }
 
+; Раз в календарный месяц: backup отгулов + очистка рабочего списка.
+MaybeRotateDaysOffMonthly() {
+    global daysOffFile, settingsFile, backupPath
+
+    currentMonth := FormatTime(A_Now, "yyyy-MM")
+    lastMonth := ""
+    try lastMonth := IniRead(settingsFile, "Main", "lastDaysOffMonth", "")
+
+    if (lastMonth = "") {
+        try IniWrite(currentMonth, settingsFile, "Main", "lastDaysOffMonth")
+        return
+    }
+    if (lastMonth = currentMonth)
+        return
+
+    hasData := false
+    if FileExist(daysOffFile) {
+        for _, line in ReadFileLines(daysOffFile, "MaybeRotateDaysOffMonthly") {
+            if (Trim(line) != "") {
+                hasData := true
+                break
+            }
+        }
+    }
+
+    if hasData {
+        try {
+            DirCreate(backupPath)
+            backupFile := backupPath "\days_off_" lastMonth ".csv"
+            FileCopy(daysOffFile, backupFile, true)
+        } catch as err {
+            LogError("MaybeRotateDaysOffMonthly", "Ошибка backup отгулов", err.Message)
+            return
+        }
+
+        try {
+            file := FileOpen(daysOffFile, "w")
+            file.Close()
+            AppendPmLog("Действие", "Отгулы: месячный backup " lastMonth " и очистка")
+        } catch as err {
+            LogError("MaybeRotateDaysOffMonthly", "Ошибка очистки отгулов", err.Message)
+            return
+        }
+    }
+
+    try IniWrite(currentMonth, settingsFile, "Main", "lastDaysOffMonth")
+}
+
 AddDayOff(*) {
-    global daysOffFile, DaysOffDateCtrl
+    global daysOffFile, DaysOffDateCtrl, DaysOffForumCtrl
 
     if !IsObject(DaysOffDateCtrl)
         return
@@ -1249,11 +1367,16 @@ AddDayOff(*) {
         return
     }
 
-    if !TryFileAppend(dayOffDate "`n", daysOffFile, "AddDayOff", "Ошибка записи days_off.csv")
+    forumUploaded := (IsObject(DaysOffForumCtrl) && DaysOffForumCtrl.Value) ? 1 : 0
+    if !TryFileAppend(FormatDayOffRecord(dayOffDate, forumUploaded) "`n", daysOffFile, "AddDayOff", "Ошибка записи days_off.csv")
         return
     DaysOffDateCtrl.Value := ""
+    if IsObject(DaysOffForumCtrl)
+        DaysOffForumCtrl.Value := 0
+    UpdateDayOffForumStatus()
     FillDaysOffList()
     FillNormHistoryList()
+    RefreshNormDaysOffInfo()
 }
 
 GetSelectedDayOffDates() {
@@ -1274,8 +1397,25 @@ GetSelectedDayOffDates() {
     return dates
 }
 
+
+WriteDayOffRecords(records, source := "WriteDayOffRecords") {
+    global daysOffFile
+
+    try {
+        file := FileOpen(daysOffFile, "w")
+        for _, record in records
+            file.WriteLine(FormatDayOffRecord(record["date"], record["forumUploaded"]))
+        file.Close()
+        return true
+    } catch as err {
+        LogError(source, "Ошибка записи days_off.csv", err.Message)
+        MsgBox("Не удалось сохранить список отгулов.`n`n" err.Message, "Ошибка", "Iconx")
+        return false
+    }
+}
+
 DeleteSelectedDayOff(*) {
-    global daysOffFile, DaysOffListCtrl
+    global DaysOffListCtrl
 
     if !IsObject(DaysOffListCtrl)
         return
@@ -1294,28 +1434,54 @@ DeleteSelectedDayOff(*) {
     if (result != "OK")
         return
 
-    newLines := []
-    if FileExist(daysOffFile) {
-        for _, line in ReadFileLines(daysOffFile) {
-            lineDate := NormalizeDayOffDate(line)
-            if (lineDate != "" && !ArrayHasValue(selectedDates, lineDate))
-                newLines.Push(lineDate)
-        }
+    newRecords := []
+    for _, record in GetDayOffRecords() {
+        if !ArrayHasValue(selectedDates, record["date"])
+            newRecords.Push(record)
     }
 
-    try {
-        file := FileOpen(daysOffFile, "w")
-        for _, lineDate in newLines
-            file.WriteLine(lineDate)
-        file.Close()
-    } catch as err {
-        LogError("DeleteSelectedDayOff", "Ошибка записи days_off.csv", err.Message)
-        MsgBox("Не удалось сохранить список отгулов.`n`n" err.Message, "Ошибка", "Iconx")
+    if !WriteDayOffRecords(newRecords, "DeleteSelectedDayOff")
         return
-    }
 
     FillDaysOffList()
     FillNormHistoryList()
+}
+
+
+SetSelectedDayOffForumStatus(uploaded, *) {
+    selectedDates := GetSelectedDayOffDates()
+    if (selectedDates.Length = 0) {
+        ShowAppDialog("Отгулы", "Выберите дату отгула в списке.")
+        return
+    }
+
+    records := GetDayOffRecords()
+    for _, record in records {
+        if ArrayHasValue(selectedDates, record["date"])
+            record["forumUploaded"] := uploaded ? 1 : 0
+    }
+
+    if !WriteDayOffRecords(records, "SetSelectedDayOffForumStatus")
+        return
+
+    FillDaysOffList()
+}
+
+ToggleSelectedDayOffForumStatus(*) {
+    selectedDates := GetSelectedDayOffDates()
+    if (selectedDates.Length = 0)
+        return
+
+    records := GetDayOffRecords()
+    for _, record in records {
+        if ArrayHasValue(selectedDates, record["date"])
+            record["forumUploaded"] := record["forumUploaded"] ? 0 : 1
+    }
+
+    if !WriteDayOffRecords(records, "ToggleSelectedDayOffForumStatus")
+        return
+
+    FillDaysOffList()
 }
 
 FillDaysOffList() {
@@ -1327,17 +1493,29 @@ FillDaysOffList() {
     DaysOffListCtrl.Delete()
     lines := []
 
-    if FileExist(daysOffFile) {
-        for _, line in ReadFileLines(daysOffFile) {
-            lineDate := NormalizeDayOffDate(line)
-            if (lineDate != "")
-                lines.Push(lineDate)
-        }
-    }
+    for _, record in GetDayOffRecords()
+        lines.Push(FormatDayOffRecord(record["date"], record["forumUploaded"]))
 
     lines := SortRecordsNewestFirst(lines, "dayoff")
-    for _, lineDate in lines
-        DaysOffListCtrl.Add(, lineDate)
+    for _, line in lines {
+        record := ParseDayOffRecord(line)
+        if IsObject(record) {
+            forumText := record["forumUploaded"] ? "Залито" : "Не залито"
+            DaysOffListCtrl.Add(, record["date"], forumText)
+        }
+    }
+    RefreshNormDaysOffInfo()
+}
+
+UpdateDayOffForumStatus(*) {
+    global DaysOffForumCtrl, DaysOffForumStatusCtrl, colorGreen, colorRed
+
+    if !IsObject(DaysOffForumStatusCtrl)
+        return
+
+    uploaded := IsObject(DaysOffForumCtrl) && DaysOffForumCtrl.Value
+    DaysOffForumStatusCtrl.Text := uploaded ? "На форуме залито" : "Не залито"
+    DaysOffForumStatusCtrl.SetFont("s9 Bold c" (uploaded ? colorGreen : colorRed), "Segoe UI")
 }
 
 ; =========================
@@ -2094,7 +2272,7 @@ UnregisterCustomBinds() {
     for _, item in RegisteredBindTriggers {
         try {
             if (item["type"] = "hotstring" || item["type"] = "macro")
-                Hotstring(item["trigger"], , "Off")
+                Hotstring(item["trigger"], "Off")
             else
                 Hotkey(item["trigger"], "Off")
         }
@@ -2250,6 +2428,11 @@ CheckLog(*) {
     global saveFile, dotGreen, dotRed, StatusDotCtrl, PMCountTextCtrl
     global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
     global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
+    global cloudAccessState
+
+    ; Счётчик работает только при подтверждённом доступе Cloud.
+    if (cloudAccessState != "ok")
+        return
     checkLogStartedAt := GetHighResolutionMilliseconds()
     processedLineCount := 0
     pmCountChanged := false
@@ -2415,7 +2598,7 @@ OpenMenu(*) {
         if (A_TickCount - lastMenuOpenTick < 500)
             return
         if (settingsMenuHidden) {
-            SettingsGui.Show("w920 h" Max(590, 174 + GetScriptPackages().Length * 250) " x" menuX " y" menuY)
+            SettingsGui.Show("w920 h590 x" menuX " y" menuY)
             settingsMenuHidden := false
             lastMenuOpenTick := A_TickCount
             return
@@ -2461,32 +2644,33 @@ BuildMainWindow(initialView := "Dashboard") {
     SettingsGui.Add("Text", "x0 y0 w920 h28 Background" colorCard)
     SettingsGui.Add("Text", "x0 y28 w216 h" (windowHeight - 28) " Background" colorSidebar)
     SettingsGui.Add("Text", "x216 y28 w704 h" (windowHeight - 28) " Background" colorBg)
-    SettingsGui.Add("Text", "x0 y27 w920 h1 Background2B3443")
-    SettingsGui.Add("Text", "x215 y28 w1 h" (windowHeight - 28) " Background2B3443")
+    SettingsGui.Add("Text", "x0 y27 w920 h1 Background" uiDivider)
+    SettingsGui.Add("Text", "x215 y28 w1 h" (windowHeight - 28) " Background" uiDivider)
     SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
     SettingsGui.Add("Text", "x18 y5 w300 h18 Background" colorCard, "ChesNova " appVersion)
     SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
     cloudBtn := SettingsGui.Add("Text", "x704 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "☁")
-    cloudBtn.OnEvent("Click", (*) => ShowView("Cloud"))
+    BindTextButton(cloudBtn, colorCardAlt, (*) => ShowView("Cloud"))
     diagnosticsBtn := SettingsGui.Add("Text", "x670 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "D")
-    diagnosticsBtn.OnEvent("Click", (*) => ShowView("Diagnostics"))
+    BindTextButton(diagnosticsBtn, colorCardAlt, (*) => ShowView("Diagnostics"))
     settingsBtn := SettingsGui.Add("Text", "x738 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "⚙")
-    settingsBtn.OnEvent("Click", (*) => ShowView("Settings"))
+    BindTextButton(settingsBtn, colorCardAlt, (*) => ShowView("Settings"))
     NotificationButtonCtrl := SettingsGui.Add("Text", "x772 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "🔔")
-    NotificationButtonCtrl.OnEvent("Click", OpenNotifications)
+    BindTextButton(NotificationButtonCtrl, colorCardAlt, OpenNotifications)
     NotificationButtonCtrl.SetFont("s10 Norm c" colorText, "Segoe UI Emoji")
     NotificationIndicatorCtrl := SettingsGui.Add("Text", "x794 y2 w7 h8 +0x200 Center Background" colorCardAlt " c" colorGreen, "●")
     NotificationIndicatorCtrl.SetFont("s6 Bold c" colorGreen, "Segoe UI")
     hideWindowBtn := SettingsGui.Add("Text", "x846 y3 w32 h22 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x2212))
-    hideWindowBtn.OnEvent("Click", HideSettingsMenu)
+    BindTextButton(hideWindowBtn, colorCardAlt, HideSettingsMenu)
     closeWindowBtn := SettingsGui.Add("Text", "x882 y3 w32 h22 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x00D7))
-    closeWindowBtn.OnEvent("Click", CloseSettings)
+    BindTextButton(closeWindowBtn, colorCardAlt, CloseSettings)
 
+    ; Сайдбар: сверху частое, снизу редкое
     BuildNavButton("Dashboard", "⌂   Главная", 48)
     BuildNavButton("Punishments", "⚖   Наказания", 88)
-    BuildNavButton("NormHistory", "◷   Норма", 128)
-    BuildNavButton("DaysOff", "☀   Отгулы", 168)
-    BuildNavButton("PMLogs", "▤   PM логи", 208)
+    BuildNavButton("PMLogs", "▤   PM логи", 128)
+    BuildNavButton("NormHistory", "◷   Норма", 168)
+    BuildNavButton("DaysOff", "☀   Отгулы", 208)
     BuildNavButton("Binds", "⌨   Бинды", 248)
     BuildNavButton("Scripts", "✦   Скрипты", 288)
     BuildNavButton("Updates", "↻   Обновления", windowHeight - 82)
@@ -2533,7 +2717,7 @@ BuildSidebarActionButton(label, y, callback) {
 
     SettingsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
     ctrl := SettingsGui.Add("Text", "x24 y" y " w178 h34 +0x200 Background" colorCard, "  " label)
-    ctrl.OnEvent("Click", callback)
+    BindTextButton(ctrl, colorCard, callback)
     return ctrl
 }
 
@@ -2638,6 +2822,70 @@ GetScriptPackages() {
                 Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
             ],
             "activationCommands", "//loader add script scripts/_otools.js`n//loader reload"
+        ),
+        Map(
+            "id", "fpsunlocker",
+            "displayTitle", "FPSUnlocker",
+            "author", "Misha Ches",
+            "title", "FPSUnlocker",
+            "description", "Разблокировка FPS для более плавной игры.",
+            "authors", "Misha Ches",
+            "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/FPSUnlock.asi",
+            "files", [
+                Map("name", "FPSUnlock.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/FPSUnlock.asi", "relativePath", "FPSUnlock.asi")
+            ],
+            "activationCommands", ""
+        ),
+        Map(
+            "id", "camhunt",
+            "displayTitle", "CamHunt",
+            "author", "Misha Ches",
+            "title", "CamHunt",
+            "description", "Камхак CamHunt. Установщик добавляет только недостающие файлы.",
+            "authors", "Misha Ches",
+            "topic", "https://github.com/MishaChes/ChesNova/tree/main/files/CamHunt",
+            "skipExisting", true,
+            "files", [
+                Map("name", "CLEO.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/CLEO.asi", "relativePath", "CLEO.asi"),
+                Map("name", "CamHunt", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/CamHunt", "relativePath", "CamHunt"),
+                Map("name", "CamHunt.sp", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/CamHunt.sp", "relativePath", "CamHunt.sp"),
+                Map("name", "Hooks.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/Hooks.asi", "relativePath", "Hooks.asi"),
+                Map("name", "SA_GUI.fp", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/SA_GUI.fp", "relativePath", "SA_GUI.fp"),
+                Map("name", "msvcr100d.dll", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/msvcr100d.dll", "relativePath", "msvcr100d.dll"),
+                Map("name", "CamHunt.cfg", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/CLEO/CamHunt.cfg", "relativePath", "CLEO\CamHunt.cfg"),
+                Map("name", "newOpcodes.cleo", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/CLEO/newOpcodes.cleo", "relativePath", "CLEO\newOpcodes.cleo"),
+                Map("name", "ch_font.dat", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/data/Fonts/ch_font.dat", "relativePath", "data\Fonts\ch_font.dat"),
+                Map("name", "ch_font.txd", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/data/Fonts/ch_font.txd", "relativePath", "data\Fonts\ch_font.txd"),
+                Map("name", "CamHunt.txd", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/CamHunt/models/CamHunt.txd", "relativePath", "models\CamHunt.txd")
+            ],
+            "activationCommands", ""
+        ),
+        Map(
+            "id", "weather_time",
+            "displayTitle", "Погода/Время",
+            "author", "Misha Ches",
+            "title", "Погода/Время",
+            "description", "Скрипт погоды и времени с конфигурационным файлом.",
+            "authors", "Misha Ches",
+            "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/weather_time.asi",
+            "files", [
+                Map("name", "weather_time.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/weather_time.asi", "relativePath", "weather_time.asi"),
+                Map("name", "weather_time.ini", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/weather_time.ini", "relativePath", "weather_time.ini")
+            ],
+            "activationCommands", ""
+        ),
+        Map(
+            "id", "clientside",
+            "displayTitle", "clientside.dll",
+            "author", "Юсиф",
+            "title", "clientside.dll",
+            "description", "Новый скрипт для crashlog'ов.",
+            "authors", "Юсиф",
+            "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/clientside.dll",
+            "files", [
+                Map("name", "clientside.dll", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/clientside.dll", "relativePath", "clientside.dll")
+            ],
+            "activationCommands", ""
         )
     ]
 }
@@ -2682,16 +2930,10 @@ DownloadVersionManifest() {
 
     ; Уникальный параметр и no-cache не дают GitHub CDN вернуть старую копию JSON.
     requestUrl := versionInfoUrl "?nocache=" A_Now "_" A_TickCount
-    http := ComObject("WinHttp.WinHttpRequest.5.1")
-    http.Open("GET", requestUrl, false)
-    http.SetRequestHeader("Cache-Control", "no-cache")
-    http.SetRequestHeader("Pragma", "no-cache")
-    http.Send()
-
-    if (http.Status != 200)
-        throw Error("GitHub вернул HTTP " http.Status ".")
-
-    return http.ResponseText
+    result := HttpGetText(requestUrl)
+    if (result["status"] != 200)
+        throw Error("GitHub вернул HTTP " result["status"] ".")
+    return result["text"]
 }
 
 ParseVersionManifest(jsonText) {
@@ -2760,7 +3002,7 @@ ShowUpdateDialog(versionInfo) {
 
     isRequired := versionInfo["required"]
     dlgHeight := isRequired ? 330 : 300
-    dlg := Gui("+ToolWindow -SysMenu +AlwaysOnTop +Border", "Обновление ChesNova")
+    dlg := Gui("+Border", "Обновление ChesNova")
     dlg.BackColor := colorBg
     dlg.MarginX := 0
     dlg.MarginY := 0
@@ -2776,9 +3018,9 @@ ShowUpdateDialog(versionInfo) {
     dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
     dlg.Add("Text", "x38 y152 w430 h" (isRequired ? 100 : 76) " Background" colorCard, RTrim(changelogText, lineBreak))
     startupLaterButton := dlg.Add("Text", "x206 y" (dlgHeight - 52) " w128 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Позже")
-    startupLaterButton.OnEvent("Click", (*) => dlg.Destroy())
+    BindTextButton(startupLaterButton, colorCardAlt, (*) => dlg.Destroy())
     startupUpdateButton := dlg.Add("Text", "x346 y" (dlgHeight - 52) " w136 h30 +0x200 Center Background" colorAccent " c" colorText, "Обновить")
-    startupUpdateButton.OnEvent("Click", StartManualUpdateFromDialog.Bind(dlg))
+    BindTextButton(startupUpdateButton, colorAccent, StartManualUpdateFromDialog.Bind(dlg))
 
     if isRequired {
         dlg.SetFont("s9 Bold c" colorRed, "Segoe UI")
@@ -2786,15 +3028,16 @@ ShowUpdateDialog(versionInfo) {
         downloadButton := dlg.Add("Text", "x314 y" (dlgHeight - 52) " w168 h30 +0x200 Center Background" colorAccent " c" colorText, "📥 Скачать")
     } else {
         laterButton := dlg.Add("Text", "x206 y" (dlgHeight - 52) " w128 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Позже")
-        laterButton.OnEvent("Click", (*) => dlg.Destroy())
+        BindTextButton(laterButton, colorCardAlt, (*) => dlg.Destroy())
         downloadButton := dlg.Add("Text", "x346 y" (dlgHeight - 52) " w136 h30 +0x200 Center Background" colorAccent " c" colorText, "📥 Скачать")
     }
 
-    downloadButton.OnEvent("Click", OpenUpdateDownload.Bind(versionInfo["download"], dlg))
+    BindTextButton(downloadButton, colorAccent, OpenUpdateDownload.Bind(versionInfo["download"], dlg))
     downloadButton.Visible := false
     if IsSet(laterButton)
         laterButton.Visible := false
     dlg.Show("w520 h" dlgHeight)
+    try WinActivate(dlg.Hwnd)
 }
 
 StartManualUpdateFromDialog(dlg, *) {
@@ -2882,7 +3125,7 @@ ManualUpdateChesNova(*) {
 ShowUpdateInstalledDialog() {
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
-    dlg := Gui("+ToolWindow +AlwaysOnTop +Border", "Обновление ChesNova")
+    dlg := Gui("+Border", "Обновление ChesNova")
     dlg.BackColor := colorBg
     dlg.MarginX := 0
     dlg.MarginY := 0
@@ -2894,11 +3137,12 @@ ShowUpdateInstalledDialog() {
     dlg.Add("Text", "x38 y74 w460 h42 Background" colorCard, "Для применения изменений необходимо перезапустить ChesNova.")
     dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
     laterButton := dlg.Add("Text", "x250 y160 w108 h30 +0x200 Center Background" colorCardAlt, "Позже")
-    laterButton.OnEvent("Click", (*) => dlg.Destroy())
+    BindTextButton(laterButton, colorCardAlt, (*) => dlg.Destroy())
     restartButton := dlg.Add("Text", "x370 y160 w172 h30 +0x200 Center Background" colorAccent, "Перезапустить сейчас")
-    restartButton.OnEvent("Click", RestartChesNova.Bind(dlg))
+    BindTextButton(restartButton, colorAccent, RestartChesNova.Bind(dlg))
     dlg.OnEvent("Close", (*) => dlg.Destroy())
     dlg.Show("w560 h208")
+    try WinActivate(dlg.Hwnd)
 }
 
 RestartChesNova(dlg, *) {
@@ -3102,7 +3346,7 @@ OpenNotifications(*) {
     visibleNotifications := GetVisibleNotifications()
     visibleNotificationCount := CountVisibleNotifications()
 
-    NotificationsGui := Gui("+ToolWindow +AlwaysOnTop +Border", "Уведомления")
+    NotificationsGui := Gui("+Border", "Уведомления")
     NotificationsGui.BackColor := colorBg
     NotificationsGui.MarginX := 0
     NotificationsGui.MarginY := 0
@@ -3123,9 +3367,9 @@ OpenNotifications(*) {
     }
 
     clearButton := NotificationsGui.Add("Text", "x270 y478 w126 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
-    clearButton.OnEvent("Click", ClearNotifications)
+    BindTextButton(clearButton, colorCardAlt, ClearNotifications)
     closeButton := NotificationsGui.Add("Text", "x408 y478 w128 h30 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
-    closeButton.OnEvent("Click", (*) => SafeDestroyGui(&NotificationsGui))
+    BindTextButton(closeButton, colorAccent, (*) => SafeDestroyGui(&NotificationsGui))
     NotificationsGui.OnEvent("Close", (*) => SafeDestroyGui(&NotificationsGui))
     NotificationsGui.Show("w560 h530")
 }
@@ -3235,39 +3479,46 @@ ScriptsView() {
 
     view := "Scripts"
     ScriptPackageStatusCtrls := Map()
-    AddViewControl(view, "Text", "x250 y34 w560 h30 Background" colorBg " c" colorText, "Скрипты")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
-    AddViewControl(view, "Text", "x250 y88 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры — автоматический поиск не используется.")
-    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w330 h26 cFFFFFF Background151A22", scriptsGamePath)
-    pathButton := AddViewControl(view, "Text", "x592 y112 w126 h26 +0x200 Center Background" colorCardAlt " c" colorText, "📁 Папка")
-    pathButton.OnEvent("Click", SelectScriptsGamePath)
-    checkButton := AddViewControl(view, "Text", "x726 y112 w124 h26 +0x200 Center Background" colorCardAlt " c" colorText, "🔎 Проверить")
-    checkButton.OnEvent("Click", CheckScriptPackages)
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Скрипты")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
+    AddViewControl(view, "Text", "x250 y84 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры. Автопоиск пути не используется.")
 
+    ; Путь + действия в одну линию (x250..x850)
+    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w340 h28 c" colorText " Background" uiInputBg, scriptsGamePath)
+    pathButton := AddViewControl(view, "Text", "x598 y112 w118 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Папка")
+    BindTextButton(pathButton, colorCardAlt, SelectScriptsGamePath)
+    checkButton := AddViewControl(view, "Text", "x724 y112 w126 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить")
+    BindTextButton(checkButton, colorCardAlt, CheckScriptPackages)
+
+    cardH := 64
+    cardGap := 8
+    startY := 150
     for index, package in GetScriptPackages() {
-        cardY := 154 + ((index - 1) * 250)
-        AddViewControl(view, "Text", "x250 y" cardY " w600 h230 Background" colorCard)
-        AddViewControl(view, "Text", "x250 y" cardY " w4 h230 Background" colorAccent)
-        AddViewControl(view, "Text", "x272 y" (cardY + 18) " w250 h28 Background" colorCard " c" colorText, package["title"])
-        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x532 y" (cardY + 22) " w296 h22 Background" colorCard " c" colorRed, "")
-        AddViewControl(view, "Text", "x272 y" (cardY + 52) " w450 h38 Background" colorCard " c" colorMuted, package["description"])
-        AddViewControl(view, "Text", "x272 y" (cardY + 96) " w170 h18 Background" colorCard " c" colorMuted, "Авторы")
-        AddViewControl(view, "Text", "x272 y" (cardY + 116) " w280 h38 Background" colorCard " c" colorText, package["authors"])
-        AddViewControl(view, "Text", "x570 y" (cardY + 96) " w200 h18 Background" colorCard " c" colorMuted, "Файлы")
+        cardY := startY + ((index - 1) * (cardH + cardGap))
+        ; Карточка
+        AddViewControl(view, "Text", "x250 y" cardY " w600 h" cardH " Background" colorCard)
+        AddViewControl(view, "Text", "x250 y" cardY " w4 h" cardH " Background" colorAccent)
 
-        filesText := ""
-        for _, file in package["files"]
-            filesText .= "✔ " file["name"] "`n"
-        AddViewControl(view, "Text", "x570 y" (cardY + 116) " w180 h64 Background" colorCard " c" colorGreen, RTrim(filesText, "`n"))
+        ; Верхний ряд: название | статус | установить
+        AddViewControl(view, "Text", "x272 y" (cardY + 8) " w200 h20 Background" colorCard " c" colorText, package["displayTitle"])
+        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x480 y" (cardY + 10) " w180 h18 Background" colorCard " c" colorRed, "●")
+        installButton := AddViewControl(view, "Text", "x678 y" (cardY + 6) " w152 h28 +0x200 Center Background" colorAccent " c" colorText, "Установить")
+        BindTextButton(installButton, colorAccent, InstallScriptPackage.Bind(package["id"]))
 
-        topicButton := AddViewControl(view, "Text", "x272 y" (cardY + 190) " w268 h28 +0x200 Center Background" colorCardAlt " c" colorText, "🌐 Официальная тема")
-        topicButton.OnEvent("Click", OpenScriptTopic.Bind(package["topic"]))
-        installButton := AddViewControl(view, "Text", "x550 y" (cardY + 190) " w278 h28 +0x200 Center Background" colorAccent " c" colorText, "📥 Установить")
-        installButton.OnEvent("Click", InstallScriptPackage.Bind(package["id"]))
+        ; Нижний ряд: автор / заметка | ссылка
+        note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
+        if (package["id"] = "onishi")
+            note := "Loader входит в установку"
+        AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
+        AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
+        topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
+        BindTextButton(topicButton, colorCardAlt, OpenScriptTopic.Bind(package["topic"]))
     }
 
     RefreshScriptsView()
 }
+
+
 
 ScriptsViewCompact() {
     global ScriptsGamePathCtrl, ScriptPackageStatusCtrls, scriptsGamePath
@@ -3275,32 +3526,46 @@ ScriptsViewCompact() {
 
     view := "Scripts"
     ScriptPackageStatusCtrls := Map()
-    AddViewControl(view, "Text", "x250 y34 w560 h30 Background" colorBg " c" colorText, "Скрипты")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
-    AddViewControl(view, "Text", "x250 y88 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры — автоматический поиск не используется.")
-    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w330 h26 cFFFFFF Background151A22", scriptsGamePath)
-    pathButton := AddViewControl(view, "Text", "x592 y112 w126 h26 +0x200 Center Background" colorCardAlt " c" colorText, "Папка")
-    pathButton.OnEvent("Click", SelectScriptsGamePath)
-    checkButton := AddViewControl(view, "Text", "x726 y112 w124 h26 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить")
-    checkButton.OnEvent("Click", CheckScriptPackages)
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Скрипты")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
+    AddViewControl(view, "Text", "x250 y84 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры. Автопоиск пути не используется.")
 
+    ; Путь + действия в одну линию (x250..x850)
+    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w340 h28 c" colorText " Background" uiInputBg, scriptsGamePath)
+    pathButton := AddViewControl(view, "Text", "x598 y112 w118 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Папка")
+    BindTextButton(pathButton, colorCardAlt, SelectScriptsGamePath)
+    checkButton := AddViewControl(view, "Text", "x724 y112 w126 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить")
+    BindTextButton(checkButton, colorCardAlt, CheckScriptPackages)
+
+    cardH := 64
+    cardGap := 8
+    startY := 150
     for index, package in GetScriptPackages() {
-        cardY := 154 + ((index - 1) * 118)
-        AddViewControl(view, "Text", "x250 y" cardY " w600 h104 Background" colorCard)
-        AddViewControl(view, "Text", "x250 y" cardY " w4 h104 Background" colorAccent)
-        AddViewControl(view, "Text", "x272 y" (cardY + 14) " w150 h24 Background" colorCard " c" colorText, package["displayTitle"])
-        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x432 y" (cardY + 16) " w160 h20 Background" colorCard " c" colorRed, "●")
-        installButton := AddViewControl(view, "Text", "x660 y" (cardY + 12) " w168 h28 +0x200 Center Background" colorAccent " c" colorText, "Установить")
-        installButton.OnEvent("Click", InstallScriptPackage.Bind(package["id"]))
-        note := (package["id"] = "onishi") ? "Loader входит в установку" : "Отдельный пакет"
-        AddViewControl(view, "Text", "x272 y" (cardY + 42) " w340 h18 Background" colorCard " c" colorMuted, note)
-        AddViewControl(view, "Text", "x272 y" (cardY + 72) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
-        topicButton := AddViewControl(view, "Text", "x590 y" (cardY + 68) " w238 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Прямая ссылка")
-        topicButton.OnEvent("Click", OpenScriptTopic.Bind(package["topic"]))
+        cardY := startY + ((index - 1) * (cardH + cardGap))
+        ; Карточка
+        AddViewControl(view, "Text", "x250 y" cardY " w600 h" cardH " Background" colorCard)
+        AddViewControl(view, "Text", "x250 y" cardY " w4 h" cardH " Background" colorAccent)
+
+        ; Верхний ряд: название | статус | установить
+        AddViewControl(view, "Text", "x272 y" (cardY + 8) " w200 h20 Background" colorCard " c" colorText, package["displayTitle"])
+        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x480 y" (cardY + 10) " w180 h18 Background" colorCard " c" colorRed, "●")
+        installButton := AddViewControl(view, "Text", "x678 y" (cardY + 6) " w152 h28 +0x200 Center Background" colorAccent " c" colorText, "Установить")
+        BindTextButton(installButton, colorAccent, InstallScriptPackage.Bind(package["id"]))
+
+        ; Нижний ряд: автор / заметка | ссылка
+        note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
+        if (package["id"] = "onishi")
+            note := "Loader входит в установку"
+        AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
+        AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
+        topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
+        BindTextButton(topicButton, colorCardAlt, OpenScriptTopic.Bind(package["topic"]))
     }
 
     RefreshScriptsView()
 }
+
+
 
 SelectScriptsGamePath(*) {
     global ScriptsGamePathCtrl, scriptsGamePath, settingsFile
@@ -3372,16 +3637,65 @@ CheckScriptPackages(*) {
     }
 
     RefreshScriptsView()
-    if (missingPackages.Length = 0)
-        ShowAppDialog("Проверка скриптов", "✅ Установлено:" lineBreak JoinArrayRange(installedPackages, 1, installedPackages.Length, lineBreak))
-    else
-        ShowAppDialog("Проверка скриптов", "⚠️ Требуется установка:" lineBreak JoinArrayRange(missingPackages, 1, missingPackages.Length, lineBreak lineBreak))
+    ShowScriptCheckResultDialog(installedPackages, missingPackages)
+}
+
+
+ShowScriptCheckResultDialog(installedPackages, missingPackages) {
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
+
+    lineBreak := Chr(10)
+    hasMissing := missingPackages.Length > 0
+    body := hasMissing
+        ? "Требуется установка:" lineBreak lineBreak JoinArrayRange(missingPackages, 1, missingPackages.Length, lineBreak lineBreak)
+        : "Установлено:" lineBreak lineBreak JoinArrayRange(installedPackages, 1, installedPackages.Length, lineBreak)
+
+    dlg := Gui("+Border", "Проверка скриптов")
+    dlg.BackColor := colorBg
+    dlg.MarginX := 0
+    dlg.MarginY := 0
+    dlg.SetFont("s10 c" colorText, "Segoe UI")
+
+    dlg.Add("Text", "x0 y0 w560 h360 Background" colorBg)
+    dlg.Add("Text", "x18 y18 w524 h278 Background" colorCard)
+    dlg.SetFont("s12 Bold c" (hasMissing ? colorRed : colorGreen), "Segoe UI")
+    dlg.Add("Text", "x38 y34 w460 h26 Background" colorCard, hasMissing ? "⚠️ Требуется установка" : "✅ Все скрипты установлены")
+    dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
+    resultText := dlg.Add("Edit", "x38 y72 w484 h196 ReadOnly -Wrap +VScroll Background" uiInputBg " cFFFFFF", body)
+    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    dlg.Add("Text", "x38 y272 w484 h18 Background" colorCard, "Если список длинный, используйте прокрутку внутри поля.")
+    closeButton := dlg.Add("Text", "x414 y314 w108 h28 +0x200 Center Background" colorAccent " c" colorText, "OK")
+    BindTextButton(closeButton, colorAccent, (*) => dlg.Destroy())
+    dlg.OnEvent("Close", (*) => dlg.Destroy())
+    dlg.Show("w560 h360")
 }
 
 OpenScriptTopic(url, *) {
     try Run(url)
     catch as err
         ShowAppDialog("Скрипты", "Не удалось открыть официальную тему.`n`n" err.Message)
+}
+
+IsGameProcessRunning() {
+    ; Типичные процессы SA-MP / Radmir / GTA SA
+    processNames := [
+        "gta_sa.exe",
+        "gta-sa.exe",
+        "samp.exe",
+        "samp_debug.exe",
+        "proxy_sa.exe",
+        "ragemp_v.exe",
+        "multiplayer_sa.exe"
+    ]
+    for _, name in processNames {
+        if ProcessExist(name)
+            return true
+    }
+    try {
+        if WinExist("ahk_exe gta_sa.exe") || WinExist("ahk_exe gta-sa.exe")
+            return true
+    }
+    return false
 }
 
 InstallScriptPackage(packageId, *) {
@@ -3401,6 +3715,20 @@ InstallScriptPackage(packageId, *) {
     if !DirExist(gamePath) {
         ShowAppDialog("Скрипты", "Указанная папка игры не найдена:`n" gamePath)
         return
+    }
+
+    if IsGameProcessRunning() {
+        result := ShowAppDialog(
+            "Скрипты",
+            "Игра сейчас запущена.`n`nЗакройте GTA / Radmir полностью, затем нажмите OK, чтобы продолжить установку.`nИначе файлы могут быть заняты и установка не завершится.",
+            "OKCancel"
+        )
+        if (result != "OK")
+            return
+        if IsGameProcessRunning() {
+            ShowAppDialog("Скрипты", "Игра всё ещё запущена.`nЗакройте её и повторите установку.")
+            return
+        }
     }
 
     uiResourcesPath := gamePath "\uiresources"
@@ -3437,6 +3765,13 @@ InstallScriptPackage(packageId, *) {
     try {
         for _, downloaded in downloadedFiles {
             destination := gamePath "\" downloaded["file"]["relativePath"]
+            destinationDir := RegExReplace(destination, "\\[^\\]+$")
+            if !DirExist(destinationDir)
+                DirCreate(destinationDir)
+            if (package.Has("skipExisting") && package["skipExisting"] && FileExist(destination)) {
+                try FileDelete(downloaded["temp"])
+                continue
+            }
             FileMove(downloaded["temp"], destination, 1)
         }
     } catch as err {
@@ -3452,12 +3787,14 @@ InstallScriptPackage(packageId, *) {
     RefreshScriptsView()
     if (package["activationCommands"] != "")
         ShowScriptInstallComplete(package)
+    else
+        ShowToast("✓ Пакет установлен")
 }
 
 ShowScriptInstallComplete(package) {
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
-    dlg := Gui("+ToolWindow +AlwaysOnTop +Border", "Скрипты")
+    dlg := Gui("+Border", "Скрипты — установка")
     dlg.BackColor := colorBg
     dlg.MarginX := 0
     dlg.MarginY := 0
@@ -3468,18 +3805,19 @@ ShowScriptInstallComplete(package) {
     dlg.Add("Text", "x38 y34 w360 h26 Background" colorCard, "✅ Установка завершена.")
     dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
     dlg.Add("Text", "x38 y72 w380 h40 Background" colorCard, "Для активации скрипта зайдите в игру и выполните команды:")
-    commandsCtrl := dlg.Add("Edit", "x38 y120 w380 h50 ReadOnly -Wrap Background151A22 cFFFFFF", package["activationCommands"])
+    commandsCtrl := dlg.Add("Edit", "x38 y120 w380 h50 ReadOnly -Wrap Background" uiInputBg " cFFFFFF", package["activationCommands"])
     copyButton := dlg.Add("Text", "x38 y212 w190 h30 +0x200 Center Background" colorAccent " c" colorText, "📋 Скопировать команды")
-    copyButton.OnEvent("Click", (*) => CopyScriptCommands(package["activationCommands"]))
+    BindTextButton(copyButton, colorAccent, (*) => CopyScriptCommands(package["activationCommands"]))
     closeButton := dlg.Add("Text", "x310 y212 w108 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Закрыть")
-    closeButton.OnEvent("Click", (*) => dlg.Destroy())
+    BindTextButton(closeButton, colorCardAlt, (*) => dlg.Destroy())
     dlg.OnEvent("Close", (*) => dlg.Destroy())
     dlg.Show("w470 h262")
+    try WinActivate(dlg.Hwnd)
 }
 
 CopyScriptCommands(commands, *) {
     A_Clipboard := commands
-    ShowAppDialog("Скрипты", "Команды скопированы в буфер обмена.")
+    ShowToast("✓ Команды скопированы")
 }
 
 DashboardView() {
@@ -3491,7 +3829,7 @@ DashboardView() {
 
     ; Заголовок
     AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Главная")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
     ; Профиль без аватара
     AddViewControl(view, "Text", "x250 y94 w600 h98 Background" colorCard)
@@ -3525,7 +3863,7 @@ DashboardView() {
 
     ; Быстрый переход по центру снизу
     openSettingsBtn := AddViewControl(view, "Text", "x405 y492 w290 h34 +0x200 Center Background" colorAccent " c" colorText, "⚙  Открыть настройки")
-    openSettingsBtn.OnEvent("Click", (*) => ShowView("Settings"))
+    BindTextButton(openSettingsBtn, colorAccent, (*) => ShowView("Settings"))
 }
 
 RefreshDashboardView() {
@@ -3578,16 +3916,17 @@ RefreshDashboardView() {
 
 PMLogsView() {
     global PMLogsSearchCtrl, PmLogsTextCtrl
-    global colorBg, colorCard, colorText, colorMuted
+    global colorBg, colorCard, colorCardAlt, colorText, colorMuted
 
     view := "PMLogs"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "PM Логи")
-    AddViewControl(view, "Text", "x250 y84 w220 h22 Background" colorBg " c" colorMuted, "Поиск по нику или тексту")
-    PMLogsSearchCtrl := AddViewControl(view, "Edit", "x250 y112 w470 h24 c000000 BackgroundEDEDED", "")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "PM Логи")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
+    AddViewControl(view, "Text", "x250 y84 w300 h20 Background" colorBg " c" colorMuted, "Поиск по нику или тексту")
+    PMLogsSearchCtrl := AddViewControl(view, "Edit", "x250 y112 w470 h28 c" colorText " Background" uiInputBg, "")
     PMLogsSearchCtrl.OnEvent("Change", PMLogsSearchChanged)
-    clearButton := AddViewControl(view, "Button", "x735 y112 w115 h28", "Очистить")
-    clearButton.OnEvent("Click", ClearPMLogs)
-    PmLogsTextCtrl := AddViewControl(view, "Edit", "vPmLogsText x250 y154 w600 h330 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildPmLogsText())
+    clearButton := AddViewControl(view, "Text", "x732 y112 w118 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
+    BindTextButton(clearButton, colorCardAlt, ClearPMLogs)
+    PmLogsTextCtrl := AddViewControl(view, "Edit", "vPmLogsText x250 y152 w600 h350 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildPmLogsText())
 }
 
 PMLogsSearchChanged(*) {
@@ -3600,49 +3939,57 @@ PMLogsSearchChanged(*) {
 PunishmentsView() {
     global selectedPunishmentDays, selectedPunishmentType, punishmentSearch
     global PunishmentTypeTitleCtrl, PunishmentSearchCtrl, PunishmentDetailsCtrl, PunishmentButtonCtrls
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "Punishments"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background0E1116 cFFFFFF", "Наказания")
-    AddViewControl(view, "Text", "x250 y88 w105 Background0E1116 c7aa2ff", "Тип")
-    AddViewControl(view, "Text", "x380 y88 w220 Background0E1116 c7aa2ff", "Период")
-    AddViewControl(view, "Text", "x610 y88 w210 Background0E1116 c7aa2ff", "Поиск")
-    PunishmentTypeTitleCtrl := AddViewControl(view, "Text", "vPunishmentTypeTitle x380 y174 w470 Background0E1116 cFFFFFF", "Выберите тип наказания")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Наказания")
+    AddViewControl(view, "Text", "x250 y84 w110 h20 Background" colorBg " c" colorMuted, "Тип")
+    AddViewControl(view, "Text", "x380 y84 w220 h20 Background" colorBg " c" colorMuted, "Период")
+    AddViewControl(view, "Text", "x610 y84 w240 h20 Background" colorBg " c" colorMuted, "Поиск")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
+    global PunishmentPeriodButtonCtrls
     PunishmentButtonCtrls := Map()
-    PunishmentButtonCtrls["kick"] := AddViewControl(view, "Button", "vPunishmentBtnKick x250 y120 w110 h26", "kick (0)")
-    PunishmentButtonCtrls["kick"].OnEvent("Click", ShowPunishmentKick)
-    PunishmentButtonCtrls["jail"] := AddViewControl(view, "Button", "vPunishmentBtnJail x250 y152 w110 h26", "jail (0)")
-    PunishmentButtonCtrls["jail"].OnEvent("Click", ShowPunishmentJail)
-    PunishmentButtonCtrls["warn"] := AddViewControl(view, "Button", "vPunishmentBtnWarn x250 y184 w110 h26", "warn (0)")
-    PunishmentButtonCtrls["warn"].OnEvent("Click", ShowPunishmentWarn)
-    PunishmentButtonCtrls["mute"] := AddViewControl(view, "Button", "vPunishmentBtnMute x250 y216 w110 h26", "mute (0)")
-    PunishmentButtonCtrls["mute"].OnEvent("Click", ShowPunishmentMute)
-    PunishmentButtonCtrls["vmute"] := AddViewControl(view, "Button", "vPunishmentBtnVmute x250 y248 w110 h26", "vmute (0)")
-    PunishmentButtonCtrls["vmute"].OnEvent("Click", ShowPunishmentVmute)
-    PunishmentButtonCtrls["rmute"] := AddViewControl(view, "Button", "vPunishmentBtnRmute x250 y280 w110 h26", "rmute (0)")
-    PunishmentButtonCtrls["rmute"].OnEvent("Click", ShowPunishmentRmute)
-    PunishmentButtonCtrls["gunban"] := AddViewControl(view, "Button", "vPunishmentBtnGunban x250 y312 w110 h26", "gunban (0)")
-    PunishmentButtonCtrls["gunban"].OnEvent("Click", ShowPunishmentGunban)
-    PunishmentButtonCtrls["ban"] := AddViewControl(view, "Button", "vPunishmentBtnBan x250 y344 w110 h26", "ban (0)")
-    PunishmentButtonCtrls["ban"].OnEvent("Click", ShowPunishmentBan)
-    PunishmentButtonCtrls["sban"] := AddViewControl(view, "Button", "vPunishmentBtnSban x250 y376 w110 h26", "sban (0)")
-    PunishmentButtonCtrls["sban"].OnEvent("Click", ShowPunishmentSban)
-    PunishmentButtonCtrls["all"] := AddViewControl(view, "Button", "vPunishmentBtnAll x250 y408 w110 h26", "Все (0)")
-    PunishmentButtonCtrls["all"].OnEvent("Click", ShowPunishmentAll)
+    PunishmentPeriodButtonCtrls := Map()
+    typeY := 112
+    for typeName, handler in Map(
+        "kick", ShowPunishmentKick,
+        "jail", ShowPunishmentJail,
+        "warn", ShowPunishmentWarn,
+        "mute", ShowPunishmentMute,
+        "vmute", ShowPunishmentVmute,
+        "rmute", ShowPunishmentRmute,
+        "gunban", ShowPunishmentGunban,
+        "ban", ShowPunishmentBan,
+        "sban", ShowPunishmentSban,
+        "all", ShowPunishmentAll
+    ) {
+        label := (typeName = "all") ? "Все (0)" : (typeName " (0)")
+        btn := AddViewControl(view, "Text", "x250 y" typeY " w110 h28 +0x200 Center Background" colorCardAlt " c" colorText, label)
+        btn.OnEvent("Click", handler)
+        PunishmentButtonCtrls[typeName] := btn
+        typeY += 32
+    }
 
-    todayButton := AddViewControl(view, "Button", "x380 y120 w70 h24", "Сегодня")
+    todayButton := AddViewControl(view, "Text", "x380 y112 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сегодня")
     todayButton.OnEvent("Click", SetPunishmentToday)
-    threeDaysButton := AddViewControl(view, "Button", "x455 y120 w70 h24", "3 дня")
+    threeDaysButton := AddViewControl(view, "Text", "x456 y112 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "3 дня")
     threeDaysButton.OnEvent("Click", SetPunishment3Days)
-    tenDaysButton := AddViewControl(view, "Button", "x530 y120 w70 h24", "10 дней")
+    tenDaysButton := AddViewControl(view, "Text", "x532 y112 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "10 дней")
     tenDaysButton.OnEvent("Click", SetPunishment10Days)
-    allTimeButton := AddViewControl(view, "Button", "x380 y150 w145 h24", "За всё время")
+    allTimeButton := AddViewControl(view, "Text", "x380 y148 w146 h28 +0x200 Center Background" colorCardAlt " c" colorText, "За всё время")
     allTimeButton.OnEvent("Click", SetPunishmentAllTime)
-    clearButton := AddViewControl(view, "Button", "x530 y150 w70 h24", "Очистить")
-    clearButton.OnEvent("Click", ClearPunishments)
-    PunishmentSearchCtrl := AddViewControl(view, "Edit", "vPunishmentSearch x610 y120 w240 h24 c000000 BackgroundEDEDED", punishmentSearch)
+    PunishmentPeriodButtonCtrls[1] := todayButton
+    PunishmentPeriodButtonCtrls[3] := threeDaysButton
+    PunishmentPeriodButtonCtrls[10] := tenDaysButton
+    PunishmentPeriodButtonCtrls[0] := allTimeButton
+    clearButton := AddViewControl(view, "Text", "x532 y148 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
+    BindTextButton(clearButton, colorCardAlt, ClearPunishments)
+    PunishmentSearchCtrl := AddViewControl(view, "Edit", "vPunishmentSearch x610 y112 w240 h28 c" colorText " Background" uiInputBg, punishmentSearch)
     PunishmentSearchCtrl.OnEvent("Change", RefreshPunishmentView)
-    PunishmentDetailsCtrl := AddViewControl(view, "Edit", "vPunishmentDetails x380 y208 w470 h270 ReadOnly -Wrap +WantReturn +VScroll Background20242b cFFFFFF", "Выберите тип наказания слева")
+
+    PunishmentTypeTitleCtrl := AddViewControl(view, "Text", "vPunishmentTypeTitle x380 y188 w470 h22 Background" colorBg " c" colorText, "Выберите тип наказания")
+    PunishmentDetailsCtrl := AddViewControl(view, "Edit", "vPunishmentDetails x380 y218 w470 h288 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, "Выберите тип наказания слева")
 
     UpdatePunishmentTypeButtons(selectedPunishmentDays, punishmentSearch)
     ShowPunishmentType(selectedPunishmentType)
@@ -3650,20 +3997,50 @@ PunishmentsView() {
 
 NormHistoryView() {
     global NormHistoryListCtrl
-    global colorBg, colorCard, colorText, colorMuted
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "NormHistory"
-    AddViewControl(view, "Text", "x250 y34 w360 h34 Background" colorBg " c" colorText, "История нормы")
-    AddViewControl(view, "Text", "x250 y84 w320 h22 Background" colorBg " c" colorMuted, "Новые записи отображаются сверху")
-    editButton := AddViewControl(view, "Button", "x590 y80 w130 h28", "Редактировать")
-    editButton.OnEvent("Click", OpenNormHistoryEdit)
-    clearButton := AddViewControl(view, "Button", "x735 y80 w115 h28", "Очистить")
-    clearButton.OnEvent("Click", ClearNormHistory)
-    NormHistoryListCtrl := AddViewControl(view, "ListView", "x250 y120 w600 h360 Background" colorCard " c" colorText, ["Дата", "PM", "Норма", "Статус"])
+    AddViewControl(view, "Text", "x250 y34 w360 h28 Background" colorBg " c" colorText, "История нормы")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
+    AddViewControl(view, "Text", "x250 y80 w300 h18 Background" colorBg " c" colorMuted, "Новые записи сверху")
+    editButton := AddViewControl(view, "Text", "x580 y78 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Редактировать")
+    BindTextButton(editButton, colorCardAlt, OpenNormHistoryEdit)
+    clearButton := AddViewControl(view, "Text", "x720 y78 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
+    BindTextButton(clearButton, colorCardAlt, ClearNormHistory)
+
+    NormHistoryListCtrl := AddViewControl(view, "ListView", "x250 y116 w600 h400 Background" colorCard " c" colorText, ["Дата", "PM", "Норма", "Статус"])
     NormHistoryListCtrl.ModifyCol(1, 150)
     NormHistoryListCtrl.ModifyCol(2, 90)
     NormHistoryListCtrl.ModifyCol(3, 90)
     NormHistoryListCtrl.ModifyCol(4, 190)
+}
+
+RefreshNormDaysOffInfo(*) {
+    global NormMonthComboCtrl, NormYearEditCtrl, NormDaysOffInfoCtrl
+
+    if !IsObject(NormDaysOffInfoCtrl)
+        return
+
+    monthText := IsObject(NormMonthComboCtrl) ? NormMonthComboCtrl.Text : FormatTime(A_Now, "MM")
+    yearText := IsObject(NormYearEditCtrl) ? Trim(NormYearEditCtrl.Value) : FormatTime(A_Now, "yyyy")
+
+    monthNum := ""
+    if RegExMatch(monthText, "^(\d{2})", &m)
+        monthNum := m[1]
+    else
+        monthNum := FormatTime(A_Now, "MM")
+
+    if !RegExMatch(yearText, "^\d{4}$")
+        yearText := FormatTime(A_Now, "yyyy")
+
+    count := CountDaysOffInMonth(yearText, monthNum)
+    monthLabel := monthText
+    if (InStr(monthText, "—"))
+        monthLabel := Trim(SubStr(monthText, InStr(monthText, "—") + 1))
+    else
+        monthLabel := monthNum
+
+    NormDaysOffInfoCtrl.Text := "Отгулов за " monthLabel " " yearText ":  " count
 }
 
 FillNormHistoryList() {
@@ -3715,7 +4092,7 @@ OpenNormHistoryEdit(*) {
     NormHistoryEditOriginalDate := recordDate
 
     SafeDestroyGui(&NormHistoryEditGui)
-    NormHistoryEditGui := Gui("+ToolWindow +Border", "Редактирование истории нормы")
+    NormHistoryEditGui := Gui("+Border", "Редактирование истории нормы")
     NormHistoryEditGui.OnEvent("Close", CancelNormHistoryEdit)
     NormHistoryEditGui.BackColor := colorBg
     NormHistoryEditGui.MarginX := 0
@@ -3728,15 +4105,16 @@ OpenNormHistoryEdit(*) {
     NormHistoryEditGui.Add("Text", "x34 y30 w270 h24 Background" colorCard, "Редактирование нормы")
     NormHistoryEditGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
     NormHistoryEditGui.Add("Text", "x34 y66 w80 h20 Background" colorCard, "Дата")
-    NormHistoryEditDateCtrl := NormHistoryEditGui.Add("Edit", "x130 y62 w178 h24 cFFFFFF Background151A22", recordDate)
+    NormHistoryEditDateCtrl := NormHistoryEditGui.Add("Edit", "x130 y62 w178 h24 cFFFFFF Background" uiInputBg, recordDate)
     NormHistoryEditGui.Add("Text", "x34 y100 w80 h20 Background" colorCard, "PM")
-    NormHistoryEditPmCtrl := NormHistoryEditGui.Add("Edit", "x130 y96 w178 h24 Number cFFFFFF Background151A22", recordPm)
+    NormHistoryEditPmCtrl := NormHistoryEditGui.Add("Edit", "x130 y96 w178 h24 Number cFFFFFF Background" uiInputBg, recordPm)
     NormHistoryEditGui.Add("Text", "x34 y134 w80 h20 Background" colorCard, "Норма")
-    NormHistoryEditNormCtrl := NormHistoryEditGui.Add("Edit", "x130 y130 w178 h24 Number cFFFFFF Background151A22", recordNorm)
+    NormHistoryEditNormCtrl := NormHistoryEditGui.Add("Edit", "x130 y130 w178 h24 Number cFFFFFF Background" uiInputBg, recordNorm)
 
     AddMiniWindowButton(NormHistoryEditGui, 110, 190, 104, 30, "Отмена", colorCardAlt, CancelNormHistoryEdit)
     AddMiniWindowButton(NormHistoryEditGui, 226, 190, 116, 30, "Сохранить", colorAccent, SaveNormHistoryEdit)
     NormHistoryEditGui.Show("w360 h244")
+    try WinActivate(NormHistoryEditGui.Hwnd)
 }
 
 SaveNormHistoryEdit(*) {
@@ -3791,6 +4169,7 @@ SaveNormHistoryEdit(*) {
         return
     SafeDestroyGui(&NormHistoryEditGui)
     FillNormHistoryList()
+    ShowToast("✓ Запись нормы сохранена")
 }
 
 CancelNormHistoryEdit(*) {
@@ -3854,21 +4233,49 @@ BuildNormHistoryLines(records) {
 }
 
 DaysOffView() {
-    global DaysOffDateCtrl, DaysOffListCtrl
-    global colorBg, colorCard, colorText, colorMuted
+    global DaysOffDateCtrl, DaysOffForumCtrl, DaysOffForumStatusCtrl, DaysOffListCtrl
+    global NormMonthComboCtrl, NormYearEditCtrl, NormDaysOffInfoCtrl
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
 
     view := "DaysOff"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "Отгулы")
-    AddViewControl(view, "Text", "x250 y84 w220 h22 Background" colorBg " c" colorMuted, "Дата отгула")
-    DaysOffDateCtrl := AddViewControl(view, "Edit", "vDaysOffDate x250 y112 w160 h26 c000000 BackgroundEDEDED", FormatTime(A_Now, "yyyy-MM-dd"))
-    addButton := AddViewControl(view, "Button", "x425 y112 w115 h28", "Добавить")
-    addButton.OnEvent("Click", AddDayOff)
-    AddViewControl(view, "Text", "x250 y144 w220 h20 Background" colorBg " c" colorMuted, "Формат даты: yyyy-MM-dd")
-    deleteButton := AddViewControl(view, "Button", "x690 y112 w160 h28", "Удалить выбранный")
-    deleteButton.OnEvent("Click", DeleteSelectedDayOff)
-    AddViewControl(view, "Text", "x250 y176 w560 h22 Background" colorBg " c" colorMuted, "Все добавленные отгулы")
-    DaysOffListCtrl := AddViewControl(view, "ListView", "x250 y206 w600 h278 Background" colorCard " c" colorText, ["Дата"])
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Отгулы")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
+    AddViewControl(view, "Text", "x250 y84 w220 h20 Background" colorBg " c" colorMuted, "Дата отгула")
+    DaysOffDateCtrl := AddViewControl(view, "Edit", "vDaysOffDate x250 y112 w160 h28 c" colorText " Background" uiInputBg, FormatTime(A_Now, "yyyy-MM-dd"))
+    DaysOffForumCtrl := AddViewControl(view, "Checkbox", "x426 y118 w18 h18 Background" colorBg)
+    DaysOffForumCtrl.OnEvent("Click", UpdateDayOffForumStatus)
+    DaysOffForumStatusCtrl := AddViewControl(view, "Text", "x452 y116 w120 h22 Background" colorBg " c" colorRed, "Не залито")
+    addButton := AddViewControl(view, "Text", "x580 y112 w110 h28 +0x200 Center Background" colorAccent " c" colorText, "Добавить")
+    BindTextButton(addButton, colorAccent, AddDayOff)
+    deleteButton := AddViewControl(view, "Text", "x700 y112 w150 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удалить")
+    BindTextButton(deleteButton, colorCardAlt, DeleteSelectedDayOff)
+    AddViewControl(view, "Text", "x250 y148 w300 h18 Background" colorBg " c" colorMuted, "Формат: yyyy-MM-dd")
+    AddViewControl(view, "Text", "x250 y176 w260 h20 Background" colorBg " c" colorMuted, "Все добавленные отгулы")
+    uploadedButton := AddViewControl(view, "Text", "x540 y172 w140 h28 +0x200 Center Background" colorGreen " c" colorText, "Залито")
+    BindTextButton(uploadedButton, colorGreen, SetSelectedDayOffForumStatus.Bind(1))
+    notUploadedButton := AddViewControl(view, "Text", "x690 y172 w160 h28 +0x200 Center Background" colorRed " c" colorText, "Не залито")
+    BindTextButton(notUploadedButton, colorRed, SetSelectedDayOffForumStatus.Bind(0))
+    DaysOffListCtrl := AddViewControl(view, "ListView", "x250 y210 w600 h200 Background" colorCard " c" colorText, ["Дата", "Форум"])
     DaysOffListCtrl.ModifyCol(1, 180)
+    DaysOffListCtrl.ModifyCol(2, 130)
+    DaysOffListCtrl.OnEvent("DoubleClick", ToggleSelectedDayOffForumStatus)
+
+    ; Инфо-табло: отгулы за выбранный месяц/год
+    AddViewControl(view, "Text", "x250 y428 w600 h112 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y440 w360 h22 Background" colorCard " c" colorText, "Сколько отгулов за период")
+    AddViewControl(view, "Text", "x270 y470 w60 h20 Background" colorCard " c" colorMuted, "Месяц")
+    monthNames := ["01 — Январь", "02 — Февраль", "03 — Март", "04 — Апрель", "05 — Май", "06 — Июнь", "07 — Июль", "08 — Август", "09 — Сентябрь", "10 — Октябрь", "11 — Ноябрь", "12 — Декабрь"]
+    NormMonthComboCtrl := AddViewControl(view, "ComboBox", "x330 y466 w180 h200", monthNames)
+    currentMonthIdx := Integer(FormatTime(A_Now, "MM"))
+    if (currentMonthIdx >= 1 && currentMonthIdx <= 12)
+        NormMonthComboCtrl.Choose(currentMonthIdx)
+    AddViewControl(view, "Text", "x530 y470 w40 h20 Background" colorCard " c" colorMuted, "Год")
+    NormYearEditCtrl := AddViewControl(view, "Edit", "x575 y466 w70 h28 Number c" colorText " Background" uiInputBg, FormatTime(A_Now, "yyyy"))
+    showButton := AddViewControl(view, "Text", "x660 y466 w170 h28 +0x200 Center Background" colorAccent " c" colorText, "Показать")
+    BindTextButton(showButton, colorAccent, RefreshNormDaysOffInfo)
+    NormDaysOffInfoCtrl := AddViewControl(view, "Text", "x270 y508 w560 h24 Background" colorCard " c" colorAccent " +0x200", "")
+    UpdateDayOffForumStatus()
+    RefreshNormDaysOffInfo()
 }
 
 BindsView() {
@@ -3877,14 +4284,14 @@ BindsView() {
 
     view := "Binds"
     AddViewControl(view, "Text", "x250 y34 w360 h28 Background" colorBg " c" colorText, "Бинды")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
     AddViewControl(view, "Text", "x250 y94 w600 h116 Background" colorCard)
     BindsEnabledCtrl := AddViewControl(view, "Checkbox", "x270 y112 w160 h24 Checked" bindsEnabled " c" colorText " Background" colorCard, "Бинды включены")
     BindsEnabledCtrl.OnEvent("Click", ToggleAllBindsEnabled)
 
     AddViewControl(view, "Text", "x270 y146 w80 h20 Background" colorCard " c" colorMuted, "Поиск")
-    BindsSearchCtrl := AddViewControl(view, "Edit", "x270 y170 w230 h26 cFFFFFF Background151A22", "")
+    BindsSearchCtrl := AddViewControl(view, "Edit", "x270 y170 w230 h28 c" colorText " Background" uiInputBg, "")
     BindsSearchCtrl.OnEvent("Change", RefreshBindsList)
     AddViewControl(view, "Text", "x520 y146 w150 h20 Background" colorCard " c" colorMuted, "Фильтр категории")
     BindsCategoryCtrl := AddViewControl(view, "ComboBox", "x520 y170 w180 h120", GetBindCategories(true))
@@ -3892,24 +4299,26 @@ BindsView() {
     BindsCategoryCtrl.OnEvent("Change", RefreshBindsList)
     BindsCategoryStatusCtrl := AddViewControl(view, "Text", "x710 y173 w120 h20 Background" colorCard " c" colorMuted, "Выберите фильтр")
 
-    addCategoryButton := AddViewControl(view, "Text", "x250 y222 w190 h28 +0x200 Center Background" colorAccent " c" colorText, "Добавить катег.")
-    addCategoryButton.OnEvent("Click", AddBindCategory)
-    deleteCategoryButton := AddViewControl(view, "Text", "x455 y222 w190 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удалить катег.")
-    deleteCategoryButton.OnEvent("Click", DeleteSelectedBindCategory)
-    toggleCategoryButton := AddViewControl(view, "Text", "x660 y222 w190 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл катег.")
-    toggleCategoryButton.OnEvent("Click", ToggleSelectedBindCategory)
+    addCategoryButton := AddViewControl(view, "Text", "x250 y222 w141 h28 +0x200 Center Background" colorAccent " c" colorText, "Доб. катег.")
+    BindTextButton(addCategoryButton, colorAccent, AddBindCategory)
+    deleteCategoryButton := AddViewControl(view, "Text", "x403 y222 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удал. катег.")
+    BindTextButton(deleteCategoryButton, colorCardAlt, DeleteSelectedBindCategory)
+    toggleCategoryButton := AddViewControl(view, "Text", "x556 y222 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл кат.")
+    BindTextButton(toggleCategoryButton, colorCardAlt, ToggleSelectedBindCategory)
+    importButton := AddViewControl(view, "Text", "x709 y222 w141 h28 +0x200 Center Background" colorAccent " c" colorText, "Импорт")
+    BindTextButton(importButton, colorAccent, ImportBindsFromFile)
 
     addButton := AddViewControl(view, "Text", "x250 y270 w141 h28 +0x200 Center Background" colorAccent " c" colorText, "Добавить бинд")
-    addButton.OnEvent("Click", AddBind)
+    BindTextButton(addButton, colorAccent, AddBind)
     editButton := AddViewControl(view, "Text", "x403 y270 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Редактировать")
-    editButton.OnEvent("Click", EditSelectedBind)
+    BindTextButton(editButton, colorCardAlt, EditSelectedBind)
     deleteButton := AddViewControl(view, "Text", "x556 y270 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удалить")
-    deleteButton.OnEvent("Click", DeleteSelectedBind)
+    BindTextButton(deleteButton, colorCardAlt, DeleteSelectedBind)
     toggleButton := AddViewControl(view, "Text", "x709 y270 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл")
-    toggleButton.OnEvent("Click", ToggleSelectedBind)
+    BindTextButton(toggleButton, colorCardAlt, ToggleSelectedBind)
 
     ; 6-я колонка скрытая: там хранится trigger, потому что ID больше не используется.
-    BindsListCtrl := AddViewControl(view, "ListView", "x250 y316 w600 h168 Background" colorCard " c" colorText, ["Тип", "Категория", "Название", "Триггер", "Статус", "Ключ"])
+    BindsListCtrl := AddViewControl(view, "ListView", "x250 y316 w600 h200 Background" colorCard " c" colorText, ["Тип", "Категория", "Название", "Триггер", "Статус", "Ключ"])
     BindsListCtrl.ModifyCol(1, 80)
     BindsListCtrl.ModifyCol(2, 135)
     BindsListCtrl.ModifyCol(3, 170)
@@ -3951,6 +4360,112 @@ AddBindCategory(*) {
 
     RefreshBindCategoryFilter(category)
     RefreshBindsList()
+}
+
+; Импорт биндов из CSV того же формата, что пишет ChesNova:
+; type|category|name|trigger|content|enabled
+; Категория берётся из имени файла; файл копируется в data\binds\imports\.
+ImportBindsFromFile(*) {
+    global bindsDir
+
+    selectedPath := FileSelect(1, bindsDir, "Импорт биндов", "Бинды CSV (*.csv)")
+    if (selectedPath = "")
+        return
+
+    SplitPath(selectedPath, &fileName, &sourceDir, &ext, &nameNoExt)
+    categoryName := Trim(nameNoExt)
+
+    if (categoryName = "") {
+        ShowAppDialog("Импорт биндов", "Не удалось определить имя категории из файла.")
+        return
+    }
+    if (categoryName = "Все") {
+        ShowAppDialog("Импорт биндов", "Нельзя импортировать в системную категорию " Chr(34) "Все" Chr(34) ". Переименуйте файл.")
+        return
+    }
+
+    importedBinds := ReadBindsFromFile(selectedPath, "ImportBindsFromFile")
+    if (importedBinds.Length = 0) {
+        ShowAppDialog("Импорт биндов", "В файле нет распознанных биндов.`n`nОжидается формат:`ntype|category|name|trigger|content|enabled")
+        return
+    }
+
+    categoryCreated := false
+    if !BindCategoryExists(categoryName) {
+        if !AddBindCategoryByName(categoryName)
+            return
+        categoryCreated := true
+    }
+
+    existingBinds := ReadBinds()
+    existingTriggers := Map()
+    for _, bind in existingBinds {
+        trigger := Trim(bind["trigger"])
+        if (trigger != "")
+            existingTriggers[trigger] := true
+    }
+
+    addedCount := 0
+    skippedCount := 0
+    for _, bind in importedBinds {
+        trigger := Trim(bind["trigger"])
+        if (trigger = "") {
+            skippedCount += 1
+            continue
+        }
+        if existingTriggers.Has(trigger) {
+            skippedCount += 1
+            continue
+        }
+
+        bind["category"] := categoryName
+        bind["type"] := NormalizeBindType(bind["type"])
+        bind["name"] := Trim(bind["name"])
+        bind["trigger"] := trigger
+        bind["content"] := bind["content"]
+        bind["enabled"] := (bind["enabled"] + 0) ? 1 : 0
+        if (bind["name"] = "")
+            bind["name"] := trigger
+
+        existingBinds.Push(bind)
+        existingTriggers[trigger] := true
+        addedCount += 1
+    }
+
+    if (addedCount = 0) {
+        ShowAppDialog("Импорт биндов", "Новых биндов нет.`nВсе триггеры из файла уже существуют или строки пустые.`nПропущено: " skippedCount)
+        return
+    }
+
+    if !WriteBinds(existingBinds) {
+        ShowAppDialog("Импорт биндов", "Не удалось сохранить импортированные бинды.")
+        return
+    }
+
+    ; Копия исходника в папку imports (не move — оригинал у автора сохраняется)
+    try {
+        importsDir := bindsDir "\imports"
+        DirCreate(importsDir)
+        destPath := importsDir "\" fileName
+        if (StrLower(selectedPath) != StrLower(destPath))
+            FileCopy(selectedPath, destPath, 1)
+    } catch as err {
+        LogError("ImportBindsFromFile", "Не удалось скопировать файл в imports", err.Message)
+    }
+
+    RegisterCustomBinds()
+    RefreshBindCategoryFilter(categoryName)
+
+    message := "Категория: " categoryName
+    if categoryCreated
+        message .= " (создана)"
+    message .= "`nДобавлено биндов: " addedCount
+    if (skippedCount > 0)
+        message .= "`nПропущено (дубли/пустые): " skippedCount
+    message .= "`nКопия файла: data\binds\imports\"
+
+    ShowAppDialog("Импорт биндов", message)
+    ShowToast("✓ Импорт: +" addedCount " в «" categoryName "»")
 }
 
 GetSelectedBindCategory() {
@@ -4101,12 +4616,12 @@ OpenBindEditor(originalTrigger := "") {
     BindEditEnabledCtrl := BindEditGui.Add("Checkbox", "x424 y100 w140 Checked" enabled " c" colorText " Background" colorCard, "Включён")
 
     BindEditGui.Add("Text", "x34 y142 w120 h20 Background" colorCard, "Название")
-    BindEditNameCtrl := BindEditGui.Add("Edit", "x34 y166 w270 h26 cFFFFFF Background151A22", bindName)
+    BindEditNameCtrl := BindEditGui.Add("Edit", "x34 y166 w270 h26 c" colorText " Background" uiInputBg, bindName)
     BindEditGui.Add("Text", "x324 y142 w120 h20 Background" colorCard, "Триггер")
-    BindEditTriggerCtrl := BindEditGui.Add("Edit", "x324 y166 w262 h26 cFFFFFF Background151A22", trigger)
+    BindEditTriggerCtrl := BindEditGui.Add("Edit", "x324 y166 w262 h26 c" colorText " Background" uiInputBg, trigger)
 
     BindEditGui.Add("Text", "x34 y212 w180 h20 Background" colorCard, "Содержимое бинда")
-    BindEditContentCtrl := BindEditGui.Add("Edit", "x34 y238 w552 h150 cFFFFFF Background151A22 +WantReturn +VScroll", content)
+    BindEditContentCtrl := BindEditGui.Add("Edit", "x34 y238 w552 h150 c" colorText " Background" uiInputBg " +WantReturn +VScroll", content)
 
     AddMiniWindowButton(BindEditGui, 390, 440, 104, 30, "Отмена", colorCardAlt, CancelBindEdit)
     AddMiniWindowButton(BindEditGui, 506, 440, 116, 30, "Сохранить", colorAccent, SaveBindEdit)
@@ -4226,6 +4741,7 @@ SaveBindEdit(*) {
     RegisterCustomBinds()
     RefreshBindsList()
     SafeDestroyGui(&BindEditGui)
+    ShowToast("✓ Бинд сохранён")
 }
 
 HideBindEdit(*) {
@@ -4246,36 +4762,36 @@ SettingsView() {
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "Settings"
-    AddViewControl(view, "Text", "x250 y34 w560 h30 Background" colorBg " c" colorText, "Настройки")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Настройки")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
     ; Левая колонка: профиль и горячие клавиши.
     AddViewControl(view, "Text", "x250 y88 w280 h102 Background" colorCard)
     AddViewControl(view, "Text", "x270 y104 w220 h22 Background" colorCard " c" colorText, "Пользователь")
     AddViewControl(view, "Text", "x270 y136 w110 h22 Background" colorCard " c" colorMuted, "Ник")
-    SetNickCtrl := AddViewControl(view, "Edit", "vSetNick x390 y132 w120 h26 c" colorText " Background151A22", nick)
+    SetNickCtrl := AddViewControl(view, "Edit", "vSetNick x390 y132 w120 h26 c" colorText " Background" uiInputBg, nick)
     AddViewControl(view, "Text", "x270 y166 w110 h22 Background" colorCard " c" colorMuted, "Норма PM")
-    SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background151A22", norm)
+    SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background" uiInputBg, norm)
 
     AddViewControl(view, "Text", "x250 y206 w280 h204 Background" colorCard)
     AddViewControl(view, "Text", "x270 y222 w220 h22 Background" colorCard " c" colorText, "Горячие клавиши")
     AddViewControl(view, "Text", "x270 y258 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
     AddViewControl(view, "Text", "x494 y230 w28 h18 Background" colorCard " c" colorMuted, "Вкл.")
-    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y254 w98 h26 c" colorText " Background151A22", menuKey)
+    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y254 w98 h26 c" colorText " Background" uiInputBg, menuKey)
     SetMenuKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetMenuKeyEnabled x496 y258 w20 h20 Checked" menuKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y294 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
-    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w98 h26 c" colorText " Background151A22", resetKey)
+    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w98 h26 c" colorText " Background" uiInputBg, resetKey)
     SetResetKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetResetKeyEnabled x496 y294 w20 h20 Checked" resetKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y330 w110 h22 Background" colorCard " c" colorMuted, "Центр HUD")
-    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w98 h26 c" colorText " Background151A22", centerKey)
+    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w98 h26 c" colorText " Background" uiInputBg, centerKey)
     SetCenterKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetCenterKeyEnabled x496 y330 w20 h20 Checked" centerKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
-    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w98 h26 c" colorText " Background151A22", hideKey)
+    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w98 h26 c" colorText " Background" uiInputBg, hideKey)
     SetHideKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetHideKeyEnabled x496 y366 w20 h20 Checked" hideKeyEnabled " Background" colorCard)
 
     AddViewControl(view, "Text", "x250 y442 w280 h72 Background" colorCard)
     AddViewControl(view, "Text", "x270 y456 w120 h20 Background" colorCard " c" colorMuted, "Дизайн HUD")
-    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y480 w240 c000000 BackgroundEDEDED", ["Компактный", "Расширенный", "Безопасный"])
+    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y480 w240 c" colorText " Background" uiInputBg, ["Компактный", "Расширенный", "Безопасный"])
     SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : (hudDesign = "Safe" ? 3 : 1))
 
     ; Правая колонка: автоматизация и источник логов.
@@ -4283,22 +4799,23 @@ SettingsView() {
     AddViewControl(view, "Text", "x570 y104 w220 h22 Background" colorCard " c" colorText, "Автосброс нормы")
     SetAutoResetCtrl := AddViewControl(view, "Checkbox", "vSetAutoReset x570 y136 Checked" autoResetEnabled " c" colorText " Background" colorCard, "Включить автосброс")
     AddViewControl(view, "Text", "x570 y172 w60 h22 Background" colorCard " c" colorMuted, "Часы")
-    SetResetHourCtrl := AddViewControl(view, "Edit", "vSetResetHour x635 y168 w58 h26 Number c" colorText " Background151A22", resetHour)
+    SetResetHourCtrl := AddViewControl(view, "Edit", "vSetResetHour x635 y168 w58 h26 Number c" colorText " Background" uiInputBg, resetHour)
     AddViewControl(view, "Text", "x708 y172 w64 h22 Background" colorCard " c" colorMuted, "Минуты")
-    SetResetMinuteCtrl := AddViewControl(view, "Edit", "vSetResetMinute x782 y168 w48 h26 Number c" colorText " Background151A22", resetMinute)
+    SetResetMinuteCtrl := AddViewControl(view, "Edit", "vSetResetMinute x782 y168 w48 h26 Number c" colorText " Background" uiInputBg, resetMinute)
 
     AddViewControl(view, "Text", "x550 y246 w300 h180 Background" colorCard)
     AddViewControl(view, "Text", "x570 y262 w220 h22 Background" colorCard " c" colorText, "Файл логов")
     logText := logFile
     if (logText = "")
         logText := "Файл не выбран"
-    LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x570 y292 w260 h58 ReadOnly -Wrap c" colorText " Background151A22", logText)
+    LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x570 y292 w260 h58 ReadOnly -Wrap c" colorText " Background" uiInputBg, logText)
     selectLogButton := AddViewControl(view, "Text", "x570 y366 w260 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Выбрать chatlog.txt")
-    selectLogButton.OnEvent("Click", SelectLogFile)
-    AddViewControl(view, "Text", "x550 y442 w300 h72 Background" colorCard)
-    SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x570 y464 Checked" startWithWindows " c" colorText " Background" colorCard, "Запускать вместе с Windows")
-    saveButton := AddViewControl(view, "Text", "x550 y528 w300 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Сохранить настройки")
-    saveButton.OnEvent("Click", SaveSettings)
+    BindTextButton(selectLogButton, colorCardAlt, SelectLogFile)
+    AddViewControl(view, "Text", "x550 y442 w300 h86 Background" colorCard)
+    AddViewControl(view, "Text", "x570 y456 w220 h20 Background" colorCard " c" colorText, "Запуск и автоматизация")
+    SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x570 y482 Checked" startWithWindows " c" colorText " Background" colorCard, "Запускать вместе с Windows")
+    saveButton := AddViewControl(view, "Text", "x550 y540 w300 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Сохранить настройки")
+    BindTextButton(saveButton, colorAccent, SaveSettings)
 }
 
 UpdatesView() {
@@ -4306,8 +4823,8 @@ UpdatesView() {
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "Updates"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "Обновления")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Обновления")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
     AddViewControl(view, "Text", "x250 y94 w600 h116 Background" colorCard)
     AddViewControl(view, "Text", "x274 y116 w250 h24 Background" colorCard " c" colorText, "ChesNova " appVersion)
     AddViewControl(view, "Text", "x274 y148 w430 h24 Background" colorCard " c" colorMuted, "Проверяйте новые версии и управляйте обновлением приложения.")
@@ -4315,17 +4832,17 @@ UpdatesView() {
     AddViewControl(view, "Text", "x250 y226 w600 h100 Background" colorCard)
     AddViewControl(view, "Text", "x274 y242 w260 h20 Background" colorCard " c" colorText, "Действия с обновлением")
     checkButton := AddViewControl(view, "Text", "x274 y270 w268 h34 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить обновления")
-    checkButton.OnEvent("Click", CheckForUpdatesManual)
+    BindTextButton(checkButton, colorCardAlt, CheckForUpdatesManual)
     updateButton := AddViewControl(view, "Text", "x558 y270 w268 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Обновить ChesNova")
-    updateButton.OnEvent("Click", ManualUpdateChesNova)
+    BindTextButton(updateButton, colorAccent, ManualUpdateChesNova)
     AddViewControl(view, "Text", "x250 y342 w600 h86 Background" colorCard)
     AddViewControl(view, "Text", "x274 y358 w530 h20 Background" colorCard " c" colorMuted, "Настройка проверки при запуске сохраняется отдельно.")
     saveButton := AddViewControl(view, "Text", "x274 y388 w552 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сохранить настройки")
-    saveButton.OnEvent("Click", SaveSettings)
+    BindTextButton(saveButton, colorCardAlt, SaveSettings)
     AddViewControl(view, "Text", "x250 y444 w600 h72 Background" colorCard)
     AddViewControl(view, "Text", "x274 y458 w530 h18 Background" colorCard " c" colorMuted, "Если автоматическое обновление недоступно:")
-    downloadButton := AddViewControl(view, "Text", "x274 y484 w552 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать последнюю версию")
-    downloadButton.OnEvent("Click", DownloadLatestUpdate)
+    downloadButton := AddViewControl(view, "Text", "x274 y484 w552 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать последнюю версию")
+    BindTextButton(downloadButton, colorCardAlt, DownloadLatestUpdate)
 }
 
 RefreshUpdatesView(*) {
@@ -4344,9 +4861,11 @@ RefreshSettingsView() {
 
 HelpView() {
     global HelpEditCtrl, ErrorsLogTextCtrl
+    global colorBg, colorCard, colorCardAlt, colorText, colorMuted
 
     view := "Help"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background0E1116 cFFFFFF", "Помощь")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Помощь")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
     helpText := "
 (
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -4490,28 +5009,28 @@ ChesNova, aTools или Onishi. Для Onishi также устанавлива�
 Автор: Misha_Ches
 VK: vk.com/m.ches
 )"
-    HelpEditCtrl := AddViewControl(view, "Edit", "vHelpEdit x250 y84 w600 h240 ReadOnly -Wrap +WantReturn +VScroll Background20242b cFFFFFF", helpText)
+    HelpEditCtrl := AddViewControl(view, "Edit", "vHelpEdit x250 y84 w600 h240 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, helpText)
 
-    AddViewControl(view, "Text", "x250 y342 w220 Background0E1116 c7aa2ff", "Последние ошибки")
-    refreshErrorsButton := AddViewControl(view, "Button", "x500 y338 w100 h28", "Обновить")
-    refreshErrorsButton.OnEvent("Click", RefreshErrorsLogView)
-    openErrorsButton := AddViewControl(view, "Button", "x610 y338 w110 h28", "Открыть файл")
-    openErrorsButton.OnEvent("Click", OpenErrorsLogFile)
-    clearErrorsButton := AddViewControl(view, "Button", "x730 y338 w120 h28", "Очистить лог")
-    clearErrorsButton.OnEvent("Click", ClearErrorsLog)
-    ErrorsLogTextCtrl := AddViewControl(view, "Edit", "vErrorsLogText x250 y376 w600 h108 ReadOnly -Wrap +WantReturn +VScroll Background20242b cFFFFFF", GetLastErrorLogLines())
+    AddViewControl(view, "Text", "x250 y342 w220 Background" colorBg " c" colorMuted, "Последние ошибки")
+    refreshErrorsButton := AddViewControl(view, "Text", "x500 y338 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
+    BindTextButton(refreshErrorsButton, colorCardAlt, RefreshErrorsLogView)
+    openErrorsButton := AddViewControl(view, "Text", "x610 y338 w110 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Открыть файл")
+    BindTextButton(openErrorsButton, colorCardAlt, OpenErrorsLogFile)
+    clearErrorsButton := AddViewControl(view, "Text", "x730 y338 w120 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить лог")
+    BindTextButton(clearErrorsButton, colorCardAlt, ClearErrorsLog)
+    ErrorsLogTextCtrl := AddViewControl(view, "Edit", "vErrorsLogText x250 y376 w600 h108 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, GetLastErrorLogLines())
 }
 
 DiagnosticsView() {
     global DiagnosticTextCtrl, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "Diagnostics"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "Диагностика")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Диагностика")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
     AddViewControl(view, "Text", "x250 y94 w600 h330 Background" colorCard)
     AddViewControl(view, "Text", "x274 y116 w530 h24 Background" colorCard " c" colorMuted, "Метрики по запросу. Фоновая диагностика отключена.")
     refreshButton := AddViewControl(view, "Text", "x660 y446 w190 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
-    refreshButton.OnEvent("Click", RefreshDiagnosticsView)
+    BindTextButton(refreshButton, colorCardAlt, RefreshDiagnosticsView)
     DiagnosticTextCtrl := AddViewControl(view, "Edit", "x274 y150 w530 h270 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildDiagnosticsText())
 }
 
@@ -4580,20 +5099,20 @@ RefreshDiagnosticsView(*) {
 
 CloudView() {
     global CloudNickCtrl, CloudStatusCtrl, CloudAccessTextCtrl, CloudLastCheckCtrl
-    global colorBg, colorCard, colorAccent, colorText, colorMuted, colorGreen
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen
 
     view := "Cloud"
-    AddViewControl(view, "Text", "x250 y34 w560 h34 Background" colorBg " c" colorText, "Cloud")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background2A3340")
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Cloud")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
     AddViewControl(view, "Text", "x250 y94 w600 h120 Background" colorCard)
     AddViewControl(view, "Text", "x270 y112 w220 h22 Background" colorCard " c" colorMuted, "Аккаунт администратора")
     CloudNickCtrl := AddViewControl(view, "Text", "x270 y140 w260 h30 Background" colorCard " c" colorAccent " +0x200", "")
     CloudStatusCtrl := AddViewControl(view, "Text", "x270 y174 w260 h24 Background" colorCard " c" colorGreen " +0x200", "")
-    checkButton := AddViewControl(view, "Button", "x610 y128 w110 h30", "Проверить")
-    checkButton.OnEvent("Click", CloudCheckAccess)
-    changeNickButton := AddViewControl(view, "Button", "x732 y128 w98 h30", "Сменить ник")
-    changeNickButton.OnEvent("Click", CloudChangeNick)
+    checkButton := AddViewControl(view, "Text", "x610 y128 w110 h30 +0x200 Center Background" colorAccent " c" colorText, "Проверить")
+    BindTextButton(checkButton, colorAccent, CloudCheckAccess)
+    changeNickButton := AddViewControl(view, "Text", "x732 y128 w98 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Сменить ник")
+    BindTextButton(changeNickButton, colorCardAlt, CloudChangeNick)
 
     AddViewControl(view, "Text", "x250 y236 w290 h116 Background" colorCard)
     AddViewControl(view, "Text", "x270 y258 w220 h22 Background" colorCard " c" colorMuted, "Статус доступа")
@@ -4784,7 +5303,7 @@ SaveMenuPosition() {
 SelectLogFile(*) {
     global logFile, lastSize, LogFileTextCtrl
 
-    selectedFile := FileSelect(3, , "Выберите chatlog.txt", "*.txt")
+    selectedFile := FileSelect(3, "Выберите chatlog.txt", "*.txt")
     if (selectedFile != "") {
         logFile := selectedFile
         lastSize := FileGetSize(logFile)
@@ -4986,6 +5505,7 @@ SaveSettings(*) {
         return
     }
     AppendPmLog("Действие", "Сохранены настройки ChesNova")
+    ShowToast("✓ Настройки сохранены")
 
     SafeDestroyGui(&SettingsGui)
     ResetDashboardControls()
@@ -5016,7 +5536,7 @@ ResetPM(*) {
     global ResetConfirmGui
 
     SafeDestroyGui(&ResetConfirmGui)
-    ResetConfirmGui := Gui("+AlwaysOnTop +ToolWindow -Caption +Border", "ResetConfirm")
+    ResetConfirmGui := Gui("+Border", "Сброс PM")
     ResetConfirmGui.BackColor := "121214"
     ResetConfirmGui.MarginX := 14
     ResetConfirmGui.MarginY := 14
@@ -5030,11 +5550,13 @@ ResetPM(*) {
     ResetConfirmGui.SetFont("s9 Norm cFFFFFF")
     ResetConfirmGui.Add("Text", "x14 y55 w260", "Сбросить текущий счетчик PM?")
     ResetConfirmGui.Add("Text", "x14 y80 w260 cA8A8A8", "Текущий результат будет сохранен в историю.")
-    resetButton := ResetConfirmGui.Add("Button", "x14 y120 w125 h30", "Сбросить")
-    resetButton.OnEvent("Click", ConfirmResetPM)
-    cancelButton := ResetConfirmGui.Add("Button", "x149 y120 w125 h30", "Отмена")
-    cancelButton.OnEvent("Click", CancelResetPM)
+    global colorAccent, colorCardAlt, colorText
+    resetButton := ResetConfirmGui.Add("Text", "x14 y120 w125 h30 +0x200 Center Background" colorAccent " c" colorText, "Сбросить")
+    BindTextButton(resetButton, colorAccent, ConfirmResetPM)
+    cancelButton := ResetConfirmGui.Add("Text", "x149 y120 w125 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Отмена")
+    BindTextButton(cancelButton, colorCardAlt, CancelResetPM)
     ResetConfirmGui.Show("w290 h165")
+    try WinActivate(ResetConfirmGui.Hwnd)
 }
 
 ConfirmResetPM(*) {
@@ -5052,6 +5574,7 @@ ConfirmResetPM(*) {
         StatusDotCtrl.SetFont("c" dotRed)
     }
     beepPlayed := false
+    ShowToast("✓ Счётчик PM сброшен")
 }
 
 CancelResetPM(*) {
@@ -5167,7 +5690,8 @@ SortRecordsNewestFirst(lines, recordType) {
 
 GetRecordSortKey(line, recordType) {
     if (recordType = "dayoff") {
-        date := StrReplace(NormalizeDayOffDate(line), "-", "")
+        record := ParseDayOffRecord(line)
+        date := IsObject(record) ? StrReplace(record["date"], "-", "") : ""
         return date "000000"
     }
 
@@ -5391,41 +5915,60 @@ ShowAppDialog(title, message, buttons := "OK", accentColor := "") {
     if (accentColor = "")
         accentColor := colorAccent
 
+    ; Высота под текст: длинные сообщения больше не обрезаются.
+    lineBreak := Chr(10)
+    normalized := StrReplace(StrReplace(message, "`r`n", lineBreak), "`r", lineBreak)
+    lineCount := 1
+    Loop Parse, normalized, lineBreak
+        lineCount := A_Index
+    approxWrapped := 0
+    Loop Parse, normalized, lineBreak {
+        lineLen := StrLen(A_LoopField)
+        approxWrapped += Max(1, Ceil(lineLen / 42))
+    }
+    textLines := Max(lineCount, approxWrapped)
+    textHeight := Min(220, Max(64, textLines * 16))
+    cardHeight := 58 + textHeight
+    dlgHeight := cardHeight + 72
+    buttonY := dlgHeight - 40
+
     AppDialogResult := ""
-    dlg := Gui("+ToolWindow +AlwaysOnTop +Border", title)
+    ; Обычное окно с заголовком (как редактор биндов): видно на панели задач, не AlwaysOnTop.
+    dlg := Gui("+Border", title)
     dlg.BackColor := colorBg
     dlg.MarginX := 0
     dlg.MarginY := 0
     dlg.SetFont("s10 c" colorText, "Segoe UI")
 
-    dlg.Add("Text", "x0 y0 w420 h190 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w384 h124 Background" colorCard)
+    dlg.Add("Text", "x0 y0 w420 h" dlgHeight " Background" colorBg)
+    dlg.Add("Text", "x18 y18 w384 h" cardHeight " Background" colorCard)
     dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
     dlg.Add("Text", "x38 y32 w330 h24 Background" colorCard, title)
     dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y66 w345 h64 Background" colorCard, message)
+    dlg.Add("Text", "x38 y66 w345 h" textHeight " Background" colorCard, message)
 
     if (buttons = "OKCancel") {
-        AddDialogTextButton(dlg, 176, 150, 104, 28, "Отмена", colorCardAlt, "Cancel")
-        AddDialogTextButton(dlg, 292, 150, 104, 28, "OK", accentColor, "OK")
+        AddDialogTextButton(dlg, 176, buttonY, 104, 28, "Отмена", colorCardAlt, "Cancel")
+        AddDialogTextButton(dlg, 292, buttonY, 104, 28, "OK", accentColor, "OK")
     } else if (buttons = "YesNo") {
-        AddDialogTextButton(dlg, 176, 150, 104, 28, "Нет", colorCardAlt, "No")
-        AddDialogTextButton(dlg, 292, 150, 104, 28, "Да", colorRed, "Yes")
+        AddDialogTextButton(dlg, 176, buttonY, 104, 28, "Нет", colorCardAlt, "No")
+        AddDialogTextButton(dlg, 292, buttonY, 104, 28, "Да", colorRed, "Yes")
     } else {
-        AddDialogTextButton(dlg, 292, 150, 104, 28, "OK", accentColor, "OK")
+        AddDialogTextButton(dlg, 292, buttonY, 104, 28, "OK", accentColor, "OK")
     }
 
     dlg.OnEvent("Close", (*) => CloseAppDialog(dlg, "Cancel"))
-    dlg.Show("w420 h190")
+    dlg.Show("w420 h" dlgHeight)
+    try WinActivate(dlg.Hwnd)
     WinWaitClose("ahk_id " dlg.Hwnd)
     return AppDialogResult
 }
 
 AddDialogTextButton(dlg, x, y, w, h, label, bgColor, result) {
-    global colorText
+    global colorText, colorAccent
     dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
     ctrl := dlg.Add("Text", "x" x " y" y " w" w " h" h " +0x200 Center Background" bgColor, label)
-    ctrl.OnEvent("Click", (*) => CloseAppDialog(dlg, result))
+    ctrl.OnEvent("Click", (*) => (FlashControl(ctrl, bgColor), CloseAppDialog(dlg, result)))
     return ctrl
 }
 
@@ -5439,7 +5982,56 @@ AddMiniWindowButton(guiObj, x, y, w, h, label, bgColor, callback) {
     global colorText
     guiObj.SetFont("s9 Bold c" colorText, "Segoe UI")
     ctrl := guiObj.Add("Text", "x" x " y" y " w" w " h" h " +0x200 Center Background" bgColor, label)
-    ctrl.OnEvent("Click", callback)
+    ctrl.OnEvent("Click", (*) => (FlashControl(ctrl, bgColor), callback()))
+    return ctrl
+}
+
+; Короткая вспышка фона — видно, что клик принят.
+FlashControl(ctrl, normalBg := "", flashBg := "", ms := 140) {
+    global colorAccent
+    if !IsObject(ctrl)
+        return
+    if (flashBg = "")
+        flashBg := (normalBg = colorAccent) ? "8B83FF" : colorAccent
+    try {
+        ctrl.Opt("Background" flashBg)
+        restoreBg := normalBg
+        restoreCtrl := ctrl
+        SetTimer(() => RestoreControlBackground(restoreCtrl, restoreBg), -ms)
+    }
+}
+
+RestoreControlBackground(ctrl, normalBg) {
+    if !IsObject(ctrl) || (normalBg = "")
+        return
+    try ctrl.Opt("Background" normalBg)
+}
+
+; Ненавязчивое уведомление об успехе (не модальное, само закрывается).
+ShowToast(message, durationMs := 1600) {
+    global ToastGui, colorBg, colorCard, colorAccent, colorText
+
+    SafeDestroyGui(&ToastGui)
+    ToastGui := Gui("+AlwaysOnTop -Caption +ToolWindow +Border", "ChesNovaToast")
+    ToastGui.BackColor := colorBg
+    ToastGui.MarginX := 0
+    ToastGui.MarginY := 0
+    ToastGui.SetFont("s9 Bold c" colorText, "Segoe UI")
+    ToastGui.Add("Text", "x0 y0 w320 h44 Background" colorCard)
+    ToastGui.Add("Text", "x0 y0 w4 h44 Background" colorAccent)
+    ToastGui.Add("Text", "x16 y12 w290 h22 Background" colorCard " c" colorText, message)
+    ToastGui.Show("w320 h44 xCenter y80 NA")
+    SetTimer(CloseToastGui, -durationMs)
+}
+
+CloseToastGui(*) {
+    global ToastGui
+    SafeDestroyGui(&ToastGui)
+}
+
+; Обёртка клика для Text-кнопок в главном меню: вспышка + действие.
+BindTextButton(ctrl, normalBg, callback) {
+    ctrl.OnEvent("Click", (*) => (FlashControl(ctrl, normalBg), callback()))
     return ctrl
 }
 
@@ -5450,7 +6042,7 @@ ShowBindCategoryInputDialog(defaultValue := "") {
     BindCategoryInputResult := ""
     BindCategoryInputValue := ""
 
-    dlg := Gui("+ToolWindow +AlwaysOnTop +Border", "Категория биндов")
+    dlg := Gui("+Border", "Категория биндов")
     dlg.BackColor := colorBg
     dlg.MarginX := 0
     dlg.MarginY := 0
@@ -5462,7 +6054,7 @@ ShowBindCategoryInputDialog(defaultValue := "") {
     dlg.Add("Text", "x38 y32 w280 h26 Background" colorCard, "Новая категория")
     dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
     dlg.Add("Text", "x38 y70 w344 h22 Background" colorCard, "Название категории")
-    BindCategoryInputCtrl := dlg.Add("Edit", "x38 y98 w344 h26 cFFFFFF Background151A22", defaultValue)
+    BindCategoryInputCtrl := dlg.Add("Edit", "x38 y98 w344 h26 c" colorText " Background" uiInputBg, defaultValue)
 
     AddMiniWindowButton(dlg, 178, 172, 104, 28, "Отмена", colorCardAlt, (*) => CloseBindCategoryInputDialog(dlg, "Cancel"))
     AddMiniWindowButton(dlg, 294, 172, 108, 28, "Добавить", colorAccent, (*) => CloseBindCategoryInputDialog(dlg, "OK"))
@@ -5494,7 +6086,7 @@ ShowNickInputDialog(message, defaultValue := "") {
     NickInputResult := ""
     NickInputValue := ""
 
-    dlg := Gui("+ToolWindow +AlwaysOnTop +Border", "ChesNova Cloud")
+    dlg := Gui("+Border", "ChesNova Cloud")
     dlg.BackColor := colorBg
     dlg.MarginX := 0
     dlg.MarginY := 0
@@ -5507,13 +6099,13 @@ ShowNickInputDialog(message, defaultValue := "") {
     dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
     dlg.Add("Text", "x48 y78 w364 h38 Background" colorCard, message)
     dlg.Add("Text", "x48 y130 w180 h20 Background" colorCard " c" colorMuted, "Ник администратора")
-    NickInputEditCtrl := dlg.Add("Edit", "x48 y152 w364 h26 cFFFFFF Background151A22", defaultValue)
+    NickInputEditCtrl := dlg.Add("Edit", "x48 y152 w364 h26 c" colorText " Background" uiInputBg, defaultValue)
 
     dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
     cancelBtn := dlg.Add("Text", "x226 y198 w90 h30 +0x200 Center Background" colorCardAlt, "Отмена")
-    cancelBtn.OnEvent("Click", (*) => CloseNickInputDialog(dlg, "Cancel"))
+    BindTextButton(cancelBtn, colorCardAlt, (*) => CloseNickInputDialog(dlg, "Cancel"))
     okBtn := dlg.Add("Text", "x328 y198 w84 h30 +0x200 Center Background" colorAccent, "OK")
-    okBtn.OnEvent("Click", (*) => CloseNickInputDialog(dlg, "OK"))
+    BindTextButton(okBtn, colorAccent, (*) => CloseNickInputDialog(dlg, "OK"))
 
     dlg.OnEvent("Close", (*) => CloseNickInputDialog(dlg, "Cancel"))
     dlg.OnEvent("Escape", (*) => CloseNickInputDialog(dlg, "Cancel"))
@@ -5669,28 +6261,61 @@ EnsureNickBeforeCloudAccess(forcePrompt := false, message := "") {
         MsgBox("Введите корректный ник администратора.", "ChesNova", "Icon!")
     }
 }
+; HTTP GET с таймаутами. resolve/connect/send/receive в мс.
+HttpGetText(url, resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiveMs := 45000) {
+    http := ComObject("WinHttp.WinHttpRequest.5.1")
+    http.Open("GET", url, false)
+    try http.SetTimeouts(resolveMs, connectMs, sendMs, receiveMs)
+    http.SetRequestHeader("Cache-Control", "no-cache")
+    http.SetRequestHeader("Pragma", "no-cache")
+    http.Send()
+    return Map("status", http.Status, "text", Trim(http.ResponseText))
+}
+
+FormatHttpError(err) {
+    msg := err.Message
+    if InStr(msg, "0x80072EE2") || InStr(msg, "истекло") || InStr(msg, "timed out") || InStr(msg, "timeout")
+        return "Сервер Cloud не ответил вовремя (таймаут).`nПроверьте интернет или повторите через минуту.`n`nGoogle Apps Script иногда «просыпается» 10–30 сек."
+    if InStr(msg, "0x80072EFD") || InStr(msg, "0x80072EE7")
+        return "Нет связи с интернетом или DNS не резолвит адрес.`nПроверьте сеть / VPN / антивирус."
+    if InStr(msg, "0x80072F7D") || InStr(msg, "0x80072F8F")
+        return "Проблема с SSL/HTTPS.`nПроверьте системное время и антивирус-HTTPS-сканер."
+    return msg
+}
+
 CheckCloudAccess(exitOnDenied := true, promptOnDenied := true) {
     global nick, accessUrl, cloudAccessState, cloudAccessMessage, cloudLastCheck, appVersion
 
     loop {
         url := accessUrl "?nick=" UriEncode(nick) "&version=" UriEncode(appVersion)
+        response := ""
+        lastErr := ""
 
-        try {
-            http := ComObject("WinHttp.WinHttpRequest.5.1")
-            http.Open("GET", url, false)
-            http.Send()
-            response := Trim(http.ResponseText)
-        } catch as err {
+        ; До 2 попыток: cold start Google Script часто рвёт первый запрос.
+        loop 2 {
+            try {
+                result := HttpGetText(url)
+                if (result["status"] != 200)
+                    throw Error("HTTP " result["status"])
+                response := result["text"]
+                lastErr := ""
+                break
+            } catch as err {
+                lastErr := err
+                if (A_Index < 2)
+                    Sleep(1200)
+            }
+        }
+
+        if (lastErr != "") {
             cloudAccessState := "offline"
             cloudAccessMessage := "Нет связи с Cloud"
             cloudLastCheck := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
 
             if (promptOnDenied)
-                MsgBox("Не удалось проверить доступ.`n`n" err.Message, "ChesNova", "Iconx")
+                MsgBox("Не удалось проверить доступ.`n`n" FormatHttpError(lastErr), "ChesNova", "Iconx")
 
-            if (exitOnDenied)
-                ExitApp()
-
+            ; Сетевой сбой ≠ отказ в доступе: не закрываем программу.
             return false
         }
 
