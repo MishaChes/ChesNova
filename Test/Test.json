@@ -1,8 +1,8 @@
 {
-  "latest": "10.6",
+  "latest": "11.0",
   "download": "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk",
   "changelog": [
-    "Тестовая сборка 10.6",
+    "Тестовая сборка 11.0",
     "Новый AI помощник",
     "-",
     "-"
