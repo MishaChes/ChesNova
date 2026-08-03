@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.5"
+CURRENT_VERSION := "10.5.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -114,6 +114,7 @@ norm := 250
 autoResetEnabled := 0
 bindsEnabled := 0
 checkUpdatesOnStartup := 1
+testerMode := 0
 startWithWindows := 0
 resetHour := 0
 resetMinute := 0
@@ -172,6 +173,7 @@ if FileExist(settingsFile)
         autoResetEnabled := IniRead(settingsFile, "Main", "autoResetEnabled", 0)
         bindsEnabled := IniRead(settingsFile, "Main", "bindsEnabled", 0)
         checkUpdatesOnStartup := IniRead(settingsFile, "Updates", "checkOnStartup", 1)
+        testerMode := IniRead(settingsFile, "Updates", "testerMode", 0)
         startWithWindows := IniRead(settingsFile, "Launcher", "startWithWindows", 0)
         resetHour := IniRead(settingsFile, "Main", "resetHour", 0)
         resetMinute := IniRead(settingsFile, "Main", "resetMinute", 0)
@@ -193,6 +195,7 @@ norm += 0
 autoResetEnabled += 0
 bindsEnabled += 0
 checkUpdatesOnStartup += 0
+testerMode += 0
 startWithWindows += 0
 menuKeyEnabled += 0
 resetKeyEnabled += 0
@@ -207,6 +210,7 @@ EnsureNickBeforeCloudAccess()
 CheckCloudAccess(true, true)
 SetTimer(SendCloudPing, 3600000)
 versionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/version.json"
+testVersionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/Test.json"
 if (checkUpdatesOnStartup)
     CheckForUpdates()
 notifications := []
@@ -239,6 +243,12 @@ diagnosticLastReadBytes := 0
 diagnosticCheckLogSamples := 0
 diagnosticCheckLogTotalMs := 0
 diagnosticCheckLogMaxMs := 0
+healthState := "ok"
+healthMessage := "Пока без замечаний"
+healthIncidents := []
+chatlogReadErrorStreak := 0
+lastChatlogChangeTick := A_TickCount
+lastHealthState := "ok"
 guiHidden := false
 selectedPunishmentDate := ""
 selectedPunishmentType := "ban"
@@ -335,6 +345,10 @@ CloudStatusCtrl := ""
 CloudAccessTextCtrl := ""
 CloudLastCheckCtrl := ""
 DiagnosticTextCtrl := ""
+DiagnosticHealthCtrl := ""
+TesterModeCtrl := ""
+TesterStatusCtrl := ""
+TesterInfoCtrl := ""
 ScriptsGamePathCtrl := ""
 ScriptPackageStatusCtrls := Map()
 NotificationButtonCtrl := ""
@@ -386,6 +400,7 @@ InitializeBinds()
 MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
 SetTimer(CheckAutoReset, 30000)
+SetTimer(RunHealthCheck, 60000)
 
 UpdatePMDisplay()
 
@@ -2428,7 +2443,7 @@ CheckLog(*) {
     global saveFile, dotGreen, dotRed, StatusDotCtrl, PMCountTextCtrl
     global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
     global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
-    global cloudAccessState
+    global cloudAccessState, chatlogReadErrorStreak, lastChatlogChangeTick
 
     ; Счётчик работает только при подтверждённом доступе Cloud.
     if (cloudAccessState != "ok")
@@ -2436,11 +2451,14 @@ CheckLog(*) {
     checkLogStartedAt := GetHighResolutionMilliseconds()
     processedLineCount := 0
     pmCountChanged := false
-    if (logFile = "" || !FileExist(logFile))
+    if (logFile = "" || !FileExist(logFile)) {
+        chatlogReadErrorStreak += 1
         return
+    }
 
     try currentSize := FileGetSize(logFile)
     catch as err {
+        chatlogReadErrorStreak += 1
         LogError("CheckLog", "Не удалось получить размер chatlog.txt", err.Message)
         return
     }
@@ -2462,6 +2480,7 @@ CheckLog(*) {
 
     try file := FileOpen(logFile, "r")
     catch as err {
+        chatlogReadErrorStreak += 1
         LogError("CheckLog", "Не удалось открыть chatlog.txt", err.Message)
         return
     }
@@ -2485,9 +2504,14 @@ CheckLog(*) {
         file.Close()
     } catch as err {
         try file.Close()
+        chatlogReadErrorStreak += 1
         LogError("CheckLog", "Ошибка чтения chatlog.txt", err.Message)
         return
     }
+
+    chatlogReadErrorStreak := 0
+    if (currentSize > 0)
+        lastChatlogChangeTick := A_TickCount
 
     diagnosticLastCheckMs := Round(GetHighResolutionMilliseconds() - checkLogStartedAt, 3)
     diagnosticLastProcessedLines := processedLineCount
@@ -2673,6 +2697,7 @@ BuildMainWindow(initialView := "Dashboard") {
     BuildNavButton("DaysOff", "☀   Отгулы", 208)
     BuildNavButton("Binds", "⌨   Бинды", 248)
     BuildNavButton("Scripts", "✦   Скрипты", 288)
+    BuildNavButton("Tester", "🧪  Тестировщик", 328)
     BuildNavButton("Updates", "↻   Обновления", windowHeight - 82)
     BuildNavButton("Help", "?   Помощь", windowHeight - 42)
 
@@ -2688,6 +2713,7 @@ BuildMainWindow(initialView := "Dashboard") {
     CloudView()
     DiagnosticsView()
     ScriptsViewCompact()
+    TesterView()
     UpdateNotificationIndicator()
 
     if (menuX = "Center")
@@ -2787,6 +2813,8 @@ ShowView(viewName, *) {
         RefreshDiagnosticsView()
     else if (viewName = "Scripts")
         RefreshScriptsView()
+    else if (viewName = "Tester")
+        RefreshTesterView()
 }
 
 ; =========================
@@ -4852,6 +4880,299 @@ RefreshUpdatesView(*) {
         SetCheckUpdatesCtrl.Value := checkUpdatesOnStartup
 }
 
+TesterView() {
+    global TesterModeCtrl, TesterStatusCtrl, TesterInfoCtrl, testerMode
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
+
+    view := "Tester"
+    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Тестировщик")
+    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
+    AddViewControl(view, "Text", "x250 y88 w600 h40 Background" colorBg " c" colorMuted, "Тестовые сборки с GitHub. Включи режим, чтобы проверять и скачивать beta-версии.")
+
+    AddViewControl(view, "Text", "x250 y140 w600 h100 Background" colorCard)
+    TesterModeCtrl := AddViewControl(view, "Checkbox", "x274 y158 w400 h24 Checked" testerMode " c" colorText " Background" colorCard, "Я тестировщик — показывать тестовый канал")
+    TesterModeCtrl.OnEvent("Click", ToggleTesterMode)
+    TesterStatusCtrl := AddViewControl(view, "Text", "x274 y196 w552 h28 Background" colorCard " c" colorAccent " +0x200", "")
+
+    AddViewControl(view, "Text", "x250 y256 w600 h170 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y268 w500 h20 Background" colorCard " c" colorText, "Тестовый канал")
+    TesterInfoCtrl := AddViewControl(view, "Edit", "x274 y292 w552 h78 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, "")
+    checkButton := AddViewControl(view, "Text", "x274 y380 w170 h28 +0x200 Center Background" colorAccent " c" colorText, "Проверить")
+    BindTextButton(checkButton, colorAccent, CheckTestUpdates)
+    downloadButton := AddViewControl(view, "Text", "x456 y380 w170 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать")
+    BindTextButton(downloadButton, colorCardAlt, DownloadTestUpdate)
+    installButton := AddViewControl(view, "Text", "x638 y380 w188 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Установить test")
+    BindTextButton(installButton, colorCardAlt, InstallTestUpdate)
+
+    AddViewControl(view, "Text", "x250 y424 w600 h100 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y436 w500 h20 Background" colorCard " c" colorText, "Стабильный релиз")
+    AddViewControl(view, "Text", "x274 y460 w360 h36 Background" colorCard " c" colorMuted, "Вернуть официальную сборку из versions/version.json")
+    rollbackButton := AddViewControl(view, "Text", "x640 y458 w186 h32 +0x200 Center Background" colorAccent " c" colorText, "Откат на релиз")
+    BindTextButton(rollbackButton, colorAccent, RollbackToStableRelease)
+
+    AddViewControl(view, "Text", "x250 y540 w600 h28 Background" colorBg " c" colorMuted, "GitHub test: Test/Test.json  •  релиз: versions/version.json")
+
+    RefreshTesterView()
+}
+
+RefreshTesterView(*) {
+    global TesterModeCtrl, TesterStatusCtrl, TesterInfoCtrl, testerMode, colorGreen, colorMuted
+
+    if IsObject(TesterModeCtrl)
+        TesterModeCtrl.Value := testerMode ? 1 : 0
+
+    if IsObject(TesterStatusCtrl) {
+        if testerMode {
+            TesterStatusCtrl.Text := "Режим тестировщика включён"
+            TesterStatusCtrl.SetFont("c" colorGreen)
+        } else {
+            TesterStatusCtrl.Text := "Режим выключен — тестовые сборки недоступны"
+            TesterStatusCtrl.SetFont("c" colorMuted)
+        }
+    }
+
+    if IsObject(TesterInfoCtrl) && (TesterInfoCtrl.Value = "") {
+        if testerMode
+            TesterInfoCtrl.Value := "Нажми «Проверить», чтобы загрузить информацию о тестовой версии."
+        else
+            TesterInfoCtrl.Value := "Включи «Я тестировщик», затем нажми «Проверить»."
+    }
+}
+
+ToggleTesterMode(*) {
+    global TesterModeCtrl, testerMode, settingsFile
+
+    testerMode := (IsObject(TesterModeCtrl) && TesterModeCtrl.Value) ? 1 : 0
+    TryIniWrite(testerMode, settingsFile, "Updates", "testerMode", "ToggleTesterMode")
+    RefreshTesterView()
+    if testerMode
+        ShowToast("✓ Режим тестировщика включён")
+    else
+        ShowToast("Режим тестировщика выключен")
+}
+
+EnsureTesterModeEnabled() {
+    global testerMode
+    if testerMode
+        return true
+    ShowAppDialog("Тестировщик", "Сначала включи «Я тестировщик».`nБез этого тестовые сборки недоступны.")
+    return false
+}
+
+DownloadTestVersionManifest() {
+    global testVersionInfoUrl
+    requestUrl := testVersionInfoUrl "?nocache=" A_Now "_" A_TickCount
+    result := HttpGetText(requestUrl)
+    if (result["status"] != 200)
+        throw Error("GitHub вернул HTTP " result["status"] " для Test/Test.json.")
+    return result["text"]
+}
+
+CheckTestUpdates(*) {
+    global CURRENT_VERSION, TesterInfoCtrl
+
+    if !EnsureTesterModeEnabled()
+        return
+
+    progressDlg := ShowCloudCheckProgressDialog()
+    try progressDlg.Title := "Тестировщик"
+    Sleep(40)
+
+    try {
+        versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
+        try progressDlg.Destroy()
+
+        if (versionInfo["latest"] = "")
+            throw Error("В Test/Test.json нет поля latest.")
+
+        lineBreak := Chr(10)
+        text := "Текущая версия: v" CURRENT_VERSION lineBreak
+        text .= "Тестовая latest: v" versionInfo["latest"] lineBreak
+        cmp := CompareVersions(versionInfo["latest"], CURRENT_VERSION)
+        if (cmp > 0)
+            text .= "Статус: есть более новая test-сборка" lineBreak
+        else if (cmp = 0)
+            text .= "Статус: test совпадает с текущей" lineBreak
+        else
+            text .= "Статус: test старше текущей (или другой номер)" lineBreak
+        text .= lineBreak "Что нового:" lineBreak
+        if (versionInfo["changelog"].Length = 0)
+            text .= "• список изменений не указан"
+        else {
+            for _, entry in versionInfo["changelog"]
+                text .= "• " entry lineBreak
+        }
+        if (versionInfo["download"] != "")
+            text .= lineBreak "Ссылка: " versionInfo["download"]
+
+        if IsObject(TesterInfoCtrl)
+            TesterInfoCtrl.Value := text
+
+        ShowAppDialog("Тестировщик", "Проверка test-канала завершена.`n`nТестовая версия: v" versionInfo["latest"])
+        ShowToast("✓ Test-канал проверен")
+    } catch as err {
+        try progressDlg.Destroy()
+        LogError("CheckTestUpdates", "Ошибка test-канала", err.Message)
+        if IsObject(TesterInfoCtrl)
+            TesterInfoCtrl.Value := "Ошибка: " err.Message
+        ShowAppDialog("Тестировщик", "Не удалось проверить test-канал.`n`nУбедись, что на GitHub есть файл:`nTest/Test.json`n`n" err.Message)
+    }
+}
+
+DownloadTestUpdate(*) {
+    if !EnsureTesterModeEnabled()
+        return
+
+    try {
+        versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
+        if (versionInfo["download"] = "") {
+            ShowAppDialog("Тестировщик", "В Test/Test.json нет ссылки download.")
+            return
+        }
+        Run(versionInfo["download"])
+        ShowToast("✓ Открыта ссылка на test-сборку")
+    } catch as err {
+        LogError("DownloadTestUpdate", "Ошибка скачивания test", err.Message)
+        ShowAppDialog("Тестировщик", "Не удалось скачать test-сборку.`n`n" err.Message)
+    }
+}
+
+InstallTestUpdate(*) {
+    global basePath, backupPath, CURRENT_VERSION
+
+    if !EnsureTesterModeEnabled()
+        return
+
+    result := ShowAppDialog(
+        "Тестировщик",
+        "Установить тестовую сборку поверх текущей?`nБудет создан backup, затем файл заменят.`n`nСтабильный канал при этом не меняется — только локальный ChesNova.ahk.",
+        "YesNo"
+    )
+    if (result != "Yes")
+        return
+
+    mainScript := basePath "\ChesNova.ahk"
+    newScript := basePath "\ChesNova_test_new.ahk"
+
+    try {
+        versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
+        downloadUrl := versionInfo["download"]
+        if (downloadUrl = "")
+            throw Error("Нет поля download в Test/Test.json.")
+
+        ; Если в манифесте zip — только открываем ссылку (установка zip вручную).
+        if InStr(StrLower(downloadUrl), ".zip") {
+            Run(downloadUrl)
+            ShowAppDialog("Тестировщик", "Это ZIP-сборка.`nСсылка открыта в браузере — распакуй и замени файлы вручную.")
+            return
+        }
+
+        if !FileExist(mainScript)
+            throw Error("Не найден текущий ChesNova.ahk.")
+
+        if FileExist(newScript)
+            FileDelete(newScript)
+
+        Download(downloadUrl, newScript)
+        if !FileExist(newScript) || FileGetSize(newScript) = 0
+            throw Error("Загруженный test-файл пустой.")
+
+        DirCreate(backupPath)
+        backupFile := backupPath "\ChesNova_before_test_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".ahk"
+        FileCopy(mainScript, backupFile, 0)
+
+        try {
+            FileDelete(mainScript)
+            FileMove(newScript, mainScript, 0)
+        } catch as installErr {
+            if !FileExist(mainScript) && FileExist(backupFile)
+                FileCopy(backupFile, mainScript, 1)
+            throw installErr
+        }
+
+        ShowAppDialog("Тестировщик", "Тестовая сборка установлена.`nBackup: " backupFile "`n`nПерезапусти ChesNova через лаунчер.")
+        ShowToast("✓ Test-сборка установлена")
+    } catch as err {
+        if FileExist(newScript)
+            try FileDelete(newScript)
+        LogError("InstallTestUpdate", "Ошибка установки test", err.Message)
+        ShowAppDialog("Тестировщик", "Не удалось установить test-сборку.`n`n" err.Message)
+    }
+}
+
+; Откат с test-сборки на стабильный релиз (versions/version.json + versions/ChesNova.ahk).
+RollbackToStableRelease(*) {
+    global basePath, backupPath, CURRENT_VERSION
+
+    if !EnsureTesterModeEnabled()
+        return
+
+    result := ShowAppDialog(
+        "Откат на релиз",
+        "Установить стабильную версию с GitHub?`nТекущий файл будет сохранён в backup, затем заменён релизом.`n`nСейчас у вас: v" CURRENT_VERSION,
+        "YesNo"
+    )
+    if (result != "Yes")
+        return
+
+    mainScript := basePath "\ChesNova.ahk"
+    newScript := basePath "\ChesNova_release_new.ahk"
+    stableAhkUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/ChesNova.ahk"
+
+    progressDlg := ShowCloudCheckProgressDialog()
+    Sleep(40)
+
+    try {
+        if !FileExist(mainScript)
+            throw Error("Не найден текущий ChesNova.ahk.")
+
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        latest := versionInfo["latest"]
+        downloadUrl := versionInfo["download"]
+
+        ; Для авто-установки нужен .ahk. В манифесте часто zip — тогда берём versions/ChesNova.ahk.
+        installUrl := stableAhkUrl
+        if (downloadUrl != "" && InStr(StrLower(downloadUrl), ".ahk") && !InStr(StrLower(downloadUrl), ".zip"))
+            installUrl := downloadUrl
+
+        if FileExist(newScript)
+            FileDelete(newScript)
+
+        Download(installUrl, newScript)
+        if !FileExist(newScript) || FileGetSize(newScript) = 0
+            throw Error("Загруженный релизный файл пустой.`nURL: " installUrl)
+
+        DirCreate(backupPath)
+        backupFile := backupPath "\ChesNova_before_rollback_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".ahk"
+        FileCopy(mainScript, backupFile, 0)
+
+        try {
+            FileDelete(mainScript)
+            FileMove(newScript, mainScript, 0)
+        } catch as installErr {
+            if !FileExist(mainScript) && FileExist(backupFile)
+                FileCopy(backupFile, mainScript, 1)
+            throw installErr
+        }
+
+        try progressDlg.Destroy()
+
+        msg := "Стабильный релиз установлен."
+        if (latest != "")
+            msg .= "`nВерсия на GitHub: v" latest
+        msg .= "`nBackup: " backupFile
+        msg .= "`n`nПерезапусти ChesNova через лаунчер."
+        ShowAppDialog("Откат на релиз", msg)
+        ShowToast("✓ Откат на релиз выполнен")
+    } catch as err {
+        try progressDlg.Destroy()
+        if FileExist(newScript)
+            try FileDelete(newScript)
+        LogError("RollbackToStableRelease", "Ошибка отката на релиз", err.Message)
+        ShowAppDialog("Откат на релиз", "Не удалось установить стабильную версию.`n`n" err.Message)
+    }
+}
+
 RefreshSettingsView() {
     global logFile, LogFileTextCtrl
 
@@ -5022,37 +5343,151 @@ VK: vk.com/m.ches
 }
 
 DiagnosticsView() {
-    global DiagnosticTextCtrl, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
+    global DiagnosticTextCtrl, DiagnosticHealthCtrl
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
     view := "Diagnostics"
     AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Диагностика")
     AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y94 w600 h330 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y116 w530 h24 Background" colorCard " c" colorMuted, "Метрики по запросу. Фоновая диагностика отключена.")
-    refreshButton := AddViewControl(view, "Text", "x660 y446 w190 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
+    AddViewControl(view, "Text", "x250 y94 w600 h380 Background" colorCard)
+    DiagnosticHealthCtrl := AddViewControl(view, "Text", "x274 y112 w530 h24 Background" colorCard " c" colorAccent " +0x200", GetHealthStatusLine())
+    AddViewControl(view, "Text", "x274 y140 w400 h18 Background" colorCard " c" colorMuted, "Проверка раз в 1 мин • автообновление на этой вкладке")
+    refreshButton := AddViewControl(view, "Text", "x660 y500 w190 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
     BindTextButton(refreshButton, colorCardAlt, RefreshDiagnosticsView)
-    DiagnosticTextCtrl := AddViewControl(view, "Edit", "x274 y150 w530 h270 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildDiagnosticsText())
+    DiagnosticTextCtrl := AddViewControl(view, "Edit", "x274 y168 w530 h310 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildDiagnosticsText())
+    RunHealthCheck()
 }
 
 BuildDiagnosticsText() {
     global logFile, pmLogsFile, punishmentsFile, errorsLogFile
     global hudDesign, diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
     global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
+    global healthState, healthMessage, healthIncidents, cloudAccessState, chatlogReadErrorStreak
 
-    text := "Интервал CheckLog: 1000 мс`n"
+    text := "—— Здоровье ——`n"
+    text .= GetHealthStatusLine() "`n"
+    text .= "Cloud: " GetCloudStatusText() "`n"
+    text .= "Ошибки чтения chatlog подряд: " chatlogReadErrorStreak "`n`n"
+
+    text .= "—— CheckLog ——`n"
+    text .= "Интервал: 1000 мс`n"
     text .= "Режим HUD: " GetHudDesignText() "`n"
-    text .= "Время последнего CheckLog: " diagnosticLastCheckMs " мс`n"
-    text .= "Среднее CheckLog: " (diagnosticCheckLogSamples ? Round(diagnosticCheckLogTotalMs / diagnosticCheckLogSamples, 3) : 0) " мс`n"
-    text .= "Максимум CheckLog: " diagnosticCheckLogMaxMs " мс`n"
-    text .= "Обработано строк: " diagnosticLastProcessedLines "`n"
+    text .= "Последний проход: " diagnosticLastCheckMs " мс`n"
+    text .= "Среднее: " (diagnosticCheckLogSamples ? Round(diagnosticCheckLogTotalMs / diagnosticCheckLogSamples, 3) : 0) " мс`n"
+    text .= "Максимум: " diagnosticCheckLogMaxMs " мс`n"
+    text .= "Строк за проход: " diagnosticLastProcessedLines "`n"
     text .= "Новых PM: " diagnosticLastPmChanges "`n"
-    text .= "Прочитано из chatlog: " FormatDiagnosticBytes(diagnosticLastReadBytes) "`n"
-    text .= "Размер chatlog при проверке: " FormatDiagnosticBytes(diagnosticLastLogSize) "`n`n"
+    text .= "Прочитано: " FormatDiagnosticBytes(diagnosticLastReadBytes) "`n"
+    text .= "Размер chatlog: " FormatDiagnosticBytes(diagnosticLastLogSize) "`n`n"
+
+    text .= "—— Файлы ——`n"
     text .= "chatlog.txt: " FormatDiagnosticFileSize(logFile) "`n"
     text .= "pm_logs.csv: " FormatDiagnosticFileSize(pmLogsFile) "`n"
     text .= "punishments_history.csv: " FormatDiagnosticFileSize(punishmentsFile) "`n"
-    text .= "errors.log: " FormatDiagnosticFileSize(errorsLogFile)
+    text .= "errors.log: " FormatDiagnosticFileSize(errorsLogFile) "`n`n"
+
+    text .= "—— Последние инциденты ——`n"
+    if (healthIncidents.Length = 0)
+        text .= "нет`n"
+    else {
+        maxShow := Min(healthIncidents.Length, 12)
+        Loop maxShow
+            text .= healthIncidents[A_Index] "`n"
+    }
     return text
+}
+
+GetHealthStatusLine() {
+    global healthState, healthMessage
+    label := "OK"
+    if (healthState = "warn")
+        label := "ВНИМАНИЕ"
+    else if (healthState = "critical")
+        label := "КРИТИЧНО"
+    return label " — " healthMessage
+}
+
+GetHealthStatusColor() {
+    global healthState, colorGreen, colorRed, colorYellow, colorAccent
+    if (healthState = "ok")
+        return colorGreen
+    if (healthState = "warn")
+        return colorYellow
+    if (healthState = "critical")
+        return colorRed
+    return colorAccent
+}
+
+PushHealthIncident(message) {
+    global healthIncidents
+    entry := FormatTime(A_Now, "HH:mm:ss") "  " message
+    healthIncidents.InsertAt(1, entry)
+    while (healthIncidents.Length > 15)
+        healthIncidents.Pop()
+}
+
+RunHealthCheck(*) {
+    global logFile, cloudAccessState, diagnosticLastCheckMs, diagnosticCheckLogMaxMs
+    global chatlogReadErrorStreak, lastChatlogChangeTick
+    global healthState, healthMessage, lastHealthState, CurrentView
+
+    issuesCritical := []
+    issuesWarn := []
+
+    if (logFile = "" || !FileExist(logFile))
+        issuesCritical.Push("chatlog.txt не найден")
+
+    if (cloudAccessState = "blocked" || cloudAccessState = "denied")
+        issuesCritical.Push("Cloud: " GetCloudStatusText())
+    else if (cloudAccessState = "offline")
+        issuesCritical.Push("нет связи с Cloud")
+    else if (cloudAccessState != "ok")
+        issuesWarn.Push("Cloud ещё не подтверждён")
+
+    if (chatlogReadErrorStreak >= 3)
+        issuesCritical.Push("ошибки чтения chatlog (" chatlogReadErrorStreak " подряд)")
+    else if (chatlogReadErrorStreak >= 1)
+        issuesWarn.Push("сбои чтения chatlog (" chatlogReadErrorStreak ")")
+
+    if (diagnosticLastCheckMs >= 400 || diagnosticCheckLogMaxMs >= 800)
+        issuesWarn.Push("медленный CheckLog (last " diagnosticLastCheckMs " / max " diagnosticCheckLogMaxMs " мс)")
+
+    ; Лог молчит 10+ минут при активном доступе Cloud
+    silentMs := A_TickCount - lastChatlogChangeTick
+    if (cloudAccessState = "ok" && lastChatlogChangeTick > 0 && silentMs >= 600000)
+        issuesWarn.Push("chatlog не обновлялся " Round(silentMs / 60000) " мин")
+
+    if (issuesCritical.Length > 0) {
+        healthState := "critical"
+        healthMessage := issuesCritical[1]
+        if (issuesCritical.Length > 1)
+            healthMessage .= " (+" (issuesCritical.Length - 1) ")"
+    } else if (issuesWarn.Length > 0) {
+        healthState := "warn"
+        healthMessage := issuesWarn[1]
+        if (issuesWarn.Length > 1)
+            healthMessage .= " (+" (issuesWarn.Length - 1) ")"
+    } else {
+        healthState := "ok"
+        healthMessage := "Всё в порядке"
+    }
+
+    if (healthState != lastHealthState) {
+        if (healthState = "critical") {
+            PushHealthIncident("КРИТИЧНО: " healthMessage)
+            ShowToast("⚠ Критично: " healthMessage, 2800)
+        } else if (healthState = "warn") {
+            PushHealthIncident("Внимание: " healthMessage)
+            ShowToast("⚠ " healthMessage, 2200)
+        } else if (lastHealthState != "ok") {
+            PushHealthIncident("Восстановлено: " healthMessage)
+            ShowToast("✓ Здоровье: OK", 1600)
+        }
+        lastHealthState := healthState
+    }
+
+    if (CurrentView = "Diagnostics")
+        RefreshDiagnosticsView()
 }
 
 GetHudDesignText() {
@@ -5091,10 +5526,14 @@ FormatDiagnosticBytes(bytes) {
 }
 
 RefreshDiagnosticsView(*) {
-    global DiagnosticTextCtrl
+    global DiagnosticTextCtrl, DiagnosticHealthCtrl
 
     if IsObject(DiagnosticTextCtrl)
         DiagnosticTextCtrl.Value := BuildDiagnosticsText()
+    if IsObject(DiagnosticHealthCtrl) {
+        DiagnosticHealthCtrl.Text := GetHealthStatusLine()
+        DiagnosticHealthCtrl.SetFont("c" GetHealthStatusColor())
+    }
 }
 
 CloudView() {
@@ -5148,9 +5587,57 @@ RefreshCloudView(*) {
 }
 
 CloudCheckAccess(*) {
+    global nick, cloudAccessState, cloudAccessMessage, colorGreen, colorRed
+
+    progressDlg := ShowCloudCheckProgressDialog()
+    ; Даем окну отрисоваться до синхронного HTTP-запроса.
+    Sleep(50)
     CheckCloudAccess(false, false)
+    try progressDlg.Destroy()
+
     RefreshDashboardView()
     RefreshCloudView()
+
+    if (cloudAccessState = "ok") {
+        ShowAppDialog(
+            "Cloud",
+            "Проверка завершена успешно.`n`nНик: " nick "`nСтатус: доступ подтверждён.",
+            "OK",
+            colorGreen
+        )
+        ShowToast("✓ Cloud: доступ подтверждён")
+        return
+    }
+
+    detail := cloudAccessMessage
+    if (detail = "")
+        detail := GetCloudStatusText()
+
+    ShowAppDialog(
+        "Cloud",
+        "Проверка завершена неудачно.`n`nНик: " nick "`nПричина: " detail,
+        "OK",
+        colorRed
+    )
+}
+
+ShowCloudCheckProgressDialog() {
+    global colorBg, colorCard, colorAccent, colorText, colorMuted
+
+    dlg := Gui("+Border -SysMenu", "Cloud")
+    dlg.BackColor := colorBg
+    dlg.MarginX := 0
+    dlg.MarginY := 0
+    dlg.SetFont("s10 c" colorText, "Segoe UI")
+    dlg.Add("Text", "x0 y0 w380 h140 Background" colorBg)
+    dlg.Add("Text", "x18 y18 w344 h104 Background" colorCard)
+    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
+    dlg.Add("Text", "x38 y40 w300 h24 Background" colorCard, "Проверка доступа…")
+    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    dlg.Add("Text", "x38 y72 w300 h36 Background" colorCard, "Сверяем ник с таблицей Cloud.`nПодождите несколько секунд.")
+    dlg.Show("w380 h140")
+    try WinActivate(dlg.Hwnd)
+    return dlg
 }
 
 CloudChangeNick(*) {
@@ -5481,6 +5968,7 @@ SaveSettings(*) {
         IniWrite(autoResetEnabled, settingsFile, "Main", "autoResetEnabled")
         IniWrite(bindsEnabled, settingsFile, "Main", "bindsEnabled")
         IniWrite(checkUpdatesOnStartup, settingsFile, "Updates", "checkOnStartup")
+        IniWrite(testerMode, settingsFile, "Updates", "testerMode")
         IniWrite(startWithWindows, settingsFile, "Launcher", "startWithWindows")
         IniWrite(resetHour, settingsFile, "Main", "resetHour")
         IniWrite(resetMinute, settingsFile, "Main", "resetMinute")
