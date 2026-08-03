@@ -33,6 +33,7 @@ A_TrayMenu.Delete() ; убираем стандартные пункты
 
 A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
 A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
+A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
 A_TrayMenu.Add("🔄 Центрировать HUD", TrayCenterHUD)
 A_TrayMenu.Add()
 A_TrayMenu.Add("❌ Выход", TrayExit)
@@ -46,6 +47,10 @@ TrayOpenMenu(*) {
 
 TrayOpenSettings(*) {
     BuildMainWindow("Settings")
+}
+
+TrayOpenAi(*) {
+    OpenAiAssistant()
 }
 
 TrayCenterHUD(*) {
@@ -67,7 +72,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.5.2"
+CURRENT_VERSION := "10.6"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -122,11 +127,19 @@ lastResetDate := ""
 menuKey := "F10"
 resetKey := "F9"
 centerKey := "F5"
- hideKey := "F2"
+hideKey := "F2"
+aiKey := "F7"
 menuKeyEnabled := 1
 resetKeyEnabled := 1
 centerKeyEnabled := 1
 hideKeyEnabled := 1
+aiKeyEnabled := 1
+geminiApiKey := ""
+geminiModel := "gemini-3.6-flash"
+aiDailyLimit := 0
+aiDailyUsed := 0
+aiDailyRemaining := 0
+aiConfigLoaded := false
 hudDesign := "Compact"
 ; Тёмная оболочка; макет определяет расположение элементов.
 colorBg := "0B0E14"
@@ -166,10 +179,14 @@ if FileExist(settingsFile)
         resetKey := IniRead(settingsFile, "Keys", "resetKey", "F9")
         centerKey := IniRead(settingsFile, "Keys", "centerKey", "F5")
         hideKey := IniRead(settingsFile, "Keys", "hideKey", "F2")
+        aiKey := IniRead(settingsFile, "Keys", "aiKey", "F7")
         menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
         resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
         centerKeyEnabled := IniRead(settingsFile, "Keys", "centerKeyEnabled", 1)
         hideKeyEnabled := IniRead(settingsFile, "Keys", "hideKeyEnabled", 1)
+        aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 1)
+        geminiApiKey := IniRead(settingsFile, "AI", "geminiApiKey", "")
+        geminiModel := IniRead(settingsFile, "AI", "geminiModel", "gemini-3.6-flash")
         autoResetEnabled := IniRead(settingsFile, "Main", "autoResetEnabled", 0)
         bindsEnabled := IniRead(settingsFile, "Main", "bindsEnabled", 0)
         checkUpdatesOnStartup := IniRead(settingsFile, "Updates", "checkOnStartup", 1)
@@ -201,6 +218,10 @@ menuKeyEnabled += 0
 resetKeyEnabled += 0
 centerKeyEnabled += 0
 hideKeyEnabled += 0
+aiKeyEnabled += 0
+geminiApiKey := Trim(geminiApiKey)
+if (geminiModel = "" || geminiModel = "gemini-2.5-flash")
+    geminiModel := "gemini-3.6-flash"
 
 cloudAccessState := "unknown"
 cloudAccessMessage := "Ожидает проверки"
@@ -209,6 +230,8 @@ accessUrl := "https://script.google.com/macros/s/AKfycbx1qWofvCKam_l4JGZKXegu6wv
 EnsureNickBeforeCloudAccess()
 CheckCloudAccess(true, true)
 SetTimer(SendCloudPing, 3600000)
+SetTimer(FetchAiConfigFromCloud, -2000)
+SetTimer(FetchAiConfigFromCloud, 1800000)
 versionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/version.json"
 testVersionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/Test.json"
 if (checkUpdatesOnStartup)
@@ -275,11 +298,21 @@ SetMenuKeyCtrl := ""
 SetResetKeyCtrl := ""
 SetCenterKeyCtrl := ""
 SetHideKeyCtrl := ""
+SetAiKeyCtrl := ""
 SetMenuKeyEnabledCtrl := ""
 SetResetKeyEnabledCtrl := ""
 SetCenterKeyEnabledCtrl := ""
 SetHideKeyEnabledCtrl := ""
+SetAiKeyEnabledCtrl := ""
 SetHudDesignCtrl := ""
+AiGui := ""
+AiQuestionCtrl := ""
+AiAnswerCtrl := ""
+AiStatusCtrl := ""
+AiLimitCtrl := ""
+AiAskBtnCtrl := ""
+lastAiOpenTick := 0
+aiRequestBusy := false
 SetAutoResetCtrl := ""
 SetCheckUpdatesCtrl := ""
 SetStartupCtrl := ""
@@ -2649,6 +2682,7 @@ BuildMainWindow(initialView := "Dashboard") {
     SafeDestroyGui(&SettingsGui)
     settingsMenuHidden := false
     ResetDashboardControls()
+    ResetDiagnosticsControls()
     ResetCloudControls()
     ResetNotificationControls()
     GuiViewCtrls := Map()
@@ -4784,8 +4818,8 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, hudDesign, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetCenterKeyEnabledCtrl, SetHideKeyEnabledCtrl, SetHudDesignCtrl
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, aiKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, hudDesign, logFile
+    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetAiKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetCenterKeyEnabledCtrl, SetHideKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetHudDesignCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
@@ -4801,7 +4835,7 @@ SettingsView() {
     AddViewControl(view, "Text", "x270 y166 w110 h22 Background" colorCard " c" colorMuted, "Норма PM")
     SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background" uiInputBg, norm)
 
-    AddViewControl(view, "Text", "x250 y206 w280 h204 Background" colorCard)
+    AddViewControl(view, "Text", "x250 y206 w280 h248 Background" colorCard)
     AddViewControl(view, "Text", "x270 y222 w220 h22 Background" colorCard " c" colorText, "Горячие клавиши")
     AddViewControl(view, "Text", "x270 y258 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
     AddViewControl(view, "Text", "x494 y230 w28 h18 Background" colorCard " c" colorMuted, "Вкл.")
@@ -4816,10 +4850,13 @@ SettingsView() {
     AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
     SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w98 h26 c" colorText " Background" uiInputBg, hideKey)
     SetHideKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetHideKeyEnabled x496 y366 w20 h20 Checked" hideKeyEnabled " Background" colorCard)
+    AddViewControl(view, "Text", "x270 y402 w110 h22 Background" colorCard " c" colorMuted, "AI-ассистент")
+    SetAiKeyCtrl := AddViewControl(view, "Edit", "vSetAiKey x390 y398 w98 h26 c" colorText " Background" uiInputBg, aiKey)
+    SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y402 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
 
-    AddViewControl(view, "Text", "x250 y442 w280 h72 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y456 w120 h20 Background" colorCard " c" colorMuted, "Дизайн HUD")
-    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y480 w240 c" colorText " Background" uiInputBg, ["Компактный", "Расширенный", "Безопасный"])
+    AddViewControl(view, "Text", "x250 y468 w280 h66 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y478 w120 h18 Background" colorCard " c" colorMuted, "Дизайн HUD")
+    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y498 w240 c" colorText " Background" uiInputBg, ["Компактный", "Расширенный", "Безопасный"])
     SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : (hudDesign = "Safe" ? 3 : 1))
 
     ; Правая колонка: автоматизация и источник логов.
@@ -4894,18 +4931,23 @@ TesterView() {
     TesterModeCtrl.OnEvent("Click", ToggleTesterMode)
     TesterStatusCtrl := AddViewControl(view, "Text", "x274 y196 w552 h28 Background" colorCard " c" colorAccent " +0x200", "")
 
-    AddViewControl(view, "Text", "x250 y256 w600 h200 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y272 w500 h22 Background" colorCard " c" colorText, "Тестовый канал")
-    TesterInfoCtrl := AddViewControl(view, "Edit", "x274 y302 w552 h100 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, "")
-    checkButton := AddViewControl(view, "Text", "x274 y416 w170 h30 +0x200 Center Background" colorAccent " c" colorText, "Проверить")
+    AddViewControl(view, "Text", "x250 y256 w600 h170 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y268 w500 h20 Background" colorCard " c" colorText, "Тестовый канал")
+    TesterInfoCtrl := AddViewControl(view, "Edit", "x274 y292 w552 h78 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, "")
+    checkButton := AddViewControl(view, "Text", "x274 y380 w170 h28 +0x200 Center Background" colorAccent " c" colorText, "Проверить")
     BindTextButton(checkButton, colorAccent, CheckTestUpdates)
-    downloadButton := AddViewControl(view, "Text", "x456 y416 w170 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать")
+    downloadButton := AddViewControl(view, "Text", "x456 y380 w170 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать")
     BindTextButton(downloadButton, colorCardAlt, DownloadTestUpdate)
-    installButton := AddViewControl(view, "Text", "x638 y416 w188 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Установить test")
+    installButton := AddViewControl(view, "Text", "x638 y380 w188 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Установить test")
     BindTextButton(installButton, colorCardAlt, InstallTestUpdate)
 
-    AddViewControl(view, "Text", "x250 y476 w600 h60 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y490 w552 h36 Background" colorCard " c" colorMuted, "Файл на GitHub: Test/Test.json`nСтабильный канал в «Обновления» не затрагивается.")
+    AddViewControl(view, "Text", "x250 y424 w600 h100 Background" colorCard)
+    AddViewControl(view, "Text", "x274 y436 w500 h20 Background" colorCard " c" colorText, "Стабильный релиз")
+    AddViewControl(view, "Text", "x274 y460 w360 h36 Background" colorCard " c" colorMuted, "Вернуть официальную сборку из versions/version.json")
+    rollbackButton := AddViewControl(view, "Text", "x640 y458 w186 h32 +0x200 Center Background" colorAccent " c" colorText, "Откат на релиз")
+    BindTextButton(rollbackButton, colorAccent, RollbackToStableRelease)
+
+    AddViewControl(view, "Text", "x250 y540 w600 h28 Background" colorBg " c" colorMuted, "GitHub test: Test/Test.json  •  релиз: versions/version.json")
 
     RefreshTesterView()
 }
@@ -5095,6 +5137,79 @@ InstallTestUpdate(*) {
     }
 }
 
+; Откат с test-сборки на стабильный релиз (versions/version.json + versions/ChesNova.ahk).
+RollbackToStableRelease(*) {
+    global basePath, backupPath, CURRENT_VERSION
+
+    if !EnsureTesterModeEnabled()
+        return
+
+    result := ShowAppDialog(
+        "Откат на релиз",
+        "Установить стабильную версию с GitHub?`nТекущий файл будет сохранён в backup, затем заменён релизом.`n`nСейчас у вас: v" CURRENT_VERSION,
+        "YesNo"
+    )
+    if (result != "Yes")
+        return
+
+    mainScript := basePath "\ChesNova.ahk"
+    newScript := basePath "\ChesNova_release_new.ahk"
+    stableAhkUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/ChesNova.ahk"
+
+    progressDlg := ShowCloudCheckProgressDialog()
+    Sleep(40)
+
+    try {
+        if !FileExist(mainScript)
+            throw Error("Не найден текущий ChesNova.ahk.")
+
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        latest := versionInfo["latest"]
+        downloadUrl := versionInfo["download"]
+
+        ; Для авто-установки нужен .ahk. В манифесте часто zip — тогда берём versions/ChesNova.ahk.
+        installUrl := stableAhkUrl
+        if (downloadUrl != "" && InStr(StrLower(downloadUrl), ".ahk") && !InStr(StrLower(downloadUrl), ".zip"))
+            installUrl := downloadUrl
+
+        if FileExist(newScript)
+            FileDelete(newScript)
+
+        Download(installUrl, newScript)
+        if !FileExist(newScript) || FileGetSize(newScript) = 0
+            throw Error("Загруженный релизный файл пустой.`nURL: " installUrl)
+
+        DirCreate(backupPath)
+        backupFile := backupPath "\ChesNova_before_rollback_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".ahk"
+        FileCopy(mainScript, backupFile, 0)
+
+        try {
+            FileDelete(mainScript)
+            FileMove(newScript, mainScript, 0)
+        } catch as installErr {
+            if !FileExist(mainScript) && FileExist(backupFile)
+                FileCopy(backupFile, mainScript, 1)
+            throw installErr
+        }
+
+        try progressDlg.Destroy()
+
+        msg := "Стабильный релиз установлен."
+        if (latest != "")
+            msg .= "`nВерсия на GitHub: v" latest
+        msg .= "`nBackup: " backupFile
+        msg .= "`n`nПерезапусти ChesNova через лаунчер."
+        ShowAppDialog("Откат на релиз", msg)
+        ShowToast("✓ Откат на релиз выполнен")
+    } catch as err {
+        try progressDlg.Destroy()
+        if FileExist(newScript)
+            try FileDelete(newScript)
+        LogError("RollbackToStableRelease", "Ошибка отката на релиз", err.Message)
+        ShowAppDialog("Откат на релиз", "Не удалось установить стабильную версию.`n`n" err.Message)
+    }
+}
+
 RefreshSettingsView() {
     global logFile, LogFileTextCtrl
 
@@ -5187,6 +5302,9 @@ F10 — открыть меню
 F9 — сбросить PM вручную
 F5 — переместить HUD в центр
 F2 — скрыть или показать HUD
+F7 — AI-ассистент (Gemini)
+
+Ключ и лимит AI — из Google-таблицы (по нику).
 
 Во вкладке «Настройки» можно изменить или отключить
 каждую стандартную горячую клавишу.
@@ -5352,6 +5470,7 @@ RunHealthCheck(*) {
     global logFile, cloudAccessState, diagnosticLastCheckMs, diagnosticCheckLogMaxMs
     global chatlogReadErrorStreak, lastChatlogChangeTick
     global healthState, healthMessage, lastHealthState, CurrentView
+    global SettingsGui, settingsMenuBuilding
 
     issuesCritical := []
     issuesWarn := []
@@ -5408,8 +5527,9 @@ RunHealthCheck(*) {
         lastHealthState := healthState
     }
 
-    if (CurrentView = "Diagnostics")
-        RefreshDiagnosticsView()
+    if (settingsMenuBuilding || !IsObject(SettingsGui) || CurrentView != "Diagnostics")
+        return
+    RefreshDiagnosticsView()
 }
 
 GetHudDesignText() {
@@ -5448,13 +5568,18 @@ FormatDiagnosticBytes(bytes) {
 }
 
 RefreshDiagnosticsView(*) {
-    global DiagnosticTextCtrl, DiagnosticHealthCtrl
-
-    if IsObject(DiagnosticTextCtrl)
-        DiagnosticTextCtrl.Value := BuildDiagnosticsText()
-    if IsObject(DiagnosticHealthCtrl) {
-        DiagnosticHealthCtrl.Text := GetHealthStatusLine()
-        DiagnosticHealthCtrl.SetFont("c" GetHealthStatusColor())
+    global DiagnosticTextCtrl, DiagnosticHealthCtrl, SettingsGui, settingsMenuBuilding
+    if (settingsMenuBuilding || !IsObject(SettingsGui))
+        return
+    try {
+        if IsObject(DiagnosticTextCtrl)
+            DiagnosticTextCtrl.Value := BuildDiagnosticsText()
+        if IsObject(DiagnosticHealthCtrl) {
+            DiagnosticHealthCtrl.Text := GetHealthStatusLine()
+            DiagnosticHealthCtrl.SetFont("c" GetHealthStatusColor())
+        }
+    } catch as err {
+        ResetDiagnosticsControls()
     }
 }
 
@@ -5657,6 +5782,12 @@ ResetDashboardControls() {
     DashboardDaysOffMonthCtrl := ""
 }
 
+ResetDiagnosticsControls() {
+    global DiagnosticTextCtrl, DiagnosticHealthCtrl
+    DiagnosticTextCtrl := ""
+    DiagnosticHealthCtrl := ""
+}
+
 ResetCloudControls() {
     global CloudNickCtrl, CloudStatusCtrl, CloudAccessTextCtrl, CloudLastCheckCtrl
 
@@ -5674,11 +5805,13 @@ ResetNotificationControls() {
 }
 
 CloseSettings(*) {
-    global SettingsGui, settingsMenuHidden
+    global SettingsGui, settingsMenuHidden, CurrentView
     SaveMenuPosition()
     SafeDestroyGui(&SettingsGui)
     settingsMenuHidden := false
+    CurrentView := ""
     ResetDashboardControls()
+    ResetDiagnosticsControls()
     ResetCloudControls()
     ResetNotificationControls()
 }
@@ -5851,7 +5984,7 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, centerKey, hideKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, hudDesign, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
+    global menuKey, resetKey, centerKey, hideKey, aiKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, geminiApiKey, geminiModel, hudDesign, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY
 
     SaveMenuPosition()
     values := SettingsGui.Submit()
@@ -5877,10 +6010,12 @@ SaveSettings(*) {
     resetKey := values.SetResetKey
     centerKey := values.SetCenterKey
     hideKey := values.SetHideKey
+    aiKey := values.SetAiKey
     menuKeyEnabled := values.SetMenuKeyEnabled
     resetKeyEnabled := values.SetResetKeyEnabled
     centerKeyEnabled := values.SetCenterKeyEnabled
     hideKeyEnabled := values.SetHideKeyEnabled
+    aiKeyEnabled := values.SetAiKeyEnabled
     hudDesign := (values.SetHudDesign = "Расширенный") ? "Expanded" : ((values.SetHudDesign = "Безопасный") ? "Safe" : "Compact")
 
     try {
@@ -5899,10 +6034,14 @@ SaveSettings(*) {
         IniWrite(resetKey, settingsFile, "Keys", "resetKey")
         IniWrite(centerKey, settingsFile, "Keys", "centerKey")
         IniWrite(hideKey, settingsFile, "Keys", "hideKey")
+        IniWrite(aiKey, settingsFile, "Keys", "aiKey")
         IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
         IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
         IniWrite(centerKeyEnabled, settingsFile, "Keys", "centerKeyEnabled")
         IniWrite(hideKeyEnabled, settingsFile, "Keys", "hideKeyEnabled")
+        IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
+        IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
+        IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
         IniWrite(guiX, settingsFile, "GUI", "guiX")
         IniWrite(guiY, settingsFile, "GUI", "guiY")
         IniWrite(menuX, settingsFile, "GUI", "menuX")
@@ -5919,6 +6058,7 @@ SaveSettings(*) {
 
     SafeDestroyGui(&SettingsGui)
     ResetDashboardControls()
+    ResetDiagnosticsControls()
     ResetCloudControls()
     ResetNotificationControls()
 
@@ -6003,8 +6143,346 @@ CenterGUI(*) {
     TryIniWrite(guiY, settingsFile, "GUI", "guiY", "CenterGUI")
 }
 
+FetchAiConfigFromCloud(*) {
+    global nick, accessUrl, appVersion, settingsFile
+    global geminiApiKey, geminiModel, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiConfigLoaded
+
+    if (Trim(nick) = "" || nick = "Nick_Name")
+        return false
+
+    url := accessUrl "?nick=" UriEncode(nick) "&version=" UriEncode(appVersion) "&action=ai_config"
+    try {
+        result := HttpGetText(url)
+        if (result["status"] != 200)
+            return false
+        response := Trim(result["text"])
+    } catch as err {
+        LogError("FetchAiConfigFromCloud", "Сеть", err.Message)
+        return false
+    }
+
+    parts := StrSplit(response, "|")
+    if (parts.Length < 5 || parts[1] != "OK")
+        return false
+
+    geminiApiKey := Trim(parts[2])
+    aiDailyLimit := Integer(parts[3])
+    aiDailyUsed := Integer(parts[4])
+    aiDailyRemaining := Integer(parts[5])
+    aiConfigLoaded := true
+
+    if (geminiModel = "" || geminiModel = "gemini-2.5-flash")
+        geminiModel := "gemini-3.6-flash"
+
+    try {
+        IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
+        IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
+    }
+    return true
+}
+
+ConsumeAiQuotaFromCloud() {
+    global nick, accessUrl, aiDailyLimit, aiDailyUsed, aiDailyRemaining
+
+    if (Trim(nick) = "")
+        return Map("ok", false, "reason", "Нет ника")
+
+    url := accessUrl "?nick=" UriEncode(nick) "&action=ai_use"
+    try {
+        result := HttpGetText(url)
+        if (result["status"] != 200)
+            return Map("ok", false, "reason", "HTTP " result["status"])
+        response := Trim(result["text"])
+    } catch as err {
+        return Map("ok", false, "reason", err.Message)
+    }
+
+    parts := StrSplit(response, "|")
+    if (parts.Length < 4)
+        return Map("ok", false, "reason", "Некорректный ответ Cloud")
+
+    if (parts[1] = "LIMIT") {
+        aiDailyLimit := Integer(parts[2])
+        aiDailyUsed := Integer(parts[3])
+        aiDailyRemaining := Integer(parts[4])
+        return Map("ok", false, "reason", "Лимит на сегодня исчерпан (" aiDailyUsed "/" aiDailyLimit ")")
+    }
+    if (parts[1] != "OK")
+        return Map("ok", false, "reason", response)
+
+    aiDailyLimit := Integer(parts[2])
+    aiDailyUsed := Integer(parts[3])
+    aiDailyRemaining := Integer(parts[4])
+    return Map("ok", true, "reason", "")
+}
+
+GetAiLimitStatusText() {
+    global aiConfigLoaded, aiDailyLimit, aiDailyUsed, aiDailyRemaining, geminiApiKey
+    if !aiConfigLoaded
+        return "Лимит: ещё не загружен из таблицы"
+    if (Trim(geminiApiKey) = "")
+        return "Ключ пуст (проверьте A1000 в таблице)"
+    return "Лимит сегодня: " aiDailyUsed "/" aiDailyLimit " (осталось " aiDailyRemaining ")"
+}
+
+SetAiAskButtonLoading(isLoading) {
+    global AiAskBtnCtrl, colorAccent, colorCardAlt, colorText
+    if !IsObject(AiAskBtnCtrl)
+        return
+    try {
+        if (isLoading) {
+            AiAskBtnCtrl.Text := "Загрузка…"
+            AiAskBtnCtrl.Opt("Background" colorCardAlt)
+        } else {
+            AiAskBtnCtrl.Text := "Спросить"
+            AiAskBtnCtrl.Opt("Background" colorAccent)
+        }
+    }
+}
+
+OpenAiAssistant(*) {
+    global AiGui, AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, AiAskBtnCtrl, lastAiOpenTick
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, uiInputBg, uiDivider
+
+    if (A_TickCount - lastAiOpenTick < 350)
+        return
+    lastAiOpenTick := A_TickCount
+
+    if IsObject(AiGui) {
+        try {
+            if WinExist("ahk_id " AiGui.Hwnd) {
+                CloseAiAssistant()
+                return
+            }
+        }
+        SafeDestroyGui(&AiGui)
+        AiQuestionCtrl := ""
+        AiAnswerCtrl := ""
+        AiStatusCtrl := ""
+        AiLimitCtrl := ""
+        AiAskBtnCtrl := ""
+    }
+
+    FetchAiConfigFromCloud()
+
+    AiGui := Gui("+AlwaysOnTop +Border -MinimizeBox", "ChesNova AI")
+    AiGui.BackColor := colorBg
+    AiGui.MarginX := 0
+    AiGui.MarginY := 0
+    AiGui.OnEvent("Close", CloseAiAssistant)
+    AiGui.OnEvent("Escape", CloseAiAssistant)
+
+    AiGui.Add("Text", "x0 y0 w460 h520 Background" colorBg)
+    AiGui.SetFont("s12 Bold c" colorText, "Segoe UI")
+    AiGui.Add("Text", "x18 y14 w424 h26 Background" colorBg, "AI-ассистент")
+    AiGui.Add("Text", "x18 y46 w424 h1 Background" uiDivider)
+
+    AiGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    AiLimitCtrl := AiGui.Add("Text", "x18 y56 w424 h20 Background" colorBg " c" colorMuted, GetAiLimitStatusText())
+
+    AiGui.SetFont("s9 Bold c" colorText, "Segoe UI")
+    AiGui.Add("Text", "x18 y84 w424 h20 Background" colorBg, "Ваш вопрос")
+    AiGui.SetFont("s10 Norm c" colorText, "Segoe UI")
+    AiQuestionCtrl := AiGui.Add("Edit", "x18 y108 w424 h90 +Multi +WantReturn -Wrap VScroll Background" uiInputBg " c" colorText, "")
+
+    AiAskBtnCtrl := AiGui.Add("Text", "x18 y210 w204 h32 +0x200 Center Background" colorAccent " c" colorText, "Спросить")
+    BindTextButton(AiAskBtnCtrl, colorAccent, SubmitAiQuestion)
+    clearBtn := AiGui.Add("Text", "x238 y210 w204 h32 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
+    BindTextButton(clearBtn, colorCardAlt, ClearAiAssistant)
+
+    AiGui.SetFont("s9 Bold c" colorText, "Segoe UI")
+    AiGui.Add("Text", "x18 y256 w424 h20 Background" colorBg, "Ответ")
+    AiGui.SetFont("s10 Norm c" colorText, "Segoe UI")
+    AiAnswerCtrl := AiGui.Add("Edit", "x18 y280 w424 h170 +Multi +ReadOnly -Wrap +VScroll Background" colorCard " c" colorText, "")
+
+    AiGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    AiStatusCtrl := AiGui.Add("Text", "x18 y462 w424 h40 Background" colorBg " c" colorMuted, "Ключ и лимит — из Google-таблицы по нику.")
+
+    AiGui.Show("w460 h520 xCenter yCenter")
+    try {
+        WinActivate(AiGui.Hwnd)
+        AiQuestionCtrl.Focus()
+    }
+}
+
+SubmitAiQuestion(*) {
+    global AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, aiRequestBusy
+    global geminiApiKey, colorAccent, colorYellow, colorRed, colorMuted, colorGreen
+
+    if !IsObject(AiQuestionCtrl) || aiRequestBusy
+        return
+
+    question := Trim(AiQuestionCtrl.Value)
+    if (question = "") {
+        if IsObject(AiStatusCtrl) {
+            AiStatusCtrl.Text := "Введите вопрос, затем нажмите «Спросить»."
+            AiStatusCtrl.SetFont("s9 Norm c" colorYellow, "Segoe UI")
+        }
+        return
+    }
+
+    aiRequestBusy := true
+    SetAiAskButtonLoading(true)
+    if IsObject(AiAnswerCtrl)
+        AiAnswerCtrl.Value := "Загрузка ответа…"
+    if IsObject(AiStatusCtrl) {
+        AiStatusCtrl.Text := "Ожидание ответа Gemini…"
+        AiStatusCtrl.SetFont("s9 Norm c" colorAccent, "Segoe UI")
+    }
+
+    FetchAiConfigFromCloud()
+
+    if (Trim(geminiApiKey) = "") {
+        if IsObject(AiAnswerCtrl)
+            AiAnswerCtrl.Value := ""
+        if IsObject(AiStatusCtrl) {
+            AiStatusCtrl.Text := "Ключ пуст. Проверьте A1000 и доступ ника."
+            AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
+        }
+        SetAiAskButtonLoading(false)
+        aiRequestBusy := false
+        return
+    }
+
+    quota := ConsumeAiQuotaFromCloud()
+    if IsObject(AiLimitCtrl)
+        AiLimitCtrl.Text := GetAiLimitStatusText()
+
+    if !quota["ok"] {
+        if IsObject(AiAnswerCtrl)
+            AiAnswerCtrl.Value := ""
+        if IsObject(AiStatusCtrl) {
+            AiStatusCtrl.Text := quota["reason"]
+            AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
+        }
+        SetAiAskButtonLoading(false)
+        aiRequestBusy := false
+        return
+    }
+
+    try {
+        answer := AskGemini(question)
+        if IsObject(AiAnswerCtrl)
+            AiAnswerCtrl.Value := answer
+        if IsObject(AiStatusCtrl) {
+            AiStatusCtrl.Text := "Ответ получен."
+            AiStatusCtrl.SetFont("s9 Norm c" colorGreen, "Segoe UI")
+        }
+        if IsObject(AiLimitCtrl)
+            AiLimitCtrl.Text := GetAiLimitStatusText()
+    } catch as err {
+        LogError("SubmitAiQuestion", "Gemini", err.Message)
+        if IsObject(AiAnswerCtrl)
+            AiAnswerCtrl.Value := "Ошибка: " err.Message
+        if IsObject(AiStatusCtrl) {
+            AiStatusCtrl.Text := "Не удалось получить ответ."
+            AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
+        }
+    }
+
+    SetAiAskButtonLoading(false)
+    aiRequestBusy := false
+}
+
+ClearAiAssistant(*) {
+    global AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, colorMuted, aiRequestBusy
+    if aiRequestBusy
+        return
+    if IsObject(AiQuestionCtrl)
+        AiQuestionCtrl.Value := ""
+    if IsObject(AiAnswerCtrl)
+        AiAnswerCtrl.Value := ""
+    if IsObject(AiStatusCtrl) {
+        AiStatusCtrl.Text := "Поле очищено."
+        AiStatusCtrl.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    }
+    try {
+        if IsObject(AiQuestionCtrl)
+            AiQuestionCtrl.Focus()
+    }
+}
+
+CloseAiAssistant(*) {
+    global AiGui, AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, AiAskBtnCtrl, aiRequestBusy
+    aiRequestBusy := false
+    SafeDestroyGui(&AiGui)
+    AiQuestionCtrl := ""
+    AiAnswerCtrl := ""
+    AiStatusCtrl := ""
+    AiLimitCtrl := ""
+    AiAskBtnCtrl := ""
+}
+
+GetAiSystemPrompt() {
+    return "Ты помощник администратора игрового сервера (CRMP / SA-MP). Отвечай кратко, по делу, на русском. Помогай с формулировками наказаний, ответами на репорты и шаблонами. Не выдумывай внутренние правила сервера, если их не указали."
+}
+
+JsonEscape(str) {
+    str := StrReplace(str, "\", "\\")
+    str := StrReplace(str, '"', '\"')
+    str := StrReplace(str, "`r`n", "\n")
+    str := StrReplace(str, "`n", "\n")
+    str := StrReplace(str, "`r", "\n")
+    str := StrReplace(str, "`t", "\t")
+    return str
+}
+
+ExtractGeminiText(responseText) {
+    if RegExMatch(responseText, '"text"\s*:\s*"((?:\\.|[^"\\])*)"', &m)
+        return GeminiUnescape(m[1])
+    if RegExMatch(responseText, '"message"\s*:\s*"((?:\\.|[^"\\])*)"', &m)
+        return "API: " GeminiUnescape(m[1])
+    return "Не удалось разобрать ответ API.`n" SubStr(responseText, 1, 400)
+}
+
+GeminiUnescape(str) {
+    str := StrReplace(str, "\n", "`n")
+    str := StrReplace(str, "\r", "`r")
+    str := StrReplace(str, "\t", "`t")
+    str := StrReplace(str, '\"', '"')
+    str := StrReplace(str, "\\/", "/")
+    str := StrReplace(str, "\\\\", "\")
+    return str
+}
+
+HttpPostJson(url, jsonBody, apiKey := "", resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiveMs := 60000) {
+    http := ComObject("WinHttp.WinHttpRequest.5.1")
+    http.Open("POST", url, false)
+    try http.SetTimeouts(resolveMs, connectMs, sendMs, receiveMs)
+    http.SetRequestHeader("Content-Type", "application/json; charset=utf-8")
+    http.SetRequestHeader("Cache-Control", "no-cache")
+    if (apiKey != "")
+        http.SetRequestHeader("x-goog-api-key", apiKey)
+    http.Send(jsonBody)
+    return Map("status", http.Status, "text", Trim(http.ResponseText))
+}
+
+AskGemini(question) {
+    global geminiApiKey, geminiModel
+
+    model := Trim(geminiModel)
+    if (model = "" || model = "gemini-2.5-flash")
+        model := "gemini-3.6-flash"
+
+    url := "https://generativelanguage.googleapis.com/v1beta/models/" model ":generateContent"
+    body := "{"
+    body .= '"systemInstruction":{"parts":[{"text":"' JsonEscape(GetAiSystemPrompt()) '"}]},'
+    body .= '"contents":[{"role":"user","parts":[{"text":"' JsonEscape(question) '"}]}],'
+    body .= '"generationConfig":{"maxOutputTokens":1024}'
+    body .= "}"
+
+    result := HttpPostJson(url, body, geminiApiKey)
+    if (result["status"] != 200)
+        throw Error("HTTP " result["status"] "`n" SubStr(result["text"], 1, 400))
+
+    textOut := ExtractGeminiText(result["text"])
+    if (Trim(textOut) = "")
+        throw Error("Пустой ответ от модели.")
+    return textOut
+}
+
 RegisterHotkeys() {
-    global menuKey, resetKey, centerKey, hideKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, RegisteredStandardHotkeys
+    global menuKey, resetKey, centerKey, hideKey, aiKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
@@ -6026,6 +6504,10 @@ RegisterHotkeys() {
     if hideKeyEnabled {
         Hotkey(hideKey, ToggleGUI, "On")
         RegisteredStandardHotkeys.Push(hideKey)
+    }
+    if aiKeyEnabled {
+        Hotkey(aiKey, OpenAiAssistant, "On")
+        RegisteredStandardHotkeys.Push(aiKey)
     }
 }
 
