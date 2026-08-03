@@ -29,8 +29,8 @@ if (A_LastError = 183) {
 ; 🧩 TRAY MENU
 ; =========================
 
-A_TrayMenu.Delete() ; убираем стандартные пункты
-
+; Трей пересобирается после загрузки настроек (RebuildTrayMenu)
+A_TrayMenu.Delete()
 A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
 A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
 A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
@@ -38,7 +38,6 @@ A_TrayMenu.Add("🔄 Центрировать HUD", TrayCenterHUD)
 A_TrayMenu.Add()
 A_TrayMenu.Add("🔁 Перезапуск", TrayRestart)
 A_TrayMenu.Add("❌ Выход", TrayExit)
-
 A_TrayMenu.Default := "🏠 Открыть меню"
 A_TrayMenu.ClickCount := 1
 
@@ -66,6 +65,19 @@ TrayExit(*) {
     ExitApp()
 }
 
+RebuildTrayMenu() {
+    A_TrayMenu.Delete()
+    A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
+    A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
+    A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
+    A_TrayMenu.Add("🔄 Центрировать HUD", TrayCenterHUD)
+    A_TrayMenu.Add()
+    A_TrayMenu.Add("🔁 Перезапуск", TrayRestart)
+    A_TrayMenu.Add("❌ Выход", TrayExit)
+    A_TrayMenu.Default := "🏠 Открыть меню"
+    A_TrayMenu.ClickCount := 1
+}
+
 ; ------------------------------------------------------------
 ; 01. Startup, paths, settings and main HUD
 ; ------------------------------------------------------------
@@ -77,7 +89,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.6"
+CURRENT_VERSION := "11.0"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -104,6 +116,7 @@ notificationsCacheFile := dataPath "\notifications.json"
 notificationsStateFile := dataPath "\notifications_state.csv"
 notificationsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/notifications.json"
 DirCreate(bindsDir)
+aiHistoryFile := dataPath "\ai_history.json"
 errorsLogFile := logPath "\errors.log"
 try {
     if !FileExist(errorsLogFile)
@@ -149,23 +162,26 @@ aiDailyRemaining := 0
 aiQuotaDate := ""
 aiConfigLoaded := false
 hudDesign := "Compact"
-; Тёмная оболочка; макет определяет расположение элементов.
+uiTheme := "dark"  ; dark | light
+; Палитра заполняется ApplyTheme()
 colorBg := "0B0E14"
 colorSidebar := "10151E"
 colorCard := "171D28"
 colorCardAlt := "222A37"
-colorAccent := "6C63FF"
+colorAccent := "3B82F6"
 colorText := "F5F7FB"
-colorMuted := "939CAC"
-colorGreen := "41D07A"
+colorMuted := "A0A8B8"
+colorGreen := "3DDB7A"
 colorRed := "FF5B6B"
 colorYellow := "F6A623"
-; Единые токены UI
 uiDivider := "2B3443"
 uiInputBg := "151A22"
 uiBtnH := 28
 dotRed := colorRed
 dotGreen := colorGreen
+aiHistory := []  ; [{q, a, t}, ...] последние вопросы AI
+aiHistoryMax := 15
+aiHistoryFile := ""  ; заполняется ниже после dataPath
 guiX := "Center"
 guiY := "Center"
 menuX := "Center"
@@ -222,9 +238,10 @@ if FileExist(settingsFile)
         aiCompactX := IniRead(settingsFile, "GUI", "aiCompactX", "Center")
         aiCompactY := IniRead(settingsFile, "GUI", "aiCompactY", "Center")
         hudDesign := IniRead(settingsFile, "GUI", "hudDesign", "Compact")
+        uiTheme := IniRead(settingsFile, "GUI", "uiTheme", "dark")
     } catch as err {
         LogError("LoadSettings", "Повреждён settings.ini или ошибка чтения настроек", err.Message)
-        MsgBox("Повреждён settings.ini или не удалось прочитать настройки.`nБудут использованы значения по умолчанию.`n`n" err.Message, "ChesNova", "Iconx")
+        ShowToast("⚠ settings.ini повреждён — значения по умолчанию", 3200)
     }
 }
 
@@ -245,6 +262,9 @@ aiCompactKeyEnabled += 0
 geminiApiKey := Trim(geminiApiKey)
 if (geminiModel = "" || geminiModel = "gemini-1.5-flash" || geminiModel = "gemini-2.5-flash")
     geminiModel := "gemini-3.6-flash"
+
+ApplyTheme(uiTheme)
+LoadAiHistory()
 
 ; Локальный кэш лимита AI: если дата не сегодня — обнуляем used
 if (aiQuotaDate != FormatTime(, "yyyyMMdd")) {
@@ -311,9 +331,11 @@ punishmentSearch := ""
 
 MainGui := ""
 StatusDotCtrl := ""
+CloudDotCtrl := ""
 PMCountTextCtrl := ""
 HudNickCtrl := ""
 HudStatsCtrl := ""
+BindsPreviewCtrl := ""
 SettingsGui := ""
 settingsMenuHidden := false
 settingsMenuBuilding := false
@@ -442,6 +464,119 @@ punishmentTotals := LoadPunishmentTotals()
 if (logFile != "" && FileExist(logFile))
     lastSize := FileGetSize(logFile)
 
+
+; =========================
+; 🎨 THEME
+; =========================
+ApplyTheme(theme := "dark") {
+    global uiTheme, colorBg, colorSidebar, colorCard, colorCardAlt, colorAccent
+    global colorText, colorMuted, colorGreen, colorRed, colorYellow, uiDivider, uiInputBg
+    global dotRed, dotGreen
+
+    uiTheme := "dark"
+    ; Тёмная палитра (акцент можно сменить одним colorAccent)
+    colorBg := "080B12"
+    colorSidebar := "0E131C"
+    colorCard := "151C28"
+    colorCardAlt := "1E2736"
+    colorAccent := "3B82F6"
+    colorText := "F5F7FB"
+    colorMuted := "A0A8B8"
+    colorGreen := "3DDB7A"
+    colorRed := "FF5B6B"
+    colorYellow := "F6A623"
+    uiDivider := "2E3848"
+    uiInputBg := "0F141D"
+    dotRed := colorRed
+    dotGreen := colorGreen
+}
+
+; =========================
+; 🤖 AI HISTORY
+; =========================
+LoadAiHistory() {
+    global aiHistory, aiHistoryFile, aiHistoryMax
+    aiHistory := []
+    if (aiHistoryFile = "" || !FileExist(aiHistoryFile))
+        return
+    try {
+        text := FileRead(aiHistoryFile, "UTF-8")
+        ; Простой формат: строки Q|||A|||timestamp
+        for _, line in StrSplit(text, "`n") {
+            line := Trim(line, "`r`n")
+            if (line = "")
+                continue
+            part := StrSplit(line, "|||")
+            if (part.Length < 2)
+                continue
+            aiHistory.Push(Map("q", part[1], "a", part[2], "t", GetArrayValue(part, 3, "")))
+        }
+        while (aiHistory.Length > aiHistoryMax)
+            aiHistory.RemoveAt(1)
+    } catch as err {
+        LogError("LoadAiHistory", "Ошибка чтения истории AI", err.Message)
+    }
+}
+
+SaveAiHistory() {
+    global aiHistory, aiHistoryFile
+    if (aiHistoryFile = "")
+        return
+    try {
+        file := FileOpen(aiHistoryFile, "w", "UTF-8")
+        for _, item in aiHistory {
+            q := StrReplace(item["q"], "|||", " / ")
+            a := StrReplace(item["a"], "|||", " / ")
+            t := item.Has("t") ? item["t"] : ""
+            file.WriteLine(q "|||" a "|||" t)
+        }
+        file.Close()
+    } catch as err {
+        LogError("SaveAiHistory", "Ошибка записи истории AI", err.Message)
+    }
+}
+
+PushAiHistory(question, answer) {
+    global aiHistory, aiHistoryMax
+    question := Trim(question)
+    answer := Trim(answer)
+    if (question = "" || answer = "")
+        return
+    aiHistory.Push(Map("q", question, "a", answer, "t", FormatTime(A_Now, "dd.MM HH:mm")))
+    while (aiHistory.Length > aiHistoryMax)
+        aiHistory.RemoveAt(1)
+    SaveAiHistory()
+}
+
+BuildAiHistoryText() {
+    global aiHistory
+    if (aiHistory.Length = 0)
+        return "История пуста. Задайте вопрос — ответы появятся здесь."
+    text := ""
+    ; Новые сверху
+    i := aiHistory.Length
+    while (i >= 1) {
+        item := aiHistory[i]
+        text .= "▸ " item["t"] "`n"
+        text .= "Q: " item["q"] "`n"
+        text .= "A: " item["a"] "`n"
+        text .= "————————————————`n"
+        i -= 1
+    }
+    return text
+}
+
+HighlightSearchMatch(text, search) {
+    search := Trim(search)
+    if (search = "" || text = "")
+        return text
+    ; Пометка совпадений маркером «»» (Edit не умеет rich text)
+    pos := InStr(text, search, false)
+    if !pos
+        return text
+    return "» " text
+}
+
 ; =========================
 ; 🖥 MAIN GUI
 ; =========================
@@ -467,6 +602,7 @@ OnMessage(0x84, WM_NCHITTEST)
 ; ⌨️ HOTKEYS
 ; =========================
 RegisterHotkeys()
+RebuildTrayMenu()
 InitializeBinds()
 MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
@@ -474,10 +610,23 @@ SetTimer(CheckAutoReset, 30000)
 SetTimer(RunHealthCheck, 60000)
 
 UpdatePMDisplay()
+SetTimer(CheckChatlogPathOnStartup, -1500)
 
 ; ------------------------------------------------------------
 ; 02. Statistics helpers
 ; ------------------------------------------------------------
+
+CheckChatlogPathOnStartup(*) {
+    global logFile, cloudAccessState
+    if (logFile = "") {
+        ShowToast("⚠ chatlog не выбран — укажите в Настройках", 3200)
+        return
+    }
+    if !FileExist(logFile) {
+        ShowToast("⚠ chatlog не найден: " logFile, 3500)
+        return
+    }
+}
 
 ; =========================
 ; 📊 NORM MULTIPLIER
@@ -508,13 +657,14 @@ UpdatePMDisplay() {
 }
 
 BuildMainHud() {
-    global MainGui, StatusDotCtrl, PMCountTextCtrl, HudNickCtrl, HudStatsCtrl
+    global MainGui, StatusDotCtrl, CloudDotCtrl, PMCountTextCtrl, HudNickCtrl, HudStatsCtrl
     global hudDesign, guiX, guiY, colorCard, colorAccent, colorText, colorMuted, dotRed, nick, pmCount
 
     if IsObject(MainGui)
         try MainGui.Destroy()
 
     StatusDotCtrl := ""
+    CloudDotCtrl := ""
     PMCountTextCtrl := ""
     HudNickCtrl := ""
     HudStatsCtrl := ""
@@ -526,7 +676,9 @@ BuildMainHud() {
 
     if (hudDesign = "Expanded") {
         MainGui.SetFont("s8 c" colorText, "Segoe UI")
-        HudNickCtrl := MainGui.Add("Text", "x4 y4 w142 h17 Center c" colorText, nick)
+        HudNickCtrl := MainGui.Add("Text", "x4 y4 w128 h17 Center c" colorText, nick)
+        CloudDotCtrl := MainGui.Add("Text", "x134 y4 w14 h17 Center c" colorMuted, "●")
+        CloudDotCtrl.SetFont("s7 c" colorMuted, "Segoe UI")
         MainGui.Add("Text", "x4 y23 w142 h1 Background" uiDivider)
         PMCountTextCtrl := MainGui.Add("Text", "x4 y29 w142 h19 Center c" colorText, "PM: " pmCount)
         MainGui.Add("Text", "x48 y51 w54 h2 Background" colorAccent)
@@ -535,6 +687,7 @@ BuildMainHud() {
             MainGui.Show("w150 h108 xCenter yCenter")
         else
             MainGui.Show("w150 h108 x" guiX " y" guiY)
+        UpdateCloudHudDot()
     } else if (hudDesign = "Safe") {
         MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
         PMCountTextCtrl := MainGui.Add("Text", "x2 y2 w64 h16 Center c" colorText, "PM: " pmCount)
@@ -544,13 +697,32 @@ BuildMainHud() {
             MainGui.Show("w68 h20 x" guiX " y" guiY " NA")
     } else {
         MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
-        StatusDotCtrl := MainGui.Add("Text", "x6 y5 c" dotRed, "●")
-        PMCountTextCtrl := MainGui.Add("Text", "x20 y4 w68 c" colorText, "PM: " pmCount)
+        StatusDotCtrl := MainGui.Add("Text", "x4 y5 c" dotRed, "●")
+        CloudDotCtrl := MainGui.Add("Text", "x16 y5 c" colorMuted, "●")
+        CloudDotCtrl.SetFont("s7 c" colorMuted, "Segoe UI")
+        PMCountTextCtrl := MainGui.Add("Text", "x28 y4 w62 c" colorText, "PM: " pmCount)
         if (guiX = "Center")
-            MainGui.Show("w90 h24 xCenter yCenter")
+            MainGui.Show("w96 h24 xCenter yCenter")
         else
-            MainGui.Show("w90 h24 x" guiX " y" guiY)
+            MainGui.Show("w96 h24 x" guiX " y" guiY)
+        UpdateCloudHudDot()
     }
+}
+
+UpdateCloudHudDot() {
+    global CloudDotCtrl, cloudAccessState, colorGreen, colorRed, colorYellow, colorMuted
+    if !IsObject(CloudDotCtrl)
+        return
+    col := colorMuted
+    switch cloudAccessState {
+        case "ok":
+            col := colorGreen
+        case "blocked", "denied", "offline":
+            col := colorRed
+        case "unknown":
+            col := colorYellow
+    }
+    try CloudDotCtrl.SetFont("s7 c" col, "Segoe UI")
 }
 
 BuildHudPunishmentStats() {
@@ -968,13 +1140,13 @@ BuildPunishmentTypeDetails(type, days := 10, search := "") {
             if (duration = "")
                 duration := "не указано"
 
-            details .= "[" part[1] " " part[2] "] " rowType "`n"
-            details .= "Администратор: " part[3] "`n"
-            details .= "Игрок: " part[4] "`n"
-            details .= "Причина: " part[6] "`n"
+            block := "[" part[1] " " part[2] "] " rowType "`n"
+            block .= "Администратор: " part[3] "`n"
+            block .= "Игрок: " part[4] "`n"
+            block .= "Причина: " part[6] "`n"
             if (!noDurationTypes.Has(rowType))
-                details .= "Срок: " duration "`n"
-            details .= "`n"
+                block .= "Срок: " duration "`n"
+            details .= HighlightSearchMatch(block, search) "`n"
         }
     }
 
@@ -1117,7 +1289,7 @@ SaveDayStats() {
     }
 
     if !TryFileAppend(historyDate "," pmCount "," norm "`n", historyFile, "SaveDayStats", "Ошибка записи истории нормы")
-        MsgBox("Не удалось сохранить историю нормы.`nПодробности записаны в errors.log.", "Ошибка", "Iconx")
+        ShowToast("⚠ Не удалось сохранить историю нормы", 2200)
 }
 
 BuildNormHistoryText() {
@@ -1205,8 +1377,10 @@ BuildPmLogsText(search := "") {
         {
             line := lines[total - A_Index + 1]
             part := StrSplit(line, "|")
-            if (part.Length >= 4)
-                logsText .= "[" part[1] " " part[2] "] " part[3] ": " JoinArrayFrom(part, 4, "|") "`n`n"
+            if (part.Length >= 4) {
+                entry := "[" part[1] " " part[2] "] " part[3] ": " JoinArrayFrom(part, 4, "|")
+                logsText .= HighlightSearchMatch(entry, search) "`n`n"
+            }
         }
     }
 
@@ -1953,13 +2127,13 @@ GetBindTypeText(type) {
 
     switch type {
         case "hotkey":
-            return "Клавишный бинд"
+            return "⌨ Клавиша"
         case "hotstring":
-            return "Текстовая замена"
+            return "✏ Текст"
         case "macro":
-            return "Массовые сообщения"
+            return "📢 Макрос"
         default:
-            return "Клавишный бинд"
+            return "⌨ Клавиша"
     }
 }
 
@@ -2391,6 +2565,103 @@ RefreshBindsList(*) {
         ; 6-я скрытая колонка хранит ключ бинда — trigger.
         BindsListCtrl.Add(, GetBindTypeText(bind["type"]), bind["category"], bind["name"], bind["trigger"], GetBindRuntimeStatusText(bind), bind["trigger"])
     }
+    UpdateBindPreview()
+}
+
+OnBindListSelect(*) {
+    UpdateBindPreview()
+}
+
+UpdateBindPreview() {
+    global BindsPreviewCtrl
+    if !IsObject(BindsPreviewCtrl)
+        return
+    trigger := GetSelectedBindTrigger()
+    if (trigger = "") {
+        BindsPreviewCtrl.Value := "Выберите бинд в списке"
+        return
+    }
+    bind := GetBindByTrigger(trigger)
+    if !IsObject(bind) {
+        BindsPreviewCtrl.Value := "Бинд не найден"
+        return
+    }
+    text := GetBindTypeText(bind["type"]) " / " bind["category"] "`n"
+    text .= bind["name"] "  ·  " bind["trigger"] "`n"
+    text .= "————————————————`n"
+    text .= bind["content"]
+    BindsPreviewCtrl.Value := text
+}
+
+ExportBindsToFile(*) {
+    global bindsDir
+    savePath := FileSelect("S", bindsDir "\binds_export.csv", "Экспорт биндов", "Бинды CSV (*.csv)")
+    if (savePath = "")
+        return
+    if !InStr(StrLower(savePath), ".csv")
+        savePath .= ".csv"
+
+    binds := ReadBinds()
+    try {
+        file := FileOpen(savePath, "w", "UTF-8")
+        for _, bind in binds {
+            line := EncodeBindField(bind["type"]) "|"
+            line .= EncodeBindField(bind["category"]) "|"
+            line .= EncodeBindField(bind["name"]) "|"
+            line .= EncodeBindField(bind["trigger"]) "|"
+            line .= EncodeBindField(bind["content"]) "|"
+            line .= (bind["enabled"] + 0)
+            file.WriteLine(line)
+        }
+        file.Close()
+        ShowToast("✓ Экспорт: " binds.Length " биндов")
+        ShowAppDialog("Экспорт биндов", "Сохранено: " binds.Length " биндов`n`n" savePath)
+    } catch as err {
+        LogError("ExportBindsToFile", "Ошибка экспорта", err.Message)
+        ShowAppDialog("Экспорт биндов", "Не удалось сохранить файл.`n`n" err.Message)
+    }
+}
+
+TestSelectedBind(*) {
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
+    trigger := GetSelectedBindTrigger()
+    if (trigger = "") {
+        ShowAppDialog("Тест бинда", "Выберите бинд в списке.")
+        return
+    }
+    bind := GetBindByTrigger(trigger)
+    if !IsObject(bind) {
+        ShowAppDialog("Тест бинда", "Бинд не найден.")
+        return
+    }
+
+    preview := "Тип: " GetBindTypeText(bind["type"]) "`n"
+    preview .= "Триггер: " bind["trigger"] "`n"
+    preview .= "Категория: " bind["category"] "`n"
+    preview .= "————————————————`n"
+    preview .= "Что уйдёт в чат / Send:`n`n"
+    preview .= bind["content"]
+    preview .= "`n`n————————————————`nНичего не отправлено в игру — только превью."
+
+    dlg := Gui("+Border", "Тест бинда")
+    dlg.BackColor := colorBg
+    dlg.MarginX := 0
+    dlg.MarginY := 0
+    dlg.SetFont("s10 c" colorText, "Segoe UI")
+    dlg.Add("Text", "x0 y0 w520 h420 Background" colorBg)
+    dlg.Add("Text", "x18 y18 w484 h50 Background" colorCard)
+    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
+    dlg.Add("Text", "x34 y28 w400 h24 Background" colorCard, "Тест: " bind["name"])
+    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    dlg.Add("Text", "x34 y52 w400 h18 Background" colorCard, "Превью без отправки в игру")
+    dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
+    dlg.Add("Edit", "x18 y80 w484 h280 +Multi +ReadOnly -Wrap +VScroll Background" colorCard " c" colorText, preview)
+    closeBtn := dlg.Add("Text", "x382 y372 w120 h30 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
+    BindTextButton(closeBtn, colorAccent, (*) => dlg.Destroy())
+    dlg.OnEvent("Close", (*) => dlg.Destroy())
+    dlg.OnEvent("Escape", (*) => dlg.Destroy())
+    dlg.Show("w520 h420")
+    try WinActivate(dlg.Hwnd)
 }
 
 RefreshBindCategoryFilter(selectedCategory := "") {
@@ -2472,8 +2743,7 @@ RegisterCustomBinds() {
             }
         } catch as err {
             LogError("RegisterCustomBinds", "Ошибка регистрации бинда: " trigger, err.Message)
-            message := "Не удалось зарегистрировать бинд " . Chr(34) . bind["name"] . Chr(34) . ":`n" . err.Message
-            MsgBox(message, "Бинды", "Icon!")
+            ShowToast("⚠ Бинд «" bind["name"] "»: " err.Message, 2800)
         }
     }
 }
@@ -2725,7 +2995,7 @@ CheckLog(*) {
 
     TryFileDelete(saveFile, "CheckLog", "Ошибка удаления pm_count.txt перед сохранением")
     if !TryFileAppend(pmCount, saveFile, "CheckLog", "Ошибка записи pm_count.txt")
-        MsgBox("Не удалось сохранить счётчик PM.`nПодробности записаны в errors.log.", "Ошибка", "Iconx")
+        ShowToast("⚠ Не удалось сохранить счётчик PM", 2200)
 
     if IsObject(PMCountTextCtrl)
         PMCountTextCtrl.Text := "PM: " pmCount
@@ -2769,7 +3039,7 @@ CheckAutoReset(*) {
     TryFileDelete(saveFile, "CheckAutoReset", "Ошибка удаления pm_count.txt при автосбросе")
     lastResetDate := nowDate
     if !TryIniWrite(lastResetDate, settingsFile, "Main", "lastResetDate", "CheckAutoReset")
-        MsgBox("Не удалось сохранить дату автосброса.`nПодробности записаны в errors.log.", "Ошибка", "Iconx")
+        ShowToast("⚠ Не удалось сохранить дату автосброса", 2200)
     if IsObject(PMCountTextCtrl)
         PMCountTextCtrl.Text := "PM:0"
     UpdatePMDisplay()
@@ -4540,17 +4810,21 @@ BindsView() {
     BindsCategoryCtrl.OnEvent("Change", RefreshBindsList)
     BindsCategoryStatusCtrl := AddViewControl(view, "Text", "x710 y173 w120 h20 Background" colorCard " c" colorMuted, "Выберите фильтр")
 
-    ; Ряд 1 — категории (4 равные кнопки по сетке 600px)
-    addCategoryButton := AddViewControl(view, "Text", "x250 y222 w141 h28 +0x200 Center Background" colorAccent " c" colorText, "Доб. катег.")
+    ; Ряд 1 — категории + импорт/экспорт (сетка ~600)
+    addCategoryButton := AddViewControl(view, "Text", "x250 y222 w95 h28 +0x200 Center Background" colorAccent " c" colorText, "Доб. кат.")
     BindTextButton(addCategoryButton, colorAccent, AddBindCategory)
-    deleteCategoryButton := AddViewControl(view, "Text", "x403 y222 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удал. катег.")
+    deleteCategoryButton := AddViewControl(view, "Text", "x353 y222 w95 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удал. кат.")
     BindTextButton(deleteCategoryButton, colorCardAlt, DeleteSelectedBindCategory)
-    toggleCategoryButton := AddViewControl(view, "Text", "x556 y222 w141 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл кат.")
+    toggleCategoryButton := AddViewControl(view, "Text", "x456 y222 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл")
     BindTextButton(toggleCategoryButton, colorCardAlt, ToggleSelectedBindCategory)
-    importButton := AddViewControl(view, "Text", "x709 y222 w141 h28 +0x200 Center Background" colorAccent " c" colorText, "Импорт")
+    importButton := AddViewControl(view, "Text", "x564 y222 w90 h28 +0x200 Center Background" colorAccent " c" colorText, "Импорт")
     BindTextButton(importButton, colorAccent, ImportBindsFromFile)
+    exportButton := AddViewControl(view, "Text", "x662 y222 w90 h28 +0x200 Center Background" colorAccent " c" colorText, "Экспорт")
+    BindTextButton(exportButton, colorAccent, ExportBindsToFile)
+    testButton := AddViewControl(view, "Text", "x760 y222 w90 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Тест")
+    BindTextButton(testButton, colorCardAlt, TestSelectedBind)
 
-    ; Ряд 2 — бинды (5 равных: 112 + 4*gap 12 ≈ 600)
+    ; Ряд 2 — бинды
     addButton := AddViewControl(view, "Text", "x250 y270 w112 h28 +0x200 Center Background" colorAccent " c" colorText, "Добавить")
     BindTextButton(addButton, colorAccent, AddBind)
     editButton := AddViewControl(view, "Text", "x374 y270 w112 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Изменить")
@@ -4562,16 +4836,22 @@ BindsView() {
     dupButton := AddViewControl(view, "Text", "x746 y270 w104 h28 +0x200 Center Background" colorAccent " c" colorText, "Дубликаты")
     BindTextButton(dupButton, colorAccent, ShowBindDuplicatesScan)
 
-    ; 6-я колонка скрытая: там хранится trigger, потому что ID больше не используется.
-    BindsListCtrl := AddViewControl(view, "ListView", "x250 y316 w600 h200 Background" colorCard " c" colorText, ["Тип", "Категория", "Название", "Триггер", "Статус", "Ключ"])
-    BindsListCtrl.ModifyCol(1, 80)
-    BindsListCtrl.ModifyCol(2, 135)
-    BindsListCtrl.ModifyCol(3, 170)
-    BindsListCtrl.ModifyCol(4, 120)
-    BindsListCtrl.ModifyCol(5, 70)
+    ; Список + превью справа
+    BindsListCtrl := AddViewControl(view, "ListView", "x250 y316 w360 h200 Background" colorCard " c" colorText, ["Тип", "Категория", "Название", "Триггер", "Статус", "Ключ"])
+    BindsListCtrl.ModifyCol(1, 70)
+    BindsListCtrl.ModifyCol(2, 70)
+    BindsListCtrl.ModifyCol(3, 90)
+    BindsListCtrl.ModifyCol(4, 70)
+    BindsListCtrl.ModifyCol(5, 50)
     BindsListCtrl.ModifyCol(6, 0)
     BindsListCtrl.OnEvent("ColClick", SortBindsByColumn)
     BindsListCtrl.OnEvent("DoubleClick", EditSelectedBind)
+    BindsListCtrl.OnEvent("ItemSelect", OnBindListSelect)
+    BindsListCtrl.OnEvent("Click", OnBindListSelect)
+
+    AddViewControl(view, "Text", "x620 y316 w230 h18 Background" colorBg " c" colorMuted, "Превью содержимого")
+    global BindsPreviewCtrl
+    BindsPreviewCtrl := AddViewControl(view, "Edit", "x620 y336 w230 h180 ReadOnly +Multi +WantReturn +VScroll Background" colorCard " c" colorText, "Выберите бинд в списке")
 }
 
 SortBindsByColumn(ctrl, column) {
@@ -5013,7 +5293,7 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, hudDesign, logFile
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, hudDesign, uiTheme, logFile
     global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetAiKeyCtrl, SetAiCompactKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetCenterKeyEnabledCtrl, SetHideKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiCompactKeyEnabledCtrl, SetHudDesignCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
@@ -5423,145 +5703,82 @@ HelpView() {
     AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
     helpText := "
 (
-━━━━━━━━━━━━━━━━━━━━━━
-📌 НАСТРОЙКА
+СТАРТ
 
-• Нажми F10
-• Укажи ник
-• Укажи норму /pm
-• Выбери chatlog.txt
-
-━━━━━━━━━━━━━━━━━━━━━━
-⌨️ БИНДЫ (ФОРМАТ)
-
-Обычные:
-F1, F2, F5, F10
-
-SHIFT:
-+1 = Shift + 1
-+2 = Shift + 2
-+0 = Shift + 0
-
-CTRL:
-^1 = Ctrl + 1
-^F5 = Ctrl + F5
-
-ALT:
-!1 = Alt + 1
-!F2 = Alt + F2
-
-━━━━━━━━━━━━━━━━━━━━━━
-📂 ЛОГ ФАЙЛ
-
-documents > RADMIR CRMP User Files > SAMP > chatlog.txt
-
-━━━━━━━━━━━━━━━━━━━━━━
-📊 ИНДИКАТОР
-
-● Красный = не выполнено
-● Зелёный = выполнено
-
-━━━━━━━━━━━━━━━━━━━━━━
-🔁 УПРАВЛЕНИЕ
-
-F9 — сброс
-F2 — скрыть HUD
-F5 — центр
-
-━━━━━━━━━━━━━━━━━━━━━━
-⚖️ НАКАЗАНИЯ
-
-История наказаний отображается по выбранному типу и периоду.
-
-━━━━━━━━━━━━━━━━━━━━━━
-👨‍💻 АВТОР
-
-VK: @m.ches
-━━━━━━━━━━━━━━━━━━━━━━
-)"
-    helpText := "
-(
-НАСТРОЙКА
-
-1. Нажмите F10, чтобы открыть меню.
+1. Откройте меню (по умолчанию F10).
 2. Укажите игровой ник и норму PM.
-3. Выберите файл chatlog.txt.
+3. Выберите chatlog.txt:
+   Документы → RADMIR CRMP User Files → SAMP → chatlog.txt
+4. Дождитесь зелёного статуса Cloud (вкладка Cloud или точка на HUD).
 
-Обычно chatlog.txt находится здесь:
-Документы → RADMIR CRMP User Files → SAMP → chatlog.txt
+Без подтверждённого Cloud счётчик PM не считает.
 
-Счётчик автоматически обрабатывает только новые строки лога.
+————————————————
+ГОРЯЧИЕ КЛАВИШИ (по умолчанию)
 
-━━━━━━━━━━━━━━━━━━━━━━
-ГОРЯЧИЕ КЛАВИШИ
+F10 — меню
+F9  — сброс PM (с сохранением в историю)
+F5  — HUD в центр
+F2  — скрыть / показать HUD
+F7  — AI-ассистент
+F6  — мини-окно AI
 
-F10 — открыть меню
-F9 — сбросить PM вручную
-F5 — переместить HUD в центр
-F2 — скрыть или показать HUD
-F7 — AI-ассистент (Gemini)
+В чате игры: /ai ваш вопрос + Enter
 
-Ключ и лимит AI — из Google-таблицы (по нику).
+Клавиши можно сменить или отключить во вкладке «Настройки».
 
-Во вкладке «Настройки» можно изменить или отключить
-каждую стандартную горячую клавишу.
+————————————————
+HUD
 
-━━━━━━━━━━━━━━━━━━━━━━
-HUD И FPS
+● слева — норма PM (красный / зелёный)
+● рядом — Cloud (зелёный ок, жёлтый ожидание, красный нет доступа)
 
-Компактный — основной небольшой счётчик.
-Расширенный — показывает больше информации.
-Безопасный — облегчённый HUD для случаев, когда окно
-счётчика влияет на FPS в игре.
+Компактный — маленький счётчик.
+Расширенный — ник, PM и наказания за день.
+Безопасный — если HUD режет FPS в игре.
 
-Если FPS снижается при показе HUD, выберите
-«Безопасный» дизайн в настройках.
+————————————————
+НОРМА И ОТГУЛЫ
 
-━━━━━━━━━━━━━━━━━━━━━━
-НОРМА И АВТОСБРОС
+Сброс: F9 или автосброс по времени в настройках.
+История нормы и отгулы — во вкладках «Норма» и «Отгулы».
 
-Норму PM можно сбросить вручную клавишей F9 или
-автоматически в выбранное время.
+————————————————
+НАКАЗАНИЯ И PM-ЛОГИ
 
-При включении автосброса после заданного времени
-норма не будет сброшена задним числом.
+Считаются только ваши действия из chatlog.
+Фильтр по типу, периоду и поиску. Совпадения помечаются «».
 
-━━━━━━━━━━━━━━━━━━━━━━
+————————————————
 БИНДЫ
 
-Во вкладке «Бинды» доступны текстовые бинды, хоткеи
-и макросы.
+Включите «Бинды включены».
+Типы: клавиша, текстовая замена, макрос.
 
-Примеры: F1 — обычная клавиша; +1 — Shift + 1;
-^F5 — Ctrl + F5; !F2 — Alt + F2.
+Примеры триггеров:
+  F1     — клавиша
+  +1     — Shift+1
+  ^F5    — Ctrl+F5
+  !F2    — Alt+F2
 
-━━━━━━━━━━━━━━━━━━━━━━
-НАКАЗАНИЯ
+Превью — справа от списка.
+«Тест» — что уйдёт в чат, без отправки в игру.
+Импорт / экспорт — CSV.
 
-HUD отображает наказания, выданные только за текущий день:
-Kick, Jail, Warn, Mute, Vmute, Rmute, Ban, Gunban и Sban.
+————————————————
+AI
 
-Полная история доступна во вкладке «Наказания».
+Ключ и дневной лимит подтягиваются из Cloud по нику.
+История последних вопросов — кнопка «История».
 
-━━━━━━━━━━━━━━━━━━━━━━
-ДИАГНОСТИКА
-
-Вкладка «Диагностика» показывает интервал и время CheckLog,
-количество новых строк и размер файлов логов.
-
-При проблемах со счётчиком или FPS отправьте разработчику
-скриншот диагностики и файл errors.log.
-
-━━━━━━━━━━━━━━━━━━━━━━
+————————————————
 ОБНОВЛЕНИЯ И СКРИПТЫ
 
-Во вкладке «Обновления» можно проверить, установить или
-скачать последнюю версию вручную.
+«Обновления» — проверить / установить релиз.
+«Скрипты» — путь к игре и установка пакетов.
+«Тестировщик» — только если вы тестер.
 
-Во вкладке «Скрипты» укажите папку игры и установите
-ChesNova, aTools или Onishi. Для Onishi также устанавливается Loader.
-
-━━━━━━━━━━━━━━━━━━━━━━
+————————————————
 ПОДДЕРЖКА
 
 Автор: Misha_Ches
@@ -5809,6 +6026,7 @@ RefreshCloudView(*) {
     global CloudNickCtrl, CloudStatusCtrl, CloudAccessTextCtrl, CloudLastCheckCtrl
     global pmCount, norm, colorMuted
 
+    UpdateCloudHudDot()
     if !IsObject(SettingsGui)
         return
 
@@ -6190,7 +6408,7 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, geminiApiKey, geminiModel, hudDesign, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
+    global menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, geminiApiKey, geminiModel, hudDesign, uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
 
     SaveMenuPosition()
     values := SettingsGui.Submit()
@@ -6259,6 +6477,7 @@ SaveSettings(*) {
         IniWrite(aiGuiX, settingsFile, "GUI", "aiGuiX")
         IniWrite(aiGuiY, settingsFile, "GUI", "aiGuiY")
         IniWrite(hudDesign, settingsFile, "GUI", "hudDesign")
+        IniWrite(uiTheme, settingsFile, "GUI", "uiTheme")
         SetWindowsStartup(startWithWindows)
     } catch as err {
         LogError("SaveSettings", "Ошибка записи settings.ini", err.Message)
@@ -6609,10 +6828,12 @@ OpenAiAssistant(*) {
     AiGui.SetFont("s10 Norm c" colorText, "Segoe UI")
     AiQuestionCtrl := AiGui.Add("Edit", "x18 y108 w424 h90 +Multi +WantReturn -Wrap VScroll Background" uiInputBg " c" colorText, "")
 
-    AiAskBtnCtrl := AiGui.Add("Text", "x18 y210 w204 h32 +0x200 Center Background" colorAccent " c" colorText, "Спросить")
+    AiAskBtnCtrl := AiGui.Add("Text", "x18 y210 w136 h32 +0x200 Center Background" colorAccent " c" colorText, "Спросить")
     BindTextButton(AiAskBtnCtrl, colorAccent, SubmitAiQuestion)
-    clearBtn := AiGui.Add("Text", "x238 y210 w204 h32 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
+    clearBtn := AiGui.Add("Text", "x162 y210 w136 h32 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
     BindTextButton(clearBtn, colorCardAlt, ClearAiAssistant)
+    histBtn := AiGui.Add("Text", "x306 y210 w136 h32 +0x200 Center Background" colorCardAlt " c" colorText, "История")
+    BindTextButton(histBtn, colorCardAlt, ShowAiHistoryDialog)
 
     AiGui.SetFont("s9 Bold c" colorText, "Segoe UI")
     AiGui.Add("Text", "x18 y256 w424 h20 Background" colorBg, "Ответ")
@@ -6721,6 +6942,7 @@ SubmitAiQuestion(*) {
 
     try {
         answer := AskGemini(question)
+        PushAiHistory(question, answer)
         if IsObject(AiAnswerCtrl)
             AiAnswerCtrl.Value := answer
         if IsObject(AiStatusCtrl) {
@@ -6729,6 +6951,7 @@ SubmitAiQuestion(*) {
         }
         if IsObject(AiLimitCtrl)
             AiLimitCtrl.Text := GetAiLimitStatusText()
+        try RefreshAiHistoryPanel()
     } catch as err {
         LogError("SubmitAiQuestion", "Gemini", err.Message)
         if IsObject(AiAnswerCtrl)
@@ -6771,6 +6994,34 @@ CloseAiAssistant(*) {
     AiStatusCtrl := ""
     AiLimitCtrl := ""
     AiAskBtnCtrl := ""
+}
+
+RefreshAiHistoryPanel() {
+    ; no-op: история в отдельном диалоге
+}
+
+ShowAiHistoryDialog(*) {
+    global colorBg, colorCard, colorAccent, colorText, colorMuted
+    report := BuildAiHistoryText()
+    dlg := Gui("+Border", "История AI")
+    dlg.BackColor := colorBg
+    dlg.MarginX := 0
+    dlg.MarginY := 0
+    dlg.SetFont("s10 c" colorText, "Segoe UI")
+    dlg.Add("Text", "x0 y0 w520 h440 Background" colorBg)
+    dlg.Add("Text", "x18 y18 w484 h50 Background" colorCard)
+    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
+    dlg.Add("Text", "x34 y28 w400 h24 Background" colorCard, "История вопросов")
+    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+    dlg.Add("Text", "x34 y52 w400 h18 Background" colorCard, "Последние ответы (новые сверху)")
+    dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
+    dlg.Add("Edit", "x18 y80 w484 h300 +Multi +ReadOnly -Wrap +VScroll Background" colorCard " c" colorText, report)
+    closeBtn := dlg.Add("Text", "x382 y392 w120 h30 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
+    BindTextButton(closeBtn, colorAccent, (*) => dlg.Destroy())
+    dlg.OnEvent("Close", (*) => dlg.Destroy())
+    dlg.OnEvent("Escape", (*) => dlg.Destroy())
+    dlg.Show("w520 h440")
+    try WinActivate(dlg.Hwnd)
 }
 
 GetAiSystemPrompt() {
@@ -6935,6 +7186,7 @@ RunAiFromGameChat(question) {
             return
         }
         answer := AskGemini(question)
+        PushAiHistory(question, answer)
         UpdateAiCompact(answer, false)
         ShowToast("✓ AI ответил", 1400)
     } catch as err {
@@ -6985,11 +7237,13 @@ ShowAiCompactWindow(question, statusText := "") {
     AiCompactGui.SetFont("s10 Norm c" colorText, "Segoe UI")
     AiCompactAnswerCtrl := AiCompactGui.Add("Edit", "x14 y86 w412 h220 +Multi +ReadOnly Wrap +VScroll Background" colorCard " c" colorText, statusText)
 
-    copyBtn := AiCompactGui.Add("Text", "x14 y318 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Копировать")
+    copyBtn := AiCompactGui.Add("Text", "x14 y318 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Копировать")
     BindTextButton(copyBtn, colorCardAlt, CopyAiCompactAnswer)
-    openBtn := AiCompactGui.Add("Text", "x156 y318 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Полное AI")
+    histBtn := AiCompactGui.Add("Text", "x122 y318 w90 h28 +0x200 Center Background" colorCardAlt " c" colorText, "История")
+    BindTextButton(histBtn, colorCardAlt, ShowAiHistoryDialog)
+    openBtn := AiCompactGui.Add("Text", "x220 y318 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Полное AI")
     BindTextButton(openBtn, colorCardAlt, (*) => (CloseAiCompact(), OpenAiAssistant()))
-    closeBtn := AiCompactGui.Add("Text", "x298 y318 w128 h28 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
+    closeBtn := AiCompactGui.Add("Text", "x328 y318 w98 h28 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
     BindTextButton(closeBtn, colorAccent, CloseAiCompact)
 
     showOpts := "w" w " h" h
@@ -7091,6 +7345,7 @@ RegisterHotkeys() {
         RegisteredStandardHotkeys.Push(aiCompactKey)
     }
     RegisterAiChatHotstring()
+    try RebuildTrayMenu()
 }
 
 WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
@@ -7357,7 +7612,7 @@ OpenErrorsLogFile(*) {
         Run(errorsLogFile)
     } catch as err {
         LogError("OpenErrorsLogFile", "Не удалось открыть errors.log", err.Message)
-        MsgBox("Не удалось открыть errors.log.`n`n" err.Message, "Ошибки", "Iconx")
+        ShowToast("⚠ Не удалось открыть errors.log", 2200)
     }
 }
 
@@ -7373,7 +7628,7 @@ ClearErrorsLog(*) {
         file.Close()
     } catch as err {
         LogError("ClearErrorsLog", "Не удалось очистить errors.log", err.Message)
-        MsgBox("Не удалось очистить errors.log.`n`n" err.Message, "Ошибки", "Iconx")
+        ShowToast("⚠ Не удалось очистить errors.log", 2200)
         return
     }
 
