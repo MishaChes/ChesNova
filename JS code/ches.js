@@ -1,6 +1,9 @@
 (function () {
   'use strict';
 
+  var HUD_URL = 'http://127.0.0.1:17890/hud';
+  var POLL_MS = 750;
+
   var hudEl = null;
   var hudDotEl = null;
   var hudNickEl = null;
@@ -12,6 +15,7 @@
 
   var pmCount = 0;
   var healthState = 'ok'; // ok | warn | critical
+  var pollBusy = false;
 
   function getHealthColor() {
     if (healthState === 'critical') return '#FF5B6B';
@@ -65,7 +69,43 @@
     if (hudPmEl) hudPmEl.textContent = 'PM: ' + (pmCount != null ? pmCount : '—');
   }
 
-  // Публичное API (можно дергать извне)
+  function applyState(data) {
+    if (!data || typeof data !== 'object') return;
+    if (data.nick != null) settings.nick = String(data.nick);
+    if (data.pm != null) {
+      var n = parseInt(data.pm, 10);
+      if (!isNaN(n)) pmCount = n;
+    }
+    if (data.health != null) {
+      var h = String(data.health);
+      if (h === 'ok' || h === 'warn' || h === 'critical') healthState = h;
+    }
+    updateHud();
+  }
+
+  function pollHud() {
+    if (pollBusy) return;
+    pollBusy = true;
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', HUD_URL, true);
+      xhr.timeout = 1200;
+      xhr.onload = function () {
+        pollBusy = false;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            applyState(JSON.parse(xhr.responseText));
+          } catch (e) {}
+        }
+      };
+      xhr.onerror = function () { pollBusy = false; };
+      xhr.ontimeout = function () { pollBusy = false; };
+      xhr.send();
+    } catch (e) {
+      pollBusy = false;
+    }
+  }
+
   window.ChesHUD = {
     setNick: function (nick) {
       settings.nick = (nick || '').trim();
@@ -76,11 +116,11 @@
       updateHud();
     },
     setHealth: function (state) {
-      // 'ok' | 'warn' | 'critical'
       healthState = state || 'ok';
       updateHud();
     },
-    update: updateHud
+    update: updateHud,
+    poll: pollHud
   };
 
   function tick() {
@@ -92,8 +132,8 @@
 
   setInterval(function () {
     ensureHud();
-    updateHud();
-  }, 1000);
+    pollHud();
+  }, POLL_MS);
 
   tick();
 })();
