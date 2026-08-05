@@ -52,10 +52,6 @@ TrayOpenAi(*) {
     OpenAiAssistant()
 }
 
-TrayCenterHUD(*) {
-    CenterGUI()
-}
-
 TrayRestart(*) {
     RestartChesNova()
 }
@@ -155,16 +151,10 @@ resetMinute := 0
 lastResetDate := ""
 menuKey := "F10"
 resetKey := "F9"
-centerKey := "F5"
-hideKey := "F2"
 aiKey := "F7"
-aiCompactKey := "F6"
 menuKeyEnabled := 1
 resetKeyEnabled := 1
-centerKeyEnabled := 1
-hideKeyEnabled := 1
 aiKeyEnabled := 1
-aiCompactKeyEnabled := 1
 geminiApiKey := ""
 geminiModel := "gemini-3.6-flash"
 aiDailyLimit := 0
@@ -172,7 +162,6 @@ aiDailyUsed := 0
 aiDailyRemaining := 0
 aiQuotaDate := ""
 aiConfigLoaded := false
-hudDesign := "Compact"
 uiTheme := "dark"  ; dark | light
 ; Палитра заполняется ApplyTheme()
 colorBg := "0B0E14"
@@ -199,8 +188,6 @@ menuX := "Center"
 menuY := "Center"
 aiGuiX := "Center"
 aiGuiY := "Center"
-aiCompactX := "Center"
-aiCompactY := "Center"
 logFile := ""
 scriptsGamePath := ""
 
@@ -216,16 +203,10 @@ if FileExist(settingsFile)
         scriptsGamePath := IniRead(settingsFile, "Scripts", "gamePath", scriptsGamePath)
         menuKey := IniRead(settingsFile, "Keys", "menuKey", "F10")
         resetKey := IniRead(settingsFile, "Keys", "resetKey", "F9")
-        centerKey := IniRead(settingsFile, "Keys", "centerKey", "F5")
-        hideKey := IniRead(settingsFile, "Keys", "hideKey", "F2")
         aiKey := IniRead(settingsFile, "Keys", "aiKey", "F7")
-        aiCompactKey := IniRead(settingsFile, "Keys", "aiCompactKey", "F6")
         menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
         resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
-        centerKeyEnabled := IniRead(settingsFile, "Keys", "centerKeyEnabled", 1)
-        hideKeyEnabled := IniRead(settingsFile, "Keys", "hideKeyEnabled", 1)
         aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 1)
-        aiCompactKeyEnabled := IniRead(settingsFile, "Keys", "aiCompactKeyEnabled", 1)
         geminiApiKey := IniRead(settingsFile, "AI", "geminiApiKey", "")
         geminiModel := IniRead(settingsFile, "AI", "geminiModel", "gemini-3.6-flash")
         aiDailyLimit := Integer(IniRead(settingsFile, "AI", "aiDailyLimit", 0))
@@ -246,9 +227,6 @@ if FileExist(settingsFile)
         menuY := IniRead(settingsFile, "GUI", "menuY", "Center")
         aiGuiX := IniRead(settingsFile, "GUI", "aiGuiX", "Center")
         aiGuiY := IniRead(settingsFile, "GUI", "aiGuiY", "Center")
-        aiCompactX := IniRead(settingsFile, "GUI", "aiCompactX", "Center")
-        aiCompactY := IniRead(settingsFile, "GUI", "aiCompactY", "Center")
-        hudDesign := IniRead(settingsFile, "GUI", "hudDesign", "Compact")
         uiTheme := IniRead(settingsFile, "GUI", "uiTheme", "dark")
     } catch as err {
         LogError("LoadSettings", "Повреждён settings.ini или ошибка чтения настроек", err.Message)
@@ -266,10 +244,7 @@ testerMode += 0
 startWithWindows += 0
 menuKeyEnabled += 0
 resetKeyEnabled += 0
-centerKeyEnabled += 0
-hideKeyEnabled += 0
 aiKeyEnabled += 0
-aiCompactKeyEnabled += 0
 geminiApiKey := Trim(geminiApiKey)
 if (geminiModel = "" || geminiModel = "gemini-1.5-flash" || geminiModel = "gemini-2.5-flash")
     geminiModel := "gemini-3.6-flash"
@@ -334,7 +309,6 @@ healthIncidents := []
 chatlogReadErrorStreak := 0
 lastChatlogChangeTick := A_TickCount
 lastHealthState := "ok"
-guiHidden := false
 selectedPunishmentDate := ""
 selectedPunishmentType := "ban"
 selectedPunishmentDays := 10
@@ -360,17 +334,10 @@ SetNickCtrl := ""
 SetNormCtrl := ""
 SetMenuKeyCtrl := ""
 SetResetKeyCtrl := ""
-SetCenterKeyCtrl := ""
-SetHideKeyCtrl := ""
 SetAiKeyCtrl := ""
-SetAiCompactKeyCtrl := ""
 SetMenuKeyEnabledCtrl := ""
 SetResetKeyEnabledCtrl := ""
-SetCenterKeyEnabledCtrl := ""
-SetHideKeyEnabledCtrl := ""
 SetAiKeyEnabledCtrl := ""
-SetAiCompactKeyEnabledCtrl := ""
-SetHudDesignCtrl := ""
 AiGui := ""
 AiQuestionCtrl := ""
 AiAnswerCtrl := ""
@@ -381,9 +348,6 @@ lastAiOpenTick := 0
 aiRequestBusy := false
 aiChatCaptureBusy := false
 aiChatHotstringRegistered := false
-AiCompactGui := ""
-AiCompactAnswerCtrl := ""
-AiCompactStatusCtrl := ""
 SetAutoResetCtrl := ""
 SetCheckUpdatesCtrl := ""
 SetStartupCtrl := ""
@@ -600,7 +564,6 @@ CloudDotCtrl := ""
 PMCountTextCtrl := ""
 HudNickCtrl := ""
 HudStatsCtrl := ""
-; BuildMainHud() больше не создаёт оверлей Windows
 OnMessage(0x201, WM_LBUTTONDOWN)
 OnMessage(0x84, WM_NCHITTEST)
 
@@ -929,21 +892,6 @@ UpdatePMDisplay() {
     RefreshDashboardView()
     WriteHudBridgeState()
 }
-
-BuildMainHud() {
-    global MainGui, StatusDotCtrl, CloudDotCtrl, PMCountTextCtrl, HudNickCtrl, HudStatsCtrl
-
-    ; AHK-оверлей отключён: HUD в игре рисует ches.js через HTTP-мост.
-    if IsObject(MainGui)
-        try MainGui.Destroy()
-    MainGui := ""
-    StatusDotCtrl := ""
-    CloudDotCtrl := ""
-    PMCountTextCtrl := ""
-    HudNickCtrl := ""
-    HudStatsCtrl := ""
-}
-
 UpdateCloudHudDot() {
     global CloudDotCtrl, cloudAccessState, colorGreen, colorRed, colorYellow, colorMuted
     if !IsObject(CloudDotCtrl)
@@ -3474,10 +3422,6 @@ CheckAutoReset(*) {
 ; =========================
 ; 👁 TOGGLE GUI
 ; =========================
-ToggleGUI(*) {
-    ; AHK-HUD отключён — счётчик только в игре (ches.js)
-}
-
 ; ------------------------------------------------------------
 ; 05. Settings window
 ; ------------------------------------------------------------
@@ -5716,8 +5660,8 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, hudDesign, uiTheme, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetAiKeyCtrl, SetAiCompactKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetCenterKeyEnabledCtrl, SetHideKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiCompactKeyEnabledCtrl, SetHudDesignCtrl
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, uiTheme, logFile
+    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetAiKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetAiKeyEnabledCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
 
@@ -5733,7 +5677,7 @@ SettingsView() {
     AddViewControl(view, "Text", "x270 y166 w110 h22 Background" colorCard " c" colorMuted, "Норма PM")
     SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background" uiInputBg, norm)
 
-    AddViewControl(view, "Text", "x250 y206 w280 h286 Background" colorCard)
+    AddViewControl(view, "Text", "x250 y206 w280 h178 Background" colorCard)
     AddViewControl(view, "Text", "x270 y222 w220 h22 Background" colorCard " c" colorText, "Горячие клавиши")
     AddViewControl(view, "Text", "x270 y258 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
     AddViewControl(view, "Text", "x494 y230 w28 h18 Background" colorCard " c" colorMuted, "Вкл.")
@@ -5742,23 +5686,10 @@ SettingsView() {
     AddViewControl(view, "Text", "x270 y294 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
     SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w98 h26 c" colorText " Background" uiInputBg, resetKey)
     SetResetKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetResetKeyEnabled x496 y294 w20 h20 Checked" resetKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y330 w110 h22 Background" colorCard " c" colorMuted, "Центр HUD")
-    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w98 h26 c" colorText " Background" uiInputBg, centerKey)
-    SetCenterKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetCenterKeyEnabled x496 y330 w20 h20 Checked" centerKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
-    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w98 h26 c" colorText " Background" uiInputBg, hideKey)
-    SetHideKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetHideKeyEnabled x496 y366 w20 h20 Checked" hideKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y402 w110 h22 Background" colorCard " c" colorMuted, "AI-ассистент")
-    SetAiKeyCtrl := AddViewControl(view, "Edit", "vSetAiKey x390 y398 w98 h26 c" colorText " Background" uiInputBg, aiKey)
-    SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y402 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y438 w110 h22 Background" colorCard " c" colorMuted, "Мини AI")
-    SetAiCompactKeyCtrl := AddViewControl(view, "Edit", "vSetAiCompactKey x390 y434 w98 h26 c" colorText " Background" uiInputBg, aiCompactKey)
-    SetAiCompactKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiCompactKeyEnabled x496 y438 w20 h20 Checked" aiCompactKeyEnabled " Background" colorCard)
-
-    AddViewControl(view, "Text", "x250 y502 w280 h58 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y508 w120 h16 Background" colorCard " c" colorMuted, "Дизайн HUD")
-    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y526 w240 c" colorText " Background" uiInputBg, ["Компактный", "Расширенный", "Безопасный"])
-    SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : (hudDesign = "Safe" ? 3 : 1))
+    AddViewControl(view, "Text", "x270 y330 w110 h22 Background" colorCard " c" colorMuted, "AI-ассистент")
+    SetAiKeyCtrl := AddViewControl(view, "Edit", "vSetAiKey x390 y326 w98 h26 c" colorText " Background" uiInputBg, aiKey)
+    SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y330 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
+    AddViewControl(view, "Text", "x270 y360 w240 h18 Background" colorCard " c" colorMuted, "В игре: /ai вопрос + Enter")
 
     ; Правая колонка: автоматизация и источник логов.
     AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
@@ -6130,36 +6061,34 @@ HelpView() {
 
 1. Откройте меню (по умолчанию F10).
 2. Укажите игровой ник и норму PM.
-3. chatlog.txt подхватывается автоматически:
-   Документы → RADMIR CRMP User Files → SAMP → chatlog.txt
-   (при необходимости можно выбрать вручную в Настройках)
-4. Дождитесь зелёного статуса Cloud (вкладка Cloud или точка на HUD).
+3. chatlog.txt и корень игры подхватываются автоматически
+   (при необходимости — вручную в «Настройках» / «Скриптах»).
+4. Счётчик в игре ставится сам: loader-js.asi + ches.js
+   (вкладка «Скрипты», путь к RADMIR CRMP).
+5. Дождитесь зелёного статуса Cloud (вкладка Cloud).
 
 Без подтверждённого Cloud счётчик PM не считает.
 
 ————————————————
 ГОРЯЧИЕ КЛАВИШИ (по умолчанию)
 
-F10 — меню
+F10 — меню ChesNova
 F9  — сброс PM (с сохранением в историю)
-F5  — HUD в центр
-F2  — скрыть / показать HUD
-F7  — AI-ассистент
-F6  — мини-окно AI
+F7  — AI-ассистент (окно в Windows)
 
 В чате игры: /ai ваш вопрос + Enter
+  → ответ показывается в игре (левый нижний угол, ~10 сек)
 
 Клавиши можно сменить или отключить во вкладке «Настройки».
 
 ————————————————
-HUD
+СЧЁТЧИК В ИГРЕ (ches.js)
 
-● слева — норма PM (красный / зелёный)
-● рядом — Cloud (зелёный ок, жёлтый ожидание, красный нет доступа)
+Правый нижний угол: ник, точка здоровья (ok / warn / critical), PM.
+Левый нижний угол: ответ AI или «AI думает…».
 
-Компактный — маленький счётчик.
-Расширенный — ник, PM и наказания за день.
-Безопасный — если HUD режет FPS в игре.
+Данные идут из ChesNova по локальному HTTP-мосту
+(127.0.0.1:17890). Окно AHK-оверлея больше не используется.
 
 ————————————————
 НОРМА И ОТГУЛЫ
@@ -6192,14 +6121,15 @@ HUD
 ————————————————
 AI
 
-Ключ и дневной лимит подтягиваются из Cloud по нику.
-История последних вопросов — кнопка «История».
+Ключ и дневной лимит — из Cloud по нику.
+F7 — полное окно ассистента (история, лимит).
+/ai в игре — быстрый ответ прямо в HUD.
 
 ————————————————
 ОБНОВЛЕНИЯ И СКРИПТЫ
 
 «Обновления» — проверить / установить релиз.
-«Скрипты» — путь к игре и установка пакетов.
+«Скрипты» — путь к игре, установка loader + ches.js и пакетов.
 «Тестировщик» — только если вы тестер.
 
 ————————————————
@@ -6238,7 +6168,7 @@ DiagnosticsView() {
 
 BuildDiagnosticsText() {
     global logFile, pmLogsFile, punishmentsFile, errorsLogFile
-    global hudDesign, diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
+    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
     global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
     global healthState, healthMessage, healthIncidents, cloudAccessState, chatlogReadErrorStreak
 
@@ -6249,7 +6179,7 @@ BuildDiagnosticsText() {
 
     text .= "—— CheckLog ——`n"
     text .= "Интервал: 1000 мс`n"
-    text .= "Режим HUD: " GetHudDesignText() "`n"
+    text .= "HUD: in-game (ches.js + HTTP-мост :17890)`n"
     text .= "Последний проход: " diagnosticLastCheckMs " мс`n"
     text .= "Среднее: " (diagnosticCheckLogSamples ? Round(diagnosticCheckLogTotalMs / diagnosticCheckLogSamples, 3) : 0) " мс`n"
     text .= "Максимум: " diagnosticCheckLogMaxMs " мс`n"
@@ -6371,17 +6301,6 @@ RunHealthCheck(*) {
         return
     RefreshDiagnosticsView()
 }
-
-GetHudDesignText() {
-    global hudDesign
-
-    if (hudDesign = "Expanded")
-        return "Расширенный"
-    if (hudDesign = "Safe")
-        return "Безопасный"
-    return "Компактный"
-}
-
 GetHighResolutionMilliseconds() {
     static frequency := 0
 
@@ -6845,7 +6764,7 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, geminiApiKey, geminiModel, hudDesign, uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, geminiApiKey, geminiModel, uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
 
     SaveMenuPosition()
     values := SettingsGui.Submit()
@@ -6869,17 +6788,10 @@ SaveSettings(*) {
 
     menuKey := values.SetMenuKey
     resetKey := values.SetResetKey
-    centerKey := values.SetCenterKey
-    hideKey := values.SetHideKey
     aiKey := values.SetAiKey
-    aiCompactKey := values.SetAiCompactKey
     menuKeyEnabled := values.SetMenuKeyEnabled
     resetKeyEnabled := values.SetResetKeyEnabled
-    centerKeyEnabled := values.SetCenterKeyEnabled
-    hideKeyEnabled := values.SetHideKeyEnabled
     aiKeyEnabled := values.SetAiKeyEnabled
-    aiCompactKeyEnabled := values.SetAiCompactKeyEnabled
-    hudDesign := (values.SetHudDesign = "Расширенный") ? "Expanded" : ((values.SetHudDesign = "Безопасный") ? "Safe" : "Compact")
 
     try {
         IniWrite(nick, settingsFile, "Main", "nick")
@@ -6895,16 +6807,10 @@ SaveSettings(*) {
         IniWrite(lastResetDate, settingsFile, "Main", "lastResetDate")
         IniWrite(menuKey, settingsFile, "Keys", "menuKey")
         IniWrite(resetKey, settingsFile, "Keys", "resetKey")
-        IniWrite(centerKey, settingsFile, "Keys", "centerKey")
-        IniWrite(hideKey, settingsFile, "Keys", "hideKey")
         IniWrite(aiKey, settingsFile, "Keys", "aiKey")
-        IniWrite(aiCompactKey, settingsFile, "Keys", "aiCompactKey")
         IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
         IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
-        IniWrite(centerKeyEnabled, settingsFile, "Keys", "centerKeyEnabled")
-        IniWrite(hideKeyEnabled, settingsFile, "Keys", "hideKeyEnabled")
         IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
-        IniWrite(aiCompactKeyEnabled, settingsFile, "Keys", "aiCompactKeyEnabled")
         IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
         IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
         IniWrite(guiX, settingsFile, "GUI", "guiX")
@@ -6913,7 +6819,6 @@ SaveSettings(*) {
         IniWrite(menuY, settingsFile, "GUI", "menuY")
         IniWrite(aiGuiX, settingsFile, "GUI", "aiGuiX")
         IniWrite(aiGuiY, settingsFile, "GUI", "aiGuiY")
-        IniWrite(hudDesign, settingsFile, "GUI", "hudDesign")
         IniWrite(uiTheme, settingsFile, "GUI", "uiTheme")
         SetWindowsStartup(startWithWindows)
     } catch as err {
@@ -6932,7 +6837,6 @@ SaveSettings(*) {
 
     RegisterHotkeys()
 
-    BuildMainHud()
     UpdatePMDisplay()
 }
 
@@ -7002,10 +6906,6 @@ CancelResetPM(*) {
 ; =========================
 ; CENTER GUI
 ; =========================
-CenterGUI(*) {
-    ; AHK-HUD отключён
-}
-
 SaveAiQuotaLocal() {
     global settingsFile, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate
     aiQuotaDate := FormatTime(, "yyyyMMdd")
@@ -7537,22 +7437,6 @@ HttpPostJson(url, jsonBody, apiKey := "", resolveMs := 15000, connectMs := 15000
 
 
 
-OpenAiCompact(*) {
-    global AiCompactGui, lastAiOpenTick
-    if (A_TickCount - lastAiOpenTick < 300)
-        return
-    lastAiOpenTick := A_TickCount
-    if IsObject(AiCompactGui) {
-        try {
-            if WinExist("ahk_id " AiCompactGui.Hwnd) {
-                CloseAiCompact()
-                return
-            }
-        }
-    }
-    ShowAiCompactWindow("Мини-окно AI", "В чате: /ai ваш вопрос + Enter`nF7 — полное AI-меню")
-}
-
 RegisterAiChatHotstring() {
     global aiChatHotstringRegistered, aiKeyEnabled
     if aiChatHotstringRegistered {
@@ -7630,100 +7514,7 @@ RunAiFromGameChat(question) {
     } finally {
         aiRequestBusy := false
     }
-}
-
-ShowAiCompactWindow(question, statusText := "") {
-    global AiCompactGui, AiCompactAnswerCtrl, AiCompactStatusCtrl
-    global aiCompactX, aiCompactY, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, uiDivider
-    question := Trim(question)
-    titleQ := (StrLen(question) > 100) ? SubStr(question, 1, 97) "…" : question
-    if IsObject(AiCompactGui) {
-        try {
-            if WinExist("ahk_id " AiCompactGui.Hwnd) {
-                if IsObject(AiCompactStatusCtrl)
-                    AiCompactStatusCtrl.Text := titleQ
-                if IsObject(AiCompactAnswerCtrl)
-                    AiCompactAnswerCtrl.Value := statusText
-                return
-            }
-        }
-        SafeDestroyGui(&AiCompactGui)
-        AiCompactAnswerCtrl := ""
-        AiCompactStatusCtrl := ""
-    }
-    ; Обычное окно с системным крестиком, как в других меню ChesNova
-    AiCompactGui := Gui("+AlwaysOnTop +Border -MinimizeBox", "ChesNova AI")
-    AiCompactGui.BackColor := colorBg
-    AiCompactGui.MarginX := 0
-    AiCompactGui.MarginY := 0
-    AiCompactGui.OnEvent("Close", CloseAiCompact)
-    AiCompactGui.OnEvent("Escape", CloseAiCompact)
-
-    w := 440
-    h := 360
-    AiCompactGui.Add("Text", "x0 y0 w" w " h" h " Background" colorBg)
-    AiCompactGui.SetFont("s10 Bold c" colorText, "Segoe UI")
-    AiCompactGui.Add("Text", "x14 y12 w410 h20 Background" colorBg, "AI ответ")
-    AiCompactGui.Add("Text", "x14 y36 w412 h1 Background" uiDivider)
-
-    AiCompactGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    AiCompactStatusCtrl := AiCompactGui.Add("Text", "x14 y44 w412 h36 Background" colorBg " c" colorMuted, titleQ)
-
-    AiCompactGui.SetFont("s10 Norm c" colorText, "Segoe UI")
-    AiCompactAnswerCtrl := AiCompactGui.Add("Edit", "x14 y86 w412 h220 +Multi +ReadOnly Wrap +VScroll Background" colorCard " c" colorText, statusText)
-
-    copyBtn := AiCompactGui.Add("Text", "x14 y318 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Копировать")
-    BindTextButton(copyBtn, colorCardAlt, CopyAiCompactAnswer)
-    histBtn := AiCompactGui.Add("Text", "x122 y318 w90 h28 +0x200 Center Background" colorCardAlt " c" colorText, "История")
-    BindTextButton(histBtn, colorCardAlt, ShowAiHistoryDialog)
-    openBtn := AiCompactGui.Add("Text", "x220 y318 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Полное AI")
-    BindTextButton(openBtn, colorCardAlt, (*) => (CloseAiCompact(), OpenAiAssistant()))
-    closeBtn := AiCompactGui.Add("Text", "x328 y318 w98 h28 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
-    BindTextButton(closeBtn, colorAccent, CloseAiCompact)
-
-    showOpts := "w" w " h" h
-    if (aiCompactX = "Center" || aiCompactY = "Center" || aiCompactX = "" || aiCompactY = "")
-        showOpts .= " xCenter yCenter"
-    else
-        showOpts .= " x" aiCompactX " y" aiCompactY
-    AiCompactGui.Show(showOpts)
-}
-
-UpdateAiCompact(text, isError := false) {
-    global AiCompactAnswerCtrl, colorRed, colorText
-    if !IsObject(AiCompactAnswerCtrl)
-        return
-    try {
-        AiCompactAnswerCtrl.Value := text
-        AiCompactAnswerCtrl.SetFont("s10 Norm c" (isError ? colorRed : colorText), "Segoe UI")
-    }
-}
-
-CopyAiCompactAnswer(*) {
-    global AiCompactAnswerCtrl
-    if !IsObject(AiCompactAnswerCtrl)
-        return
-    try {
-        A_Clipboard := AiCompactAnswerCtrl.Value
-        ShowToast("✓ Ответ скопирован", 1200)
-    }
-}
-
-CloseAiCompact(*) {
-    global AiCompactGui, AiCompactAnswerCtrl, AiCompactStatusCtrl, aiCompactX, aiCompactY, settingsFile
-    if IsObject(AiCompactGui) {
-        try {
-            AiCompactGui.GetPos(&aiCompactX, &aiCompactY)
-            TryIniWrite(aiCompactX, settingsFile, "GUI", "aiCompactX", "CloseAiCompact")
-            TryIniWrite(aiCompactY, settingsFile, "GUI", "aiCompactY", "CloseAiCompact")
-        }
-    }
-    SafeDestroyGui(&AiCompactGui)
-    AiCompactAnswerCtrl := ""
-    AiCompactStatusCtrl := ""
-}
-
-AskGemini(question) {
+}AskGemini(question) {
     global geminiApiKey, geminiModel
 
     model := Trim(geminiModel)
@@ -7748,7 +7539,7 @@ AskGemini(question) {
 }
 
 RegisterHotkeys() {
-    global menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, RegisteredStandardHotkeys
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
@@ -7763,28 +7554,16 @@ RegisterHotkeys() {
         Hotkey(resetKey, ResetPM, "On")
         RegisteredStandardHotkeys.Push(resetKey)
     }
-    if centerKeyEnabled {
-        Hotkey(centerKey, CenterGUI, "On")
-        RegisteredStandardHotkeys.Push(centerKey)
-    }
-    if hideKeyEnabled {
-        Hotkey(hideKey, ToggleGUI, "On")
-        RegisteredStandardHotkeys.Push(hideKey)
-    }
     if aiKeyEnabled {
         Hotkey(aiKey, OpenAiAssistant, "On")
         RegisteredStandardHotkeys.Push(aiKey)
-    }
-    if aiCompactKeyEnabled {
-        Hotkey(aiCompactKey, OpenAiCompact, "On")
-        RegisteredStandardHotkeys.Push(aiCompactKey)
     }
     RegisterAiChatHotstring()
     try RebuildTrayMenu()
 }
 
 WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
-    global MainGui, SettingsGui, AiCompactGui
+    global MainGui, SettingsGui
 
     if IsObject(MainGui) && (hwnd = MainGui.Hwnd || DllCall("IsChild", "Ptr", MainGui.Hwnd, "Ptr", hwnd, "Int")) {
         DragGuiWindow(MainGui.Hwnd)
@@ -7799,13 +7578,6 @@ WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
         if (relY >= 0 && relY <= 70 && relX < 780)
             DragGuiWindow(SettingsGui.Hwnd)
         return
-    }
-
-    if IsObject(AiCompactGui) && (hwnd = AiCompactGui.Hwnd || DllCall("IsChild", "Ptr", AiCompactGui.Hwnd, "Ptr", hwnd, "Int")) {
-        MouseGetPos(&mouseX, &mouseY)
-        AiCompactGui.GetPos(&winX, &winY)
-        if (mouseY - winY <= 34)
-            DragGuiWindow(AiCompactGui.Hwnd)
     }
 }
 
