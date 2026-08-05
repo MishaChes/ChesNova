@@ -67,7 +67,7 @@ TrayExit(*) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "10.5.1"
+CURRENT_VERSION := "11.0.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
