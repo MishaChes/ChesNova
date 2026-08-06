@@ -83,7 +83,7 @@ RebuildTrayMenu() {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "11.0.1"
+CURRENT_VERSION := "11.0.2"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -773,11 +773,12 @@ GetChesNovaHudPaths(gamePath := "") {
         gamePath := GetScriptsGamePath()
     gamePath := RTrim(Trim(gamePath), "\/")
     if (gamePath = "")
-        return Map("ok", false, "loader", "", "ches", "", "scriptsDir", "")
+        return Map("ok", false, "loader", "", "loaderJson", "", "ches", "", "scriptsDir", "")
     scriptsDir := gamePath "\uiresources\scripts"
     return Map(
         "ok", true,
         "loader", gamePath "\loader-js.asi",
+        "loaderJson", gamePath "\loader-js.json",
         "ches", scriptsDir "\ches.js",
         "scriptsDir", scriptsDir,
         "uiresources", gamePath "\uiresources"
@@ -788,10 +789,10 @@ IsChesNovaHudInstalled(gamePath := "") {
     paths := GetChesNovaHudPaths(gamePath)
     if !paths["ok"]
         return false
-    return FileExist(paths["loader"]) && FileExist(paths["ches"])
+    return FileExist(paths["loader"]) && FileExist(paths["loaderJson"]) && FileExist(paths["ches"])
 }
 
-; Скачивает loader-js.asi в корень игры и ches.js в uiresources\scripts.
+; Скачивает loader-js.asi + loader-js.json в корень игры и ches.js в uiresources\scripts.
 ; createOnlyMissing=true — не перезаписывать существующие файлы.
 EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
     global dataPath, scriptsGamePath
@@ -816,6 +817,11 @@ EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
             "name", "loader-js.asi",
             "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi",
             "dest", paths["loader"]
+        ),
+        Map(
+            "name", "loader-js.json",
+            "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json",
+            "dest", paths["loaderJson"]
         ),
         Map(
             "name", "ches.js",
@@ -3660,14 +3666,15 @@ GetScriptPackages() {
             "displayTitle", "Onishi",
             "author", "Takumi Onishi",
             "title", "Onishi",
-            "description", "Onishi script with loader.",
+            "description", "Onishi script with loader (скрипты уже в loader-js.json).",
             "authors", "Takumi Onishi",
             "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
             "files", [
                 Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
+                Map("name", "loader-js.json", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json", "relativePath", "loader-js.json"),
                 Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
             ],
-            "activationCommands", "//loader add script scripts/_otools.js`n//loader reload"
+            "activationCommands", ""
         ),
         Map(
             "id", "fpsunlocker",
@@ -4369,7 +4376,7 @@ ScriptsView() {
         ; Нижний ряд: автор / заметка | ссылка
         note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
         if (package["id"] = "onishi")
-            note := "Loader входит в установку"
+            note := "Loader + json, без //loader"
         AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
         AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
         topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
@@ -4416,7 +4423,7 @@ ScriptsViewCompact() {
         ; Нижний ряд: автор / заметка | ссылка
         note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
         if (package["id"] = "onishi")
-            note := "Loader входит в установку"
+            note := "Loader + json, без //loader"
         AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
         AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
         topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
