@@ -27,6 +27,7 @@
   var pmCount = 0;
   var healthState = 'ok';
   var pollBusy = false;
+  var hudVisible = true;
 
   function getHealthColor() {
     if (healthState === 'critical') return '#FF5B6B';
@@ -83,7 +84,71 @@
     hudDotEl = hudEl.querySelector('.ches-hud-dot');
     hudNickEl = hudEl.querySelector('.ches-hud-nick');
     hudPmEl = hudEl.querySelector('.ches-hud-pm');
+    applyHudVisibility();
     updateHud();
+  }
+
+  function applyHudVisibility() {
+    if (!document) return;
+    var nodes = document.querySelectorAll('#ches-hud');
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].style.display = hudVisible ? '' : 'none';
+    }
+  }
+
+  function setHudVisible(on) {
+    hudVisible = !!on;
+    applyHudVisibility();
+  }
+
+  function toggleHud() {
+    setHudVisible(!hudVisible);
+  }
+
+  function installChatHook() {
+    if (window.OUtils && typeof window.OUtils.registerCommand === 'function' && !window.__chesHudCmdRegistered) {
+      window.__chesHudCmdRegistered = true;
+      try {
+        window.OUtils.registerCommand('/ches', function () { toggleHud(); }, 0, true);
+      } catch (e) {
+        window.__chesHudCmdRegistered = false;
+      }
+    }
+    if (window.OUtils && typeof window.OUtils.addListenerToChat === 'function' && !window.__chesHudChatListener) {
+      window.__chesHudChatListener = true;
+      try {
+        window.OUtils.addListenerToChat(function (ev) {
+          var text = ev && ev[0];
+          if (typeof text === 'string' && text.split(' ')[0].toLowerCase() === '/ches') {
+            toggleHud();
+            return false;
+          }
+        });
+      } catch (e) {
+        window.__chesHudChatListener = false;
+      }
+    }
+    if (typeof window.sendChatInput === 'function' && !window.__chesHudCmdHooked) {
+      window.__chesHudCmdHooked = true;
+      var orig = window.sendChatInput;
+      try {
+        window.sendChatInput = new Proxy(orig, {
+          apply: function (target, thisArg, args) {
+            var text = args && args[0];
+            if (typeof text === 'string') {
+              var cmd = text.split(' ')[0].toLowerCase();
+              if (cmd === '/ches') {
+                toggleHud();
+                return;
+              }
+            }
+            return Reflect.apply(target, thisArg, args);
+          }
+        });
+      } catch (e) {
+        window.__chesHudCmdHooked = false;
+      }
+    }
   }
 
   function ensureThink() {
@@ -265,6 +330,8 @@
     },
     setThinking: setThinking,
     hideAi: hideAiPanel,
+    setVisible: setHudVisible,
+    toggle: toggleHud,
     update: updateHud,
     poll: pollHud
   };
@@ -277,12 +344,14 @@
     try { ensureHud(); } catch (e) {}
     try { ensureAiPanel(); } catch (e) {}
     try { ensureThink(); } catch (e) {}
+    try { installChatHook(); } catch (e) {}
   }
 
   setInterval(function () {
     ensureHud();
     ensureAiPanel();
     ensureThink();
+    installChatHook();
     pollHud();
   }, POLL_MS);
 
