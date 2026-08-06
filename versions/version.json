@@ -1,8 +1,8 @@
 {
-  "latest": "11.0.1",
-  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v10.5.1.ahk.zip",
+  "latest": "11.0.2",
+  "download": "https://github.com/MishaChes/ChesNova/raw/main/versions/v11.0.2.ahk.zip",
   "changelog": [
-    "Новая версия 11.0.1",
+    "Новая версия 11.0.2",
     "Подробнее можно узнать в группе в ВК"
   ],
   "required": false
