@@ -1,0 +1,12 @@
+{
+    "items": [
+        {
+            "type": "script",
+            "src": "scripts\/ches.js"
+        },
+        {
+            "type": "script",
+            "src": "scripts\/_otools.js"
+        }
+    ]
+}
