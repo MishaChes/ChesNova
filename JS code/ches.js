@@ -9,6 +9,7 @@
   var hudDotEl = null;
   var hudNickEl = null;
   var hudPmEl = null;
+  var hudMultEl = null;
 
   var aiEl = null;
   var aiTitleEl = null;
@@ -25,6 +26,8 @@
   };
 
   var pmCount = 0;
+  var normValue = 0;
+  var multValue = 0;
   var healthState = 'ok';
   var pollBusy = false;
   var hudVisible = true;
@@ -41,11 +44,16 @@
     style.id = 'ches-hud-style';
     style.textContent = [
       '#ches-hud,#ches-hud *,#ches-ai,#ches-ai *,#ches-think,#ches-think *{box-sizing:border-box}',
-      '#ches-hud{position:fixed;bottom:14px;right:14px;z-index:99999;min-width:110px;background:rgba(11,14,20,.88);border:1px solid #2B3443;border-radius:10px;padding:8px 12px;color:#F5F7FB;font:12px/1.35 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.35);backdrop-filter:blur(6px)}',
-      '#ches-hud .ches-hud-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}',
-      '#ches-hud .ches-hud-nick{font-weight:700;font-size:12px;letter-spacing:.2px;color:#F5F7FB;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      /* HUD: статус → ник → PM + xN (колонка, длинный ник не сливается с точкой) */
+      '#ches-hud{position:fixed;bottom:14px;right:14px;z-index:99999;min-width:118px;max-width:200px;background:rgba(11,14,20,.88);border:1px solid #2B3443;border-radius:10px;padding:8px 12px;color:#F5F7FB;font:12px/1.35 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:auto;cursor:move;user-select:none;box-shadow:0 8px 24px rgba(0,0,0,.35);backdrop-filter:blur(6px)}',
+      '#ches-hud .ches-hud-status{display:flex;align-items:center;margin-bottom:5px}',
       '#ches-hud .ches-hud-dot{width:9px;height:9px;border-radius:50%;background:#41D07A;box-shadow:0 0 0 2px rgba(65,208,122,.18);flex-shrink:0}',
+      '#ches-hud .ches-hud-status-label{font-size:10px;color:#A0A8B8;letter-spacing:.3px;text-transform:uppercase;margin-left:12px}',
+      '#ches-hud .ches-hud-nick{font-weight:700;font-size:12px;letter-spacing:.2px;color:#F5F7FB;max-width:176px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px}',
+      '#ches-hud .ches-hud-pm-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}',
       '#ches-hud .ches-hud-pm{color:#F5F7FB;font-weight:700;font-size:12px}',
+      '#ches-hud .ches-hud-mult{color:#3B82F6;font-weight:700;font-size:12px;letter-spacing:.3px;flex-shrink:0}',
+      '#ches-hud .ches-hud-mult.ches-hud-mult-off{display:none}',
       /* AI panel — левый нижний угол */
       '#ches-ai{position:fixed;bottom:16px;left:16px;z-index:100000;width:min(360px,calc(100vw - 32px));max-height:42vh;display:none;flex-direction:column;background:rgba(11,14,20,.94);border:1px solid #2B3443;border-radius:12px;padding:12px 14px;color:#F5F7FB;font:12px/1.4 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 10px 28px rgba(0,0,0,.4);backdrop-filter:blur(8px);opacity:0;transform:translateY(8px);transition:opacity .22s ease,transform .22s ease}',
       '#ches-ai.ches-ai-visible{display:flex;opacity:1;transform:translateY(0)}',
@@ -66,6 +74,87 @@
     document.head.appendChild(style);
   }
 
+
+  var dragState = null;
+  var lastAppliedHudPos = null;
+  var hudPosReady = false;
+
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function applyHudPos(el, pos) {
+    if (!el || !pos) return;
+    var leftN = parseFloat(pos.left);
+    var topN = parseFloat(pos.top);
+    if (isNaN(leftN) || isNaN(topN)) return;
+    var w = el.offsetWidth || 120;
+    var h = el.offsetHeight || 60;
+    var maxL = Math.max(0, window.innerWidth - w);
+    var maxT = Math.max(0, window.innerHeight - h);
+    var left = clamp(leftN, 0, maxL);
+    var top = clamp(topN, 0, maxT);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+    lastAppliedHudPos = { left: left, top: top };
+    hudPosReady = true;
+  }
+
+  function saveHudPos(left, top) {
+    left = Math.round(left);
+    top = Math.round(top);
+    lastAppliedHudPos = { left: left, top: top };
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'http://127.0.0.1:17890/pos?left=' + left + '&top=' + top, true);
+      xhr.timeout = 1200;
+      xhr.send();
+    } catch (e) {}
+  }
+
+  function installHudDrag(el) {
+    if (!el || el.__chesDragInstalled) return;
+    el.__chesDragInstalled = true;
+
+    el.addEventListener('mousedown', function (ev) {
+      if (ev.button !== 0) return;
+      var rect = el.getBoundingClientRect();
+      dragState = {
+        startX: ev.clientX,
+        startY: ev.clientY,
+        origLeft: rect.left,
+        origTop: rect.top
+      };
+      ev.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function (ev) {
+      if (!dragState || !hudEl) return;
+      var dx = ev.clientX - dragState.startX;
+      var dy = ev.clientY - dragState.startY;
+      var w = hudEl.offsetWidth || 120;
+      var h = hudEl.offsetHeight || 60;
+      var left = clamp(dragState.origLeft + dx, 0, Math.max(0, window.innerWidth - w));
+      var top = clamp(dragState.origTop + dy, 0, Math.max(0, window.innerHeight - h));
+      hudEl.style.left = left + 'px';
+      hudEl.style.top = top + 'px';
+      hudEl.style.right = 'auto';
+      hudEl.style.bottom = 'auto';
+    });
+
+    document.addEventListener('mouseup', function () {
+      if (!dragState || !hudEl) {
+        dragState = null;
+        return;
+      }
+      var rect = hudEl.getBoundingClientRect();
+      saveHudPos(rect.left, rect.top);
+      dragState = null;
+    });
+  }
+
   function ensureHud() {
     if (hudEl || !document.body) return;
     ensureStyles();
@@ -73,19 +162,25 @@
     hudEl = document.createElement('div');
     hudEl.id = 'ches-hud';
     hudEl.innerHTML = [
-      '<div class="ches-hud-top">',
-      '  <span class="ches-hud-nick">—</span>',
+      '<div class="ches-hud-status">',
       '  <span class="ches-hud-dot"></span>',
+      '  <span class="ches-hud-status-label">Статус</span>',
       '</div>',
-      '<div class="ches-hud-pm">PM: —</div>'
+      '<div class="ches-hud-nick">—</div>',
+      '<div class="ches-hud-pm-row">',
+      '  <span class="ches-hud-pm">PM: —</span>',
+      '  <span class="ches-hud-mult ches-hud-mult-off"></span>',
+      '</div>'
     ].join('');
     document.body.appendChild(hudEl);
 
     hudDotEl = hudEl.querySelector('.ches-hud-dot');
     hudNickEl = hudEl.querySelector('.ches-hud-nick');
     hudPmEl = hudEl.querySelector('.ches-hud-pm');
+    hudMultEl = hudEl.querySelector('.ches-hud-mult');
     applyHudVisibility();
     updateHud();
+    installHudDrag(hudEl);
   }
 
   function applyHudVisibility() {
@@ -245,6 +340,13 @@
     }
   }
 
+  function calcMult(pm, norm) {
+    var p = parseInt(pm, 10);
+    var n = parseInt(norm, 10);
+    if (isNaN(p) || isNaN(n) || n <= 0) return 0;
+    return Math.floor(p / n);
+  }
+
   function updateHud() {
     if (!hudEl) return;
     if (hudDotEl) {
@@ -254,14 +356,50 @@
     }
     if (hudNickEl) hudNickEl.textContent = settings.nick || '—';
     if (hudPmEl) hudPmEl.textContent = 'PM: ' + (pmCount != null ? pmCount : '—');
+    if (hudMultEl) {
+      var m = multValue;
+      if (m == null || isNaN(m)) m = 0;
+      m = Math.floor(m);
+      if (m >= 1) {
+        hudMultEl.textContent = 'x' + m;
+        hudMultEl.classList.remove('ches-hud-mult-off');
+      } else {
+        hudMultEl.textContent = '';
+        hudMultEl.classList.add('ches-hud-mult-off');
+      }
+    }
   }
 
   function applyState(data) {
     if (!data || typeof data !== 'object') return;
+    if (data.hud && typeof data.hud === 'object' && !dragState) {
+      var hl = parseFloat(data.hud.left);
+      var ht = parseFloat(data.hud.top);
+      if (!isNaN(hl) && !isNaN(ht)) {
+        var changed = !lastAppliedHudPos
+          || Math.abs(lastAppliedHudPos.left - hl) > 0.5
+          || Math.abs(lastAppliedHudPos.top - ht) > 0.5;
+        if (changed || !hudPosReady) {
+          ensureHud();
+          applyHudPos(hudEl, { left: hl, top: ht });
+        }
+      }
+    }
     if (data.nick != null) settings.nick = String(data.nick);
     if (data.pm != null) {
       var n = parseInt(data.pm, 10);
       if (!isNaN(n)) pmCount = n;
+    }
+    if (data.norm != null) {
+      var nv = parseInt(data.norm, 10);
+      if (!isNaN(nv)) normValue = nv;
+    }
+    if (data.mult != null) {
+      var mv = parseInt(data.mult, 10);
+      if (!isNaN(mv)) multValue = mv;
+      else multValue = calcMult(pmCount, normValue);
+    } else {
+      multValue = calcMult(pmCount, normValue);
     }
     if (data.health != null) {
       var h = String(data.health);
@@ -311,13 +449,50 @@
     }
   }
 
+  function showChat(msg) {
+    try {
+      if (typeof window.onChatMessage === 'function') {
+        // 2-й аргумент — цвет времени/строки в чате (часто его красит другой скрипт в зелёный).
+        // Ставим тот же голубой, что и [ChesNova]; текст после тега — белый.
+        window.onChatMessage('{65C4FF}[ChesNova] {FFFFFF}' + msg, 'ff65C4FF');
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  var loadAnnounced = false;
+  function announceLoaded() {
+    if (loadAnnounced) return;
+    // чуть подождать, пока CEF/чат готовы
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      if (showChat('\u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D.') || tries >= 20) {
+        loadAnnounced = true;
+        clearInterval(timer);
+      }
+    }, 500);
+  }
+
   window.ChesHUD = {
+    showChat: showChat,
     setNick: function (nick) {
       settings.nick = (nick || '').trim();
       updateHud();
     },
     setPm: function (n) {
       pmCount = n;
+      multValue = calcMult(pmCount, normValue);
+      updateHud();
+    },
+    setNorm: function (n) {
+      normValue = n;
+      multValue = calcMult(pmCount, normValue);
+      updateHud();
+    },
+    setMult: function (m) {
+      multValue = m;
       updateHud();
     },
     setHealth: function (state) {
@@ -333,7 +508,20 @@
     setVisible: setHudVisible,
     toggle: toggleHud,
     update: updateHud,
-    poll: pollHud
+    poll: pollHud,
+    resetPos: function () {
+      if (!hudEl) return;
+      hudEl.style.left = '';
+      hudEl.style.top = '';
+      hudEl.style.right = '14px';
+      hudEl.style.bottom = '14px';
+      // сохранить дефолт как координаты после reflow
+      setTimeout(function () {
+        if (!hudEl) return;
+        var rect = hudEl.getBoundingClientRect();
+        saveHudPos(rect.left, rect.top);
+      }, 30);
+    }
   };
 
   function tick() {
@@ -345,6 +533,7 @@
     try { ensureAiPanel(); } catch (e) {}
     try { ensureThink(); } catch (e) {}
     try { installChatHook(); } catch (e) {}
+    try { announceLoaded(); } catch (e) {}
   }
 
   setInterval(function () {
