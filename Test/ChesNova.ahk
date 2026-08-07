@@ -34,7 +34,6 @@ A_TrayMenu.Delete()
 A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
 A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
 A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
-A_TrayMenu.Add("🔄 Центрировать HUD", TrayCenterHUD)
 A_TrayMenu.Add()
 A_TrayMenu.Add("🔁 Перезапуск", TrayRestart)
 A_TrayMenu.Add("❌ Выход", TrayExit)
@@ -53,10 +52,6 @@ TrayOpenAi(*) {
     OpenAiAssistant()
 }
 
-TrayCenterHUD(*) {
-    CenterGUI()
-}
-
 TrayRestart(*) {
     RestartChesNova()
 }
@@ -70,7 +65,6 @@ RebuildTrayMenu() {
     A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
     A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
     A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
-    A_TrayMenu.Add("🔄 Центрировать HUD", TrayCenterHUD)
     A_TrayMenu.Add()
     A_TrayMenu.Add("🔁 Перезапуск", TrayRestart)
     A_TrayMenu.Add("❌ Выход", TrayExit)
@@ -89,7 +83,7 @@ RebuildTrayMenu() {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "11.0"
+CURRENT_VERSION := "11.0.3"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -118,6 +112,20 @@ notificationsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/n
 DirCreate(bindsDir)
 aiHistoryFile := dataPath "\ai_history.json"
 errorsLogFile := logPath "\errors.log"
+; HTTP-мост для CEF HUD (ches.js)
+hudBridgePort := 17890
+hudBridgeStateFile := dataPath "\hud_state.json"
+hudBridgePosFile := dataPath "\hud_pos.json"
+hudBridgeScriptFile := dataPath "\hud_http_bridge.ps1"
+hudBridgePidFile := dataPath "\hud_http_bridge.pid"
+hudBridgePid := 0
+; AI-ответ для in-game панели (ches.js), ~10 сек
+aiHudId := 0
+aiHudQuestion := ""
+aiHudAnswer := ""
+aiHudIsError := false
+aiHudExpireTick := 0
+aiHudThinking := false
 try {
     if !FileExist(errorsLogFile)
         FileAppend("", errorsLogFile, "UTF-8")
@@ -144,24 +152,22 @@ resetMinute := 0
 lastResetDate := ""
 menuKey := "F10"
 resetKey := "F9"
-centerKey := "F5"
-hideKey := "F2"
 aiKey := "F7"
-aiCompactKey := "F6"
 menuKeyEnabled := 1
 resetKeyEnabled := 1
-centerKeyEnabled := 1
-hideKeyEnabled := 1
 aiKeyEnabled := 1
-aiCompactKeyEnabled := 1
 geminiApiKey := ""
 geminiModel := "gemini-3.6-flash"
+deepseekApiKey := ""
+deepseekModel := "deepseek-chat"
+groqApiKey := ""
+groqModel := "llama-3.1-8b-instant"
+aiProvider := "gemini"  ; gemini | deepseek | groq
 aiDailyLimit := 0
 aiDailyUsed := 0
 aiDailyRemaining := 0
 aiQuotaDate := ""
 aiConfigLoaded := false
-hudDesign := "Compact"
 uiTheme := "dark"  ; dark | light
 ; Палитра заполняется ApplyTheme()
 colorBg := "0B0E14"
@@ -181,15 +187,13 @@ dotRed := colorRed
 dotGreen := colorGreen
 aiHistory := []  ; [{q, a, t}, ...] последние вопросы AI
 aiHistoryMax := 15
-aiHistoryFile := ""  ; заполняется ниже после dataPath
+; aiHistoryFile уже задан выше: dataPath "\ai_history.json"
 guiX := "Center"
 guiY := "Center"
 menuX := "Center"
 menuY := "Center"
 aiGuiX := "Center"
 aiGuiY := "Center"
-aiCompactX := "Center"
-aiCompactY := "Center"
 logFile := ""
 scriptsGamePath := ""
 
@@ -205,18 +209,17 @@ if FileExist(settingsFile)
         scriptsGamePath := IniRead(settingsFile, "Scripts", "gamePath", scriptsGamePath)
         menuKey := IniRead(settingsFile, "Keys", "menuKey", "F10")
         resetKey := IniRead(settingsFile, "Keys", "resetKey", "F9")
-        centerKey := IniRead(settingsFile, "Keys", "centerKey", "F5")
-        hideKey := IniRead(settingsFile, "Keys", "hideKey", "F2")
         aiKey := IniRead(settingsFile, "Keys", "aiKey", "F7")
-        aiCompactKey := IniRead(settingsFile, "Keys", "aiCompactKey", "F6")
         menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
         resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
-        centerKeyEnabled := IniRead(settingsFile, "Keys", "centerKeyEnabled", 1)
-        hideKeyEnabled := IniRead(settingsFile, "Keys", "hideKeyEnabled", 1)
         aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 1)
-        aiCompactKeyEnabled := IniRead(settingsFile, "Keys", "aiCompactKeyEnabled", 1)
         geminiApiKey := IniRead(settingsFile, "AI", "geminiApiKey", "")
         geminiModel := IniRead(settingsFile, "AI", "geminiModel", "gemini-3.6-flash")
+        deepseekApiKey := IniRead(settingsFile, "AI", "deepseekApiKey", "")
+        deepseekModel := IniRead(settingsFile, "AI", "deepseekModel", "deepseek-chat")
+        groqApiKey := IniRead(settingsFile, "AI", "groqApiKey", "")
+        groqModel := IniRead(settingsFile, "AI", "groqModel", "llama-3.1-8b-instant")
+        aiProvider := IniRead(settingsFile, "AI", "aiProvider", "gemini")
         aiDailyLimit := Integer(IniRead(settingsFile, "AI", "aiDailyLimit", 0))
         aiDailyUsed := Integer(IniRead(settingsFile, "AI", "aiDailyUsed", 0))
         aiDailyRemaining := Integer(IniRead(settingsFile, "AI", "aiDailyRemaining", 0))
@@ -235,9 +238,6 @@ if FileExist(settingsFile)
         menuY := IniRead(settingsFile, "GUI", "menuY", "Center")
         aiGuiX := IniRead(settingsFile, "GUI", "aiGuiX", "Center")
         aiGuiY := IniRead(settingsFile, "GUI", "aiGuiY", "Center")
-        aiCompactX := IniRead(settingsFile, "GUI", "aiCompactX", "Center")
-        aiCompactY := IniRead(settingsFile, "GUI", "aiCompactY", "Center")
-        hudDesign := IniRead(settingsFile, "GUI", "hudDesign", "Compact")
         uiTheme := IniRead(settingsFile, "GUI", "uiTheme", "dark")
     } catch as err {
         LogError("LoadSettings", "Повреждён settings.ini или ошибка чтения настроек", err.Message)
@@ -255,13 +255,19 @@ testerMode += 0
 startWithWindows += 0
 menuKeyEnabled += 0
 resetKeyEnabled += 0
-centerKeyEnabled += 0
-hideKeyEnabled += 0
 aiKeyEnabled += 0
-aiCompactKeyEnabled += 0
 geminiApiKey := Trim(geminiApiKey)
+deepseekApiKey := Trim(deepseekApiKey)
+groqApiKey := Trim(groqApiKey)
+aiProvider := StrLower(Trim(aiProvider))
+if (aiProvider != "deepseek" && aiProvider != "groq")
+    aiProvider := "gemini"
 if (geminiModel = "" || geminiModel = "gemini-1.5-flash" || geminiModel = "gemini-2.5-flash")
     geminiModel := "gemini-3.6-flash"
+if (deepseekModel = "")
+    deepseekModel := "deepseek-chat"
+if (groqModel = "")
+    groqModel := "llama-3.1-8b-instant"
 
 ApplyTheme(uiTheme)
 LoadAiHistory()
@@ -323,7 +329,6 @@ healthIncidents := []
 chatlogReadErrorStreak := 0
 lastChatlogChangeTick := A_TickCount
 lastHealthState := "ok"
-guiHidden := false
 selectedPunishmentDate := ""
 selectedPunishmentType := "ban"
 selectedPunishmentDays := 10
@@ -349,17 +354,11 @@ SetNickCtrl := ""
 SetNormCtrl := ""
 SetMenuKeyCtrl := ""
 SetResetKeyCtrl := ""
-SetCenterKeyCtrl := ""
-SetHideKeyCtrl := ""
 SetAiKeyCtrl := ""
-SetAiCompactKeyCtrl := ""
 SetMenuKeyEnabledCtrl := ""
 SetResetKeyEnabledCtrl := ""
-SetCenterKeyEnabledCtrl := ""
-SetHideKeyEnabledCtrl := ""
 SetAiKeyEnabledCtrl := ""
-SetAiCompactKeyEnabledCtrl := ""
-SetHudDesignCtrl := ""
+SetAiProviderCtrl := ""
 AiGui := ""
 AiQuestionCtrl := ""
 AiAnswerCtrl := ""
@@ -370,9 +369,6 @@ lastAiOpenTick := 0
 aiRequestBusy := false
 aiChatCaptureBusy := false
 aiChatHotstringRegistered := false
-AiCompactGui := ""
-AiCompactAnswerCtrl := ""
-AiCompactStatusCtrl := ""
 SetAutoResetCtrl := ""
 SetCheckUpdatesCtrl := ""
 SetStartupCtrl := ""
@@ -431,6 +427,9 @@ DashboardProgressBgCtrl := ""
 DashboardProgressFillCtrl := ""
 DashboardLogFileCtrl := ""
 DashboardDaysOffMonthCtrl := ""
+DashboardStatusChatlogCtrl := ""
+DashboardStatusGameCtrl := ""
+DashboardStatusHudCtrl := ""
 HelpEditCtrl := ""
 ErrorsLogTextCtrl := ""
 CloudNickCtrl := ""
@@ -578,23 +577,14 @@ HighlightSearchMatch(text, search) {
 }
 
 ; =========================
-; 🖥 MAIN GUI
+; 🖥 MAIN GUI (AHK-HUD отключён — счётчик в игре через ches.js)
 ; =========================
-MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow +Border", "PM Counter")
-MainGui.BackColor := colorCard
-MainGui.MarginX := 6
-MainGui.MarginY := 4
-MainGui.SetFont("s8 Bold cFFFFFF", "Segoe UI")
-StatusDotCtrl := MainGui.Add("Text", "vStatusDot x6 y5 c" dotRed, "●")
-PMCountTextCtrl := MainGui.Add("Text", "vPMCountText x20 y4 w68 cFFFFFF", "Загрузка...")
-
-if (guiX = "Center")
-    MainGui.Show("w90 h24 xCenter yCenter")
-else
-    MainGui.Show("w90 h24 x" guiX " y" guiY)
-
-BuildMainHud()
-
+MainGui := ""
+StatusDotCtrl := ""
+CloudDotCtrl := ""
+PMCountTextCtrl := ""
+HudNickCtrl := ""
+HudStatsCtrl := ""
 OnMessage(0x201, WM_LBUTTONDOWN)
 OnMessage(0x84, WM_NCHITTEST)
 
@@ -611,21 +601,301 @@ SetTimer(RunHealthCheck, 60000)
 
 UpdatePMDisplay()
 SetTimer(CheckChatlogPathOnStartup, -1500)
+StartHudHttpBridge()
+OnExit(HudBridgeOnExit)
 
 ; ------------------------------------------------------------
 ; 02. Statistics helpers
 ; ------------------------------------------------------------
 
 CheckChatlogPathOnStartup(*) {
-    global logFile, cloudAccessState
-    if (logFile = "") {
-        ShowToast("⚠ chatlog не выбран — укажите в Настройках", 3200)
-        return
+    AutoDetectGamePaths(false)
+}
+
+; =========================
+; 📁 АВТОПОИСК chatlog + корень игры
+; =========================
+; После первого запуска лаунчера/игры:
+;   chatlog: Документы\RADMIR CRMP User Files\SAMP\chatlog.txt
+;   игра:   …\RADMIR Games\RADMIR CRMP
+; На последующих запусках — только проверка сохранённых путей;
+; если файл/папка пропали — повторный поиск и сохранение.
+
+GetDefaultChatlogPath() {
+    return A_MyDocuments "\RADMIR CRMP User Files\SAMP\chatlog.txt"
+}
+
+IsValidGameRoot(path) {
+    path := RTrim(Trim(path), "\/")
+    if (path = "" || !DirExist(path))
+        return false
+    ; Типичные маркеры корня RADMIR CRMP
+    if FileExist(path "\gta_sa.exe")
+        return true
+    if FileExist(path "\samp.dll")
+        return true
+    if DirExist(path "\models") && DirExist(path "\data")
+        return true
+    ; Иногда только папка с именем RADMIR CRMP
+    SplitPath(path, &leaf)
+    if (StrLower(leaf) = "radmir crmp")
+        return true
+    return false
+}
+
+FindRadmirGameRoot() {
+    candidates := []
+
+    ; Стандартные и частые места установки
+    for _, drive in ["C:", "D:", "E:", "F:", "G:", "H:"] {
+        candidates.Push(drive "\RADMIR Games\RADMIR CRMP")
+        candidates.Push(drive "\RADMIR\RADMIR CRMP")
+        candidates.Push(drive "\Games\RADMIR Games\RADMIR CRMP")
+        candidates.Push(drive "\Games\RADMIR CRMP")
+        candidates.Push(drive "\Program Files\RADMIR Games\RADMIR CRMP")
+        candidates.Push(drive "\Program Files (x86)\RADMIR Games\RADMIR CRMP")
     }
-    if !FileExist(logFile) {
-        ShowToast("⚠ chatlog не найден: " logFile, 3500)
-        return
+    candidates.Push(A_MyDocuments "\RADMIR Games\RADMIR CRMP")
+    candidates.Push(EnvGet("LOCALAPPDATA") "\RADMIR Games\RADMIR CRMP")
+    candidates.Push(EnvGet("ProgramFiles") "\RADMIR Games\RADMIR CRMP")
+    try candidates.Push(EnvGet("ProgramFiles(x86)") "\RADMIR Games\RADMIR CRMP")
+
+    for _, path in candidates {
+        path := RTrim(path, "\/")
+        if IsValidGameRoot(path)
+            return path
     }
+
+    ; Лёгкий обход 1-го уровня папки "RADMIR Games" на основных дисках
+    for _, drive in ["C:", "D:", "E:", "F:"] {
+        root := drive "\RADMIR Games"
+        if !DirExist(root)
+            continue
+        try {
+            Loop Files, root "\*", "D" {
+                if IsValidGameRoot(A_LoopFileFullPath)
+                    return A_LoopFileFullPath
+            }
+        }
+    }
+
+    return ""
+}
+
+SaveDetectedChatlog(path) {
+    global logFile, lastSize, settingsFile, LogFileTextCtrl
+
+    path := Trim(path)
+    if (path = "" || !FileExist(path))
+        return false
+
+    logFile := path
+    try lastSize := FileGetSize(logFile)
+    catch
+        lastSize := 0
+    TryIniWrite(logFile, settingsFile, "Main", "logFile", "SaveDetectedChatlog")
+    if IsObject(LogFileTextCtrl)
+        LogFileTextCtrl.Value := logFile
+    return true
+}
+
+SaveDetectedGamePath(path) {
+    global scriptsGamePath, settingsFile, ScriptsGamePathCtrl
+
+    path := RTrim(Trim(path), "\/")
+    if (path = "" || !IsValidGameRoot(path))
+        return false
+
+    scriptsGamePath := path
+    TryIniWrite(scriptsGamePath, settingsFile, "Scripts", "gamePath", "SaveDetectedGamePath")
+    if IsObject(ScriptsGamePathCtrl)
+        ScriptsGamePathCtrl.Value := scriptsGamePath
+    return true
+}
+
+; silent=true — без тостов (фоновая перепроверка).
+; silent=false — тосты при первом обнаружении / проблемах.
+AutoDetectGamePaths(silent := false) {
+    global logFile, scriptsGamePath, lastSize
+
+    chatlogOk := false
+    gameOk := false
+    chatlogFoundNow := false
+    gameFoundNow := false
+
+    ; —— chatlog ——
+    if (logFile != "" && FileExist(logFile)) {
+        chatlogOk := true
+        try lastSize := FileGetSize(logFile)
+    } else {
+        defaultChatlog := GetDefaultChatlogPath()
+        if FileExist(defaultChatlog) {
+            if SaveDetectedChatlog(defaultChatlog) {
+                chatlogOk := true
+                chatlogFoundNow := true
+            }
+        }
+    }
+
+    ; —— корень игры ——
+    if (scriptsGamePath != "" && IsValidGameRoot(scriptsGamePath)) {
+        gameOk := true
+    } else {
+        found := FindRadmirGameRoot()
+        if (found != "") {
+            if SaveDetectedGamePath(found) {
+                gameOk := true
+                gameFoundNow := true
+            }
+        }
+    }
+
+    ; HUD в игре: loader-js.asi + ches.js (при известном корне)
+    hudResult := Map("ok", false, "downloaded", 0)
+    if gameOk {
+        ; При каждом старте: ches.js и loader-js.json всегда обновляем;
+        ; loader-js.asi — только если отсутствует (createOnlyMissing).
+        hudResult := EnsureChesNovaHudFiles(true, true)
+    }
+
+    if silent
+        return Map("chatlog", chatlogOk, "game", gameOk, "hud", hudResult.Has("installed") ? hudResult["installed"] : false)
+
+    if chatlogFoundNow && gameFoundNow
+        ShowToast("✓ chatlog и корень игры найдены автоматически", 3200)
+    else if chatlogFoundNow
+        ShowToast("✓ chatlog найден автоматически", 2800)
+    else if gameFoundNow
+        ShowToast("✓ Корень игры найден автоматически", 2800)
+    else {
+        if !chatlogOk {
+            if (logFile = "")
+                ShowToast("⚠ chatlog не найден — укажите в Настройках", 3200)
+            else
+                ShowToast("⚠ chatlog не найден: " logFile, 3500)
+        }
+        if !gameOk && (scriptsGamePath = "" || !IsValidGameRoot(scriptsGamePath)) {
+            if (scriptsGamePath != "")
+                ShowToast("⚠ Корень игры не найден — укажите во вкладке Скрипты", 3200)
+        }
+    }
+
+    if gameOk && hudResult.Has("downloaded") && (hudResult["downloaded"] > 0)
+        ShowToast("✓ Счётчик в игре установлен (loader + ches.js)", 2800)
+
+    try RefreshSettingsView()
+    try RefreshScriptsView()
+    try RefreshDashboardView()
+
+    return Map("chatlog", chatlogOk, "game", gameOk, "hud", hudResult.Has("installed") ? hudResult["installed"] : false)
+}
+
+GetChesNovaHudPaths(gamePath := "") {
+    if (gamePath = "")
+        gamePath := GetScriptsGamePath()
+    gamePath := RTrim(Trim(gamePath), "\/")
+    if (gamePath = "")
+        return Map("ok", false, "loader", "", "loaderJson", "", "ches", "", "scriptsDir", "")
+    scriptsDir := gamePath "\uiresources\scripts"
+    return Map(
+        "ok", true,
+        "loader", gamePath "\loader-js.asi",
+        "loaderJson", gamePath "\loader-js.json",
+        "ches", scriptsDir "\ches.js",
+        "scriptsDir", scriptsDir,
+        "uiresources", gamePath "\uiresources"
+    )
+}
+
+IsChesNovaHudInstalled(gamePath := "") {
+    paths := GetChesNovaHudPaths(gamePath)
+    if !paths["ok"]
+        return false
+    return FileExist(paths["loader"]) && FileExist(paths["loaderJson"]) && FileExist(paths["ches"])
+}
+
+; Скачивает loader-js.asi + loader-js.json в корень игры и ches.js в uiresources\scripts.
+; createOnlyMissing=true — не перезаписывать существующие файлы,
+; кроме тех, у которых alwaysUpdate=true (ches.js, loader-js.json — всегда после рестарта/обновы).
+EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
+    global dataPath, scriptsGamePath
+
+    gamePath := GetScriptsGamePath()
+    if (gamePath = "" || !DirExist(gamePath))
+        return Map("ok", false, "reason", "no_game", "installed", false)
+
+    paths := GetChesNovaHudPaths(gamePath)
+    try {
+        if !DirExist(paths["uiresources"])
+            DirCreate(paths["uiresources"])
+        if !DirExist(paths["scriptsDir"])
+            DirCreate(paths["scriptsDir"])
+    } catch as err {
+        LogError("EnsureChesNovaHudFiles", "Не удалось создать папки scripts", err.Message)
+        return Map("ok", false, "reason", "mkdir", "installed", false)
+    }
+
+    files := [
+        Map(
+            "name", "loader-js.asi",
+            "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi",
+            "dest", paths["loader"],
+            "alwaysUpdate", false
+        ),
+        Map(
+            "name", "loader-js.json",
+            "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json",
+            "dest", paths["loaderJson"],
+            "alwaysUpdate", true
+        ),
+        Map(
+            "name", "ches.js",
+            "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/ches.js",
+            "dest", paths["ches"],
+            "alwaysUpdate", true
+        )
+    ]
+
+    downloadsPath := dataPath "\downloads"
+    try DirCreate(downloadsPath)
+
+    downloaded := 0
+    skipped := 0
+    for _, file in files {
+        alwaysUpdate := file.Has("alwaysUpdate") && file["alwaysUpdate"]
+        ; ches.js / loader-js.json — всегда к замене после рестарта или обновы
+        if (createOnlyMissing && !alwaysUpdate && FileExist(file["dest"])) {
+            skipped += 1
+            continue
+        }
+        tempFile := downloadsPath "\ChesNova_hud_" A_TickCount "_" file["name"] ".tmp"
+        try {
+            Download(file["url"], tempFile)
+            if !FileExist(tempFile) || FileGetSize(tempFile) = 0
+                throw Error("Пустой файл после загрузки: " file["name"])
+            ; атомарнее: удалить старый → перенести
+            try {
+                if FileExist(file["dest"])
+                    FileDelete(file["dest"])
+            }
+            FileMove(tempFile, file["dest"], 1)
+            downloaded += 1
+        } catch as err {
+            try {
+                if FileExist(tempFile)
+                    FileDelete(tempFile)
+            }
+            LogError("EnsureChesNovaHudFiles", "Ошибка загрузки " file["name"], err.Message)
+            if !silent
+                ShowToast("⚠ Не удалось скачать " file["name"], 2800)
+            return Map("ok", false, "reason", file["name"], "installed", IsChesNovaHudInstalled(gamePath))
+        }
+    }
+
+    installed := IsChesNovaHudInstalled(gamePath)
+    if !silent && downloaded > 0
+        ShowToast("✓ Счётчик в игре: файлы установлены", 2600)
+    return Map("ok", installed, "reason", "", "installed", installed, "downloaded", downloaded, "skipped", skipped)
 }
 
 ; =========================
@@ -654,61 +924,8 @@ UpdatePMDisplay() {
     if IsObject(HudStatsCtrl)
         HudStatsCtrl.Text := BuildHudPunishmentStats()
     RefreshDashboardView()
+    WriteHudBridgeState()
 }
-
-BuildMainHud() {
-    global MainGui, StatusDotCtrl, CloudDotCtrl, PMCountTextCtrl, HudNickCtrl, HudStatsCtrl
-    global hudDesign, guiX, guiY, colorCard, colorAccent, colorText, colorMuted, dotRed, nick, pmCount
-
-    if IsObject(MainGui)
-        try MainGui.Destroy()
-
-    StatusDotCtrl := ""
-    CloudDotCtrl := ""
-    PMCountTextCtrl := ""
-    HudNickCtrl := ""
-    HudStatsCtrl := ""
-    guiOptions := (hudDesign = "Safe") ? "+AlwaysOnTop -Caption +ToolWindow -Border +E0x08000000 +E0x20 -DPIScale" : "+AlwaysOnTop -Caption +ToolWindow +Border"
-    MainGui := Gui(guiOptions, "PM Counter")
-    MainGui.BackColor := colorCard
-    MainGui.MarginX := 6
-    MainGui.MarginY := 4
-
-    if (hudDesign = "Expanded") {
-        MainGui.SetFont("s8 c" colorText, "Segoe UI")
-        HudNickCtrl := MainGui.Add("Text", "x4 y4 w128 h17 Center c" colorText, nick)
-        CloudDotCtrl := MainGui.Add("Text", "x134 y4 w14 h17 Center c" colorMuted, "●")
-        CloudDotCtrl.SetFont("s7 c" colorMuted, "Segoe UI")
-        MainGui.Add("Text", "x4 y23 w142 h1 Background" uiDivider)
-        PMCountTextCtrl := MainGui.Add("Text", "x4 y29 w142 h19 Center c" colorText, "PM: " pmCount)
-        MainGui.Add("Text", "x48 y51 w54 h2 Background" colorAccent)
-        HudStatsCtrl := MainGui.Add("Text", "x4 y58 w142 h45 Center c" colorMuted, BuildHudPunishmentStats())
-        if (guiX = "Center")
-            MainGui.Show("w150 h108 xCenter yCenter")
-        else
-            MainGui.Show("w150 h108 x" guiX " y" guiY)
-        UpdateCloudHudDot()
-    } else if (hudDesign = "Safe") {
-        MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
-        PMCountTextCtrl := MainGui.Add("Text", "x2 y2 w64 h16 Center c" colorText, "PM: " pmCount)
-        if (guiX = "Center")
-            MainGui.Show("w68 h20 xCenter yCenter NA")
-        else
-            MainGui.Show("w68 h20 x" guiX " y" guiY " NA")
-    } else {
-        MainGui.SetFont("s8 Bold c" colorText, "Segoe UI")
-        StatusDotCtrl := MainGui.Add("Text", "x4 y5 c" dotRed, "●")
-        CloudDotCtrl := MainGui.Add("Text", "x16 y5 c" colorMuted, "●")
-        CloudDotCtrl.SetFont("s7 c" colorMuted, "Segoe UI")
-        PMCountTextCtrl := MainGui.Add("Text", "x28 y4 w62 c" colorText, "PM: " pmCount)
-        if (guiX = "Center")
-            MainGui.Show("w96 h24 xCenter yCenter")
-        else
-            MainGui.Show("w96 h24 x" guiX " y" guiY)
-        UpdateCloudHudDot()
-    }
-}
-
 UpdateCloudHudDot() {
     global CloudDotCtrl, cloudAccessState, colorGreen, colorRed, colorYellow, colorMuted
     if !IsObject(CloudDotCtrl)
@@ -723,6 +940,218 @@ UpdateCloudHudDot() {
             col := colorYellow
     }
     try CloudDotCtrl.SetFont("s7 c" col, "Segoe UI")
+}
+
+; =========================
+; 🌐 HTTP bridge → CEF HUD
+; =========================
+WriteHudBridgeState(*) {
+    global hudBridgeStateFile, hudBridgePosFile, nick, pmCount, norm, healthState, healthMessage
+    global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
+
+    try {
+        mult := GetNormMultiplier()
+        json := "{"
+            . '"nick":"' JsonEscape(nick) '",'
+            . '"pm":' Integer(pmCount) ','
+            . '"norm":' Integer(norm) ','
+            . '"mult":' Integer(mult) ','
+            . '"health":"' JsonEscape(healthState) '",'
+            . '"message":"' JsonEscape(healthMessage) '"'
+
+        ; позиция HUD из файла (ches.js сохраняет через мост)
+        hudLeft := ""
+        hudTop := ""
+        try {
+            if FileExist(hudBridgePosFile) {
+                posText := Trim(FileRead(hudBridgePosFile, "UTF-8"))
+                if RegExMatch(posText, '"left"\s*:\s*(-?\d+(?:\.\d+)?)', &lm)
+                    hudLeft := lm[1]
+                if RegExMatch(posText, '"top"\s*:\s*(-?\d+(?:\.\d+)?)', &tm)
+                    hudTop := tm[1]
+            }
+        }
+        if (hudLeft != "" && hudTop != "")
+            json .= ',"hud":{"left":' hudLeft ',"top":' hudTop '}'
+        else
+            json .= ',"hud":null'
+
+        if (aiHudThinking) {
+            json .= ',"ai":{'
+                . '"id":' Integer(Max(aiHudId, 1)) ','
+                . '"thinking":true,'
+                . '"q":"' JsonEscape(aiHudQuestion) '",'
+                . '"a":"",'
+                . '"err":false,'
+                . '"ttl":0'
+                . "}"
+        } else if (aiHudId > 0 && aiHudAnswer != "" && A_TickCount < aiHudExpireTick) {
+            remainMs := aiHudExpireTick - A_TickCount
+            if (remainMs < 0)
+                remainMs := 0
+            json .= ',"ai":{'
+                . '"id":' Integer(aiHudId) ','
+                . '"thinking":false,'
+                . '"q":"' JsonEscape(aiHudQuestion) '",'
+                . '"a":"' JsonEscape(aiHudAnswer) '",'
+                . '"err":' (aiHudIsError ? "true" : "false") ','
+                . '"ttl":' Integer(remainMs)
+                . "}"
+        } else {
+            json .= ',"ai":null'
+        }
+
+        json .= "}"
+        f := FileOpen(hudBridgeStateFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо: мост не должен ломать основной цикл
+    }
+}
+
+; Индикатор «AI думает…» в ches.js
+PushAiThinkingToGameHud(question := "") {
+    global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
+
+    aiHudThinking := true
+    aiHudQuestion := Trim(question)
+    aiHudAnswer := ""
+    aiHudIsError := false
+    aiHudExpireTick := 0
+    if (aiHudId < 1)
+        aiHudId := 1
+    WriteHudBridgeState()
+}
+
+; Показать ответ AI в игре через ches.js (левый нижний угол, ~10 сек)
+PushAiToGameHud(question, answer, isError := false, durationMs := 10000) {
+    global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
+
+    question := Trim(question)
+    answer := Trim(answer)
+    if (answer = "")
+        return
+
+    aiHudThinking := false
+    aiHudId += 1
+    aiHudQuestion := question
+    aiHudAnswer := answer
+    aiHudIsError := isError ? true : false
+    aiHudExpireTick := A_TickCount + Max(1000, durationMs + 0)
+    WriteHudBridgeState()
+    SetTimer(ClearExpiredAiHud, -durationMs - 200)
+}
+
+ClearExpiredAiHud(*) {
+    global aiHudExpireTick, aiHudThinking
+    if (aiHudThinking)
+        return
+    if (A_TickCount >= aiHudExpireTick)
+        WriteHudBridgeState()
+}
+
+EnsureHudBridgeScript() {
+    global hudBridgeScriptFile, hudBridgePort
+
+    ; TcpListener — без прав админа и без netsh urlacl
+    ; GET /pos?left=N&top=N — сохранить позицию HUD (CEF localStorage не переживает релог)
+    script := (
+        "$ErrorActionPreference = 'Continue'`n"
+        "$port = " hudBridgePort "`n"
+        "$stateFile = $args[0]`n"
+        "$posFile = $args[1]`n"
+        "$ip = [System.Net.IPAddress]::Loopback`n"
+        "$listener = [System.Net.Sockets.TcpListener]::new($ip, $port)`n"
+        "try { $listener.Start() } catch { exit 1 }`n"
+        "while ($true) {`n"
+        "  try {`n"
+        "    $client = $listener.AcceptTcpClient()`n"
+        "    $stream = $client.GetStream()`n"
+        "    $reader = New-Object System.IO.StreamReader($stream)`n"
+        "    $requestLine = $reader.ReadLine()`n"
+        "    while ($true) { $line = $reader.ReadLine(); if ([string]::IsNullOrEmpty($line)) { break } }`n"
+        "    if ($requestLine -match 'GET\s+/pos\?left=([0-9.\-]+)&top=([0-9.\-]+)') {`n"
+        "      $left = $Matches[1]; $top = $Matches[2]`n"
+        "      try {`n"
+        "        $posJson = '{`"left`":' + $left + ',`"top`":' + $top + '}'`n"
+        "        [System.IO.File]::WriteAllText($posFile, $posJson, [System.Text.UTF8Encoding]::new($false))`n"
+        "      } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } else {`n"
+        "      $json = '{`"nick`":`"`",`"pm`":0,`"health`":`"ok`",`"message`":`"`",`"hud`":null}'`n"
+        "      if (Test-Path -LiteralPath $stateFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($stateFile, [System.Text.UTF8Encoding]::new($false)) } catch {}`n"
+        "      }`n"
+        "    }`n"
+        "    $body = [System.Text.Encoding]::UTF8.GetBytes($json)`n"
+        "    $header = `"HTTP/1.1 200 OK``r``nContent-Type: application/json; charset=utf-8``r``nAccess-Control-Allow-Origin: *``r``nAccess-Control-Allow-Methods: GET, OPTIONS``r``nCache-Control: no-store``r``nConnection: close``r``nContent-Length: $($body.Length)``r``n``r``n`"`n"
+        "    $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)`n"
+        "    $stream.Write($headerBytes, 0, $headerBytes.Length)`n"
+        "    $stream.Write($body, 0, $body.Length)`n"
+        "    $stream.Flush()`n"
+        "    $client.Close()`n"
+        "  } catch { Start-Sleep -Milliseconds 30 }`n"
+        "}`n"
+    )
+    try {
+        f := FileOpen(hudBridgeScriptFile, "w", "UTF-8")
+        f.Write(script)
+        f.Close()
+    } catch as err {
+        LogError("EnsureHudBridgeScript", "Не удалось записать hud_http_bridge.ps1", err.Message)
+    }
+}
+
+StopHudHttpBridge(*) {
+    global hudBridgePid, hudBridgePidFile
+
+    pid := hudBridgePid
+    if (pid = 0 && FileExist(hudBridgePidFile)) {
+        try pid := Integer(Trim(FileRead(hudBridgePidFile, "UTF-8")))
+        catch
+            pid := 0
+    }
+    if (pid > 0) {
+        try ProcessClose(pid)
+        catch {
+            try Run('taskkill /PID ' pid ' /F /T', , "Hide")
+        }
+    }
+    hudBridgePid := 0
+    try {
+        if FileExist(hudBridgePidFile)
+            FileDelete(hudBridgePidFile)
+    }
+}
+
+StartHudHttpBridge(*) {
+    global hudBridgePid, hudBridgePidFile, hudBridgeScriptFile, hudBridgeStateFile, hudBridgePosFile, hudBridgePort
+
+    StopHudHttpBridge()
+    WriteHudBridgeState()
+    EnsureHudBridgeScript()
+
+    try {
+        ; Hidden PowerShell HttpListener — ничего дополнительно ставить не нужно
+        cmd := 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'
+            . hudBridgeScriptFile '" "' hudBridgeStateFile '" "' hudBridgePosFile '"'
+        Run(cmd, , "Hide", &pid)
+        hudBridgePid := pid
+        try {
+            f := FileOpen(hudBridgePidFile, "w", "UTF-8")
+            f.Write(String(pid))
+            f.Close()
+        }
+        ; На всякий случай обновляем state раз в секунду
+        SetTimer(WriteHudBridgeState, 1000)
+    } catch as err {
+        LogError("StartHudHttpBridge", "Не удалось запустить HTTP-мост HUD", err.Message)
+    }
+}
+
+HudBridgeOnExit(*) {
+    StopHudHttpBridge()
 }
 
 BuildHudPunishmentStats() {
@@ -3058,20 +3487,6 @@ CheckAutoReset(*) {
 ; =========================
 ; 👁 TOGGLE GUI
 ; =========================
-ToggleGUI(*) {
-    global guiHidden, guiX, guiY, settingsFile, MainGui
-    if (guiHidden) {
-        MainGui.Show("x" guiX " y" guiY)
-        guiHidden := false
-    } else {
-        MainGui.GetPos(&guiX, &guiY)
-        TryIniWrite(guiX, settingsFile, "GUI", "guiX", "ToggleGUI")
-        TryIniWrite(guiY, settingsFile, "GUI", "guiY", "ToggleGUI")
-        MainGui.Hide()
-        guiHidden := true
-    }
-}
-
 ; ------------------------------------------------------------
 ; 05. Settings window
 ; ------------------------------------------------------------
@@ -3310,14 +3725,15 @@ GetScriptPackages() {
             "displayTitle", "Onishi",
             "author", "Takumi Onishi",
             "title", "Onishi",
-            "description", "Onishi script with loader.",
+            "description", "Onishi script with loader (скрипты уже в loader-js.json).",
             "authors", "Takumi Onishi",
             "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
             "files", [
                 Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
+                Map("name", "loader-js.json", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json", "relativePath", "loader-js.json"),
                 Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
             ],
-            "activationCommands", "//loader add script scripts/_otools.js`n//loader reload"
+            "activationCommands", ""
         ),
         Map(
             "id", "fpsunlocker",
@@ -4019,7 +4435,7 @@ ScriptsView() {
         ; Нижний ряд: автор / заметка | ссылка
         note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
         if (package["id"] = "onishi")
-            note := "Loader входит в установку"
+            note := "Loader + json, без //loader"
         AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
         AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
         topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
@@ -4066,7 +4482,7 @@ ScriptsViewCompact() {
         ; Нижний ряд: автор / заметка | ссылка
         note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
         if (package["id"] = "onishi")
-            note := "Loader входит в установку"
+            note := "Loader + json, без //loader"
         AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
         AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
         topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
@@ -4096,7 +4512,13 @@ GetScriptsGamePath() {
 
     path := IsObject(ScriptsGamePathCtrl) ? Trim(ScriptsGamePathCtrl.Value) : Trim(scriptsGamePath)
     path := RTrim(path, "\/")
-    if (path != "") {
+    if (path = "" || !IsValidGameRoot(path)) {
+        found := FindRadmirGameRoot()
+        if (found != "") {
+            path := found
+            SaveDetectedGamePath(path)
+        }
+    } else {
         scriptsGamePath := path
         TryIniWrite(path, settingsFile, "Scripts", "gamePath", "GetScriptsGamePath")
     }
@@ -4334,6 +4756,7 @@ CopyScriptCommands(commands, *) {
 DashboardView() {
     global DashboardNickCtrl, DashboardSystemStatusCtrl, DashboardCloudStatusCtrl, DashboardNormCtrl, DashboardVersionCtrl
     global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardNormPercentCtrl, DashboardProgressBgCtrl, DashboardProgressFillCtrl, DashboardLogFileCtrl, DashboardDaysOffMonthCtrl
+    global DashboardStatusChatlogCtrl, DashboardStatusGameCtrl, DashboardStatusHudCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorYellow
 
     view := "Dashboard"
@@ -4342,49 +4765,53 @@ DashboardView() {
     AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Главная")
     AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
-    ; Профиль без аватара
-    AddViewControl(view, "Text", "x250 y94 w600 h98 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y105 w220 h22 Background" colorCard " c" colorMuted, "Администратор")
-    DashboardNickCtrl := AddViewControl(view, "Text", "x270 y128 w260 h28 Background" colorCard " c" colorAccent " +0x200", "")
-    AddViewControl(view, "Text", "x270 y160 w180 h20 Background" colorCard " c" colorGreen, "• Профиль активен")
+    ; Профиль
+    AddViewControl(view, "Text", "x250 y94 w600 h88 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y108 w220 h20 Background" colorCard " c" colorMuted, "Администратор")
+    DashboardNickCtrl := AddViewControl(view, "Text", "x270 y130 w400 h28 Background" colorCard " c" colorAccent " +0x200", "")
+    AddViewControl(view, "Text", "x270 y160 w200 h18 Background" colorCard " c" colorGreen, "• Профиль активен")
 
-    ; Норма без шкалы
-    AddViewControl(view, "Text", "x250 y216 w290 h116 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y238 w190 h22 Background" colorCard " c" colorMuted, "📨 Норма PM")
-    DashboardNormPmCtrl := AddViewControl(view, "Text", "x270 y264 w240 h34 Background" colorCard " c" colorAccent " +0x200", "")
-    DashboardNormRemainingCtrl := AddViewControl(view, "Text", "x270 y302 w220 h22 Background" colorCard " c" colorMuted, "")
+    ; Норма
+    AddViewControl(view, "Text", "x250 y198 w290 h108 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y214 w190 h20 Background" colorCard " c" colorMuted, "📨 Норма PM")
+    DashboardNormPmCtrl := AddViewControl(view, "Text", "x270 y238 w240 h28 Background" colorCard " c" colorAccent " +0x200", "")
+    DashboardNormRemainingCtrl := AddViewControl(view, "Text", "x270 y270 w240 h22 Background" colorCard " c" colorMuted, "")
 
-    ; Отгулы за месяц
-    AddViewControl(view, "Text", "x560 y216 w290 h116 Background" colorCard)
-    AddViewControl(view, "Text", "x580 y238 w190 h22 Background" colorCard " c" colorMuted, "🏖 Отгулы за месяц")
-    DashboardDaysOffMonthCtrl := AddViewControl(view, "Text", "x580 y264 w210 h34 Background" colorCard " c" colorGreen " +0x200", "")
-    AddViewControl(view, "Text", "x580 y302 w220 h22 Background" colorCard " c" colorMuted, "Текущий календарный месяц")
+    ; Отгулы
+    AddViewControl(view, "Text", "x560 y198 w290 h108 Background" colorCard)
+    AddViewControl(view, "Text", "x580 y214 w200 h20 Background" colorCard " c" colorMuted, "🏖 Отгулы за месяц")
+    DashboardDaysOffMonthCtrl := AddViewControl(view, "Text", "x580 y238 w210 h28 Background" colorCard " c" colorGreen " +0x200", "")
+    AddViewControl(view, "Text", "x580 y270 w220 h22 Background" colorCard " c" colorMuted, "Текущий календарный месяц")
 
-    ; Статус системы
-    AddViewControl(view, "Text", "x250 y356 w290 h116 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y378 w220 h22 Background" colorCard " c" colorMuted, "🛡 Статус системы")
-    DashboardSystemStatusCtrl := AddViewControl(view, "Text", "x270 y404 w230 h26 Background" colorCard " c" colorGreen " +0x200", "")
-    DashboardLogFileCtrl := AddViewControl(view, "Text", "x270 y434 w230 h24 Background" colorCard " c" colorMuted, "")
+    ; Статус системы — три пункта в столбик
+    AddViewControl(view, "Text", "x250 y322 w290 h168 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y336 w240 h20 Background" colorCard " c" colorMuted, "🛡 Статус системы")
+    DashboardStatusChatlogCtrl := AddViewControl(view, "Text", "x270 y366 w250 h24 Background" colorCard " c" colorMuted " +0x200", "●  chatlog")
+    DashboardStatusGameCtrl := AddViewControl(view, "Text", "x270 y398 w250 h24 Background" colorCard " c" colorMuted " +0x200", "●  корень игры")
+    DashboardStatusHudCtrl := AddViewControl(view, "Text", "x270 y430 w250 h24 Background" colorCard " c" colorMuted " +0x200", "●  счётчик в игре")
+    ; legacy aliases (не показываем, но Refresh не падает)
+    DashboardSystemStatusCtrl := DashboardStatusChatlogCtrl
+    DashboardLogFileCtrl := DashboardStatusGameCtrl
 
     ; Cloud
-    AddViewControl(view, "Text", "x560 y356 w290 h116 Background" colorCard)
-    AddViewControl(view, "Text", "x580 y378 w220 h22 Background" colorCard " c" colorMuted, "☁ Cloud")
-    DashboardCloudStatusCtrl := AddViewControl(view, "Text", "x580 y404 w230 h26 Background" colorCard " c" colorAccent " +0x200", "")
-    AddViewControl(view, "Text", "x580 y434 w230 h24 Background" colorCard " c" colorMuted, "Проверка доступа активна")
+    AddViewControl(view, "Text", "x560 y322 w290 h168 Background" colorCard)
+    AddViewControl(view, "Text", "x580 y336 w220 h20 Background" colorCard " c" colorMuted, "☁ Cloud")
+    DashboardCloudStatusCtrl := AddViewControl(view, "Text", "x580 y380 w250 h28 Background" colorCard " c" colorAccent " +0x200", "")
+    AddViewControl(view, "Text", "x580 y420 w250 h40 Background" colorCard " c" colorMuted, "Проверка доступа по нику`nиз таблицы Cloud")
 
-    ; Быстрый переход по центру снизу
-    openSettingsBtn := AddViewControl(view, "Text", "x405 y492 w290 h34 +0x200 Center Background" colorAccent " c" colorText, "⚙  Открыть настройки")
+    ; Кнопка
+    openSettingsBtn := AddViewControl(view, "Text", "x405 y508 w290 h34 +0x200 Center Background" colorAccent " c" colorText, "⚙  Открыть настройки")
     BindTextButton(openSettingsBtn, colorAccent, (*) => ShowView("Settings"))
 }
 
 RefreshDashboardView() {
     global SettingsGui
-    global nick, pmCount, norm, logFile, appVersion, colorAccent, colorGreen, colorRed, colorMuted
-    global DashboardNickCtrl, DashboardSystemStatusCtrl, DashboardCloudStatusCtrl, DashboardNormCtrl, DashboardVersionCtrl
-    global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardNormPercentCtrl, DashboardProgressFillCtrl, DashboardLogFileCtrl, DashboardDaysOffMonthCtrl
+    global nick, pmCount, norm, logFile, scriptsGamePath, appVersion
+    global colorAccent, colorGreen, colorRed, colorMuted
+    global DashboardNickCtrl, DashboardCloudStatusCtrl
+    global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardDaysOffMonthCtrl
+    global DashboardStatusChatlogCtrl, DashboardStatusGameCtrl, DashboardStatusHudCtrl
 
-    ; Если F10-меню закрыто или пересоздаётся, старые Text-контролы уже уничтожены.
-    ; Не трогаем их, чтобы не ловить ошибку "The control is destroyed".
     if !IsObject(SettingsGui)
         return
 
@@ -4403,25 +4830,31 @@ RefreshDashboardView() {
         if IsObject(DashboardDaysOffMonthCtrl)
             DashboardDaysOffMonthCtrl.Text := CountDaysOffCurrentMonth() " дн."
 
-        if IsObject(DashboardSystemStatusCtrl) {
-            if (logFile != "" && FileExist(logFile)) {
-                DashboardSystemStatusCtrl.Text := "активировано"
-                DashboardSystemStatusCtrl.SetFont("c" colorGreen)
-            } else {
-                DashboardSystemStatusCtrl.Text := "неактивировано"
-                DashboardSystemStatusCtrl.SetFont("c" colorRed)
-            }
-        }
+        ; —— статус системы: chatlog / корень / счётчик ——
+        chatlogOk := (logFile != "" && FileExist(logFile))
+        gameOk := (scriptsGamePath != "" && IsValidGameRoot(scriptsGamePath))
+        hudOk := gameOk && IsChesNovaHudInstalled(scriptsGamePath)
 
-        if IsObject(DashboardLogFileCtrl)
-            DashboardLogFileCtrl.Text := (logFile != "" && FileExist(logFile)) ? "chatlog.txt выбран  •" : "chatlog.txt не выбран"
+        SetDashboardStatusLine(DashboardStatusChatlogCtrl, "chatlog", chatlogOk)
+        SetDashboardStatusLine(DashboardStatusGameCtrl, "корень игры", gameOk)
+        SetDashboardStatusLine(DashboardStatusHudCtrl, "счётчик в игре", hudOk)
 
         if IsObject(DashboardCloudStatusCtrl) {
             DashboardCloudStatusCtrl.Text := GetCloudStatusText()
-            DashboardCloudStatusCtrl.SetFont("c" GetCloudStatusColor())
+            DashboardCloudStatusCtrl.SetFont("s10 Bold c" GetCloudStatusColor(), "Segoe UI")
         }
     } catch as err {
         ResetDashboardControls()
+    }
+}
+
+SetDashboardStatusLine(ctrl, label, isOk) {
+    global colorGreen, colorRed
+    if !IsObject(ctrl)
+        return
+    try {
+        ctrl.Text := (isOk ? "●  " : "●  ") label
+        ctrl.SetFont("s10 Bold c" (isOk ? colorGreen : colorRed), "Segoe UI")
     }
 }
 
@@ -5293,16 +5726,17 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, hudDesign, uiTheme, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetCenterKeyCtrl, SetHideKeyCtrl, SetAiKeyCtrl, SetAiCompactKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetCenterKeyEnabledCtrl, SetHideKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiCompactKeyEnabledCtrl, SetHudDesignCtrl
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiProvider, uiTheme, logFile
+    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetAiKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiProviderCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
+    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorYellow
 
     view := "Settings"
     AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Настройки")
     AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
 
-    ; Левая колонка: профиль и горячие клавиши.
+    ; —— Левая колонка ——
+    ; Профиль
     AddViewControl(view, "Text", "x250 y88 w280 h102 Background" colorCard)
     AddViewControl(view, "Text", "x270 y104 w220 h22 Background" colorCard " c" colorText, "Пользователь")
     AddViewControl(view, "Text", "x270 y136 w110 h22 Background" colorCard " c" colorMuted, "Ник")
@@ -5310,34 +5744,36 @@ SettingsView() {
     AddViewControl(view, "Text", "x270 y166 w110 h22 Background" colorCard " c" colorMuted, "Норма PM")
     SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background" uiInputBg, norm)
 
-    AddViewControl(view, "Text", "x250 y206 w280 h286 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y222 w220 h22 Background" colorCard " c" colorText, "Горячие клавиши")
-    AddViewControl(view, "Text", "x270 y258 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
+    ; Горячие клавиши
+    AddViewControl(view, "Text", "x250 y206 w280 h196 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y222 w200 h22 Background" colorCard " c" colorText, "Горячие клавиши")
     AddViewControl(view, "Text", "x494 y230 w28 h18 Background" colorCard " c" colorMuted, "Вкл.")
-    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y254 w98 h26 c" colorText " Background" uiInputBg, menuKey)
-    SetMenuKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetMenuKeyEnabled x496 y258 w20 h20 Checked" menuKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y294 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
-    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y290 w98 h26 c" colorText " Background" uiInputBg, resetKey)
-    SetResetKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetResetKeyEnabled x496 y294 w20 h20 Checked" resetKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y330 w110 h22 Background" colorCard " c" colorMuted, "Центр HUD")
-    SetCenterKeyCtrl := AddViewControl(view, "Edit", "vSetCenterKey x390 y326 w98 h26 c" colorText " Background" uiInputBg, centerKey)
-    SetCenterKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetCenterKeyEnabled x496 y330 w20 h20 Checked" centerKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y366 w110 h22 Background" colorCard " c" colorMuted, "Скрыть HUD")
-    SetHideKeyCtrl := AddViewControl(view, "Edit", "vSetHideKey x390 y362 w98 h26 c" colorText " Background" uiInputBg, hideKey)
-    SetHideKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetHideKeyEnabled x496 y366 w20 h20 Checked" hideKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y402 w110 h22 Background" colorCard " c" colorMuted, "AI-ассистент")
-    SetAiKeyCtrl := AddViewControl(view, "Edit", "vSetAiKey x390 y398 w98 h26 c" colorText " Background" uiInputBg, aiKey)
-    SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y402 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y438 w110 h22 Background" colorCard " c" colorMuted, "Мини AI")
-    SetAiCompactKeyCtrl := AddViewControl(view, "Edit", "vSetAiCompactKey x390 y434 w98 h26 c" colorText " Background" uiInputBg, aiCompactKey)
-    SetAiCompactKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiCompactKeyEnabled x496 y438 w20 h20 Checked" aiCompactKeyEnabled " Background" colorCard)
+    AddViewControl(view, "Text", "x270 y256 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
+    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y252 w98 h26 c" colorText " Background" uiInputBg, menuKey)
+    SetMenuKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetMenuKeyEnabled x496 y256 w20 h20 Checked" menuKeyEnabled " Background" colorCard)
+    AddViewControl(view, "Text", "x270 y292 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
+    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y288 w98 h26 c" colorText " Background" uiInputBg, resetKey)
+    SetResetKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetResetKeyEnabled x496 y292 w20 h20 Checked" resetKeyEnabled " Background" colorCard)
+    AddViewControl(view, "Text", "x270 y328 w110 h22 Background" colorCard " c" colorMuted, "AI-ассистент")
+    SetAiKeyCtrl := AddViewControl(view, "Edit", "vSetAiKey x390 y324 w98 h26 c" colorText " Background" uiInputBg, aiKey)
+    SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y328 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
+    AddViewControl(view, "Text", "x270 y364 w240 h22 Background" colorCard " c" colorMuted, "В игре: /ai вопрос + Enter")
 
-    AddViewControl(view, "Text", "x250 y502 w280 h58 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y508 w120 h16 Background" colorCard " c" colorMuted, "Дизайн HUD")
-    SetHudDesignCtrl := AddViewControl(view, "ComboBox", "vSetHudDesign x270 y526 w240 c" colorText " Background" uiInputBg, ["Компактный", "Расширенный", "Безопасный"])
-    SetHudDesignCtrl.Choose(hudDesign = "Expanded" ? 2 : (hudDesign = "Safe" ? 3 : 1))
+    ; ИИ — отдельная карточка
+    AddViewControl(view, "Text", "x250 y418 w280 h138 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y434 w240 h22 Background" colorCard " c" colorText, "ИИ-модель")
+    providerChoices := ["Gemini", "DeepSeek · платная", "Groq"]
+    if (aiProvider = "deepseek")
+        providerIndex := 2
+    else if (aiProvider = "groq")
+        providerIndex := 3
+    else
+        providerIndex := 1
+    SetAiProviderCtrl := AddViewControl(view, "DropDownList", "vSetAiProvider x270 y464 w240 h120 Choose" providerIndex " c" colorText " Background" uiInputBg, providerChoices)
+    AddViewControl(view, "Text", "x270 y500 w240 h20 Background" colorCard " c" colorMuted, "Gemini и Groq — бесплатно")
+    AddViewControl(view, "Text", "x270 y520 w240 h20 Background" colorCard " c" colorMuted, "DeepSeek — платная")
 
-    ; Правая колонка: автоматизация и источник логов.
+    ; —— Правая колонка ——
     AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
     AddViewControl(view, "Text", "x570 y104 w220 h22 Background" colorCard " c" colorText, "Автосброс нормы")
     SetAutoResetCtrl := AddViewControl(view, "Checkbox", "vSetAutoReset x570 y136 Checked" autoResetEnabled " c" colorText " Background" colorCard, "Включить автосброс")
@@ -5354,9 +5790,11 @@ SettingsView() {
     LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x570 y292 w260 h58 ReadOnly -Wrap c" colorText " Background" uiInputBg, logText)
     selectLogButton := AddViewControl(view, "Text", "x570 y366 w260 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Выбрать chatlog.txt")
     BindTextButton(selectLogButton, colorCardAlt, SelectLogFile)
+
     AddViewControl(view, "Text", "x550 y442 w300 h86 Background" colorCard)
-    AddViewControl(view, "Text", "x570 y456 w220 h20 Background" colorCard " c" colorText, "Запуск и автоматизация")
+    AddViewControl(view, "Text", "x570 y456 w260 h20 Background" colorCard " c" colorText, "Запуск и автоматизация")
     SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x570 y482 Checked" startWithWindows " c" colorText " Background" colorCard, "Запускать вместе с Windows")
+
     saveButton := AddViewControl(view, "Text", "x550 y540 w300 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Сохранить настройки")
     BindTextButton(saveButton, colorAccent, SaveSettings)
 }
@@ -5707,35 +6145,34 @@ HelpView() {
 
 1. Откройте меню (по умолчанию F10).
 2. Укажите игровой ник и норму PM.
-3. Выберите chatlog.txt:
-   Документы → RADMIR CRMP User Files → SAMP → chatlog.txt
-4. Дождитесь зелёного статуса Cloud (вкладка Cloud или точка на HUD).
+3. chatlog.txt и корень игры подхватываются автоматически
+   (при необходимости — вручную в «Настройках» / «Скриптах»).
+4. Счётчик в игре ставится сам: loader-js.asi + ches.js
+   (вкладка «Скрипты», путь к RADMIR CRMP).
+5. Дождитесь зелёного статуса Cloud (вкладка Cloud).
 
 Без подтверждённого Cloud счётчик PM не считает.
 
 ————————————————
 ГОРЯЧИЕ КЛАВИШИ (по умолчанию)
 
-F10 — меню
+F10 — меню ChesNova
 F9  — сброс PM (с сохранением в историю)
-F5  — HUD в центр
-F2  — скрыть / показать HUD
-F7  — AI-ассистент
-F6  — мини-окно AI
+F7  — AI-ассистент (окно в Windows)
 
 В чате игры: /ai ваш вопрос + Enter
+  → ответ показывается в игре (левый нижний угол, ~10 сек)
 
 Клавиши можно сменить или отключить во вкладке «Настройки».
 
 ————————————————
-HUD
+СЧЁТЧИК В ИГРЕ (ches.js)
 
-● слева — норма PM (красный / зелёный)
-● рядом — Cloud (зелёный ок, жёлтый ожидание, красный нет доступа)
+Правый нижний угол: ник, точка здоровья (ok / warn / critical), PM.
+Левый нижний угол: ответ AI или «AI думает…».
 
-Компактный — маленький счётчик.
-Расширенный — ник, PM и наказания за день.
-Безопасный — если HUD режет FPS в игре.
+Данные идут из ChesNova по локальному HTTP-мосту
+(127.0.0.1:17890). Окно AHK-оверлея больше не используется.
 
 ————————————————
 НОРМА И ОТГУЛЫ
@@ -5768,14 +6205,17 @@ HUD
 ————————————————
 AI
 
-Ключ и дневной лимит подтягиваются из Cloud по нику.
-История последних вопросов — кнопка «История».
+Ключ и дневной лимит — из Cloud по нику.
+В «Настройках» можно выбрать ИИ: Gemini, DeepSeek или Groq.
+  Gemini — A1000, DeepSeek — A999, Groq — A998.
+F7 — полное окно ассистента (история, лимит).
+/ai в игре — быстрый ответ прямо в HUD.
 
 ————————————————
 ОБНОВЛЕНИЯ И СКРИПТЫ
 
 «Обновления» — проверить / установить релиз.
-«Скрипты» — путь к игре и установка пакетов.
+«Скрипты» — путь к игре, установка loader + ches.js и пакетов.
 «Тестировщик» — только если вы тестер.
 
 ————————————————
@@ -5814,7 +6254,7 @@ DiagnosticsView() {
 
 BuildDiagnosticsText() {
     global logFile, pmLogsFile, punishmentsFile, errorsLogFile
-    global hudDesign, diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
+    global diagnosticLastCheckMs, diagnosticLastProcessedLines, diagnosticLastPmChanges, diagnosticLastLogSize, diagnosticLastReadBytes
     global diagnosticCheckLogSamples, diagnosticCheckLogTotalMs, diagnosticCheckLogMaxMs
     global healthState, healthMessage, healthIncidents, cloudAccessState, chatlogReadErrorStreak
 
@@ -5825,7 +6265,7 @@ BuildDiagnosticsText() {
 
     text .= "—— CheckLog ——`n"
     text .= "Интервал: 1000 мс`n"
-    text .= "Режим HUD: " GetHudDesignText() "`n"
+    text .= "HUD: in-game (ches.js + HTTP-мост :17890)`n"
     text .= "Последний проход: " diagnosticLastCheckMs " мс`n"
     text .= "Среднее: " (diagnosticCheckLogSamples ? Round(diagnosticCheckLogTotalMs / diagnosticCheckLogSamples, 3) : 0) " мс`n"
     text .= "Максимум: " diagnosticCheckLogMaxMs " мс`n"
@@ -5941,21 +6381,12 @@ RunHealthCheck(*) {
         lastHealthState := healthState
     }
 
+    WriteHudBridgeState()
+
     if (settingsMenuBuilding || !IsObject(SettingsGui) || CurrentView != "Diagnostics")
         return
     RefreshDiagnosticsView()
 }
-
-GetHudDesignText() {
-    global hudDesign
-
-    if (hudDesign = "Expanded")
-        return "Расширенный"
-    if (hudDesign = "Safe")
-        return "Безопасный"
-    return "Компактный"
-}
-
 GetHighResolutionMilliseconds() {
     static frequency := 0
 
@@ -6190,6 +6621,7 @@ ResetDashboardControls() {
     global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardNormPercentCtrl
     global DashboardProgressBgCtrl, DashboardProgressFillCtrl, DashboardLogFileCtrl
     global DashboardDaysOffMonthCtrl
+    global DashboardStatusChatlogCtrl, DashboardStatusGameCtrl, DashboardStatusHudCtrl
 
     DashboardNickCtrl := ""
     DashboardSystemStatusCtrl := ""
@@ -6204,6 +6636,9 @@ ResetDashboardControls() {
     DashboardProgressFillCtrl := ""
     DashboardLogFileCtrl := ""
     DashboardDaysOffMonthCtrl := ""
+    DashboardStatusChatlogCtrl := ""
+    DashboardStatusGameCtrl := ""
+    DashboardStatusHudCtrl := ""
 }
 
 ResetDiagnosticsControls() {
@@ -6267,15 +6702,22 @@ SaveMenuPosition() {
 }
 
 SelectLogFile(*) {
-    global logFile, lastSize, LogFileTextCtrl
+    global logFile, lastSize, LogFileTextCtrl, settingsFile
 
-    selectedFile := FileSelect(3, "Выберите chatlog.txt", "*.txt")
+    startDir := GetDefaultChatlogPath()
+    if !FileExist(startDir)
+        startDir := A_MyDocuments "\RADMIR CRMP User Files\SAMP"
+    selectedFile := FileSelect(3, startDir, "Выберите chatlog.txt", "*.txt")
     if (selectedFile != "") {
         logFile := selectedFile
-        lastSize := FileGetSize(logFile)
+        try lastSize := FileGetSize(logFile)
+        catch
+            lastSize := 0
         if IsObject(LogFileTextCtrl)
             LogFileTextCtrl.Value := logFile
+        TryIniWrite(logFile, settingsFile, "Main", "logFile", "SelectLogFile")
         AppendPmLog("Действие", "Выбран файл логов: " logFile)
+        ShowToast("✓ chatlog выбран", 1800)
     }
 }
 
@@ -6408,7 +6850,9 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, geminiApiKey, geminiModel, hudDesign, uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiProvider
+    global geminiApiKey, geminiModel, deepseekApiKey, deepseekModel, groqApiKey, groqModel
+    global uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
 
     SaveMenuPosition()
     values := SettingsGui.Submit()
@@ -6432,17 +6876,19 @@ SaveSettings(*) {
 
     menuKey := values.SetMenuKey
     resetKey := values.SetResetKey
-    centerKey := values.SetCenterKey
-    hideKey := values.SetHideKey
     aiKey := values.SetAiKey
-    aiCompactKey := values.SetAiCompactKey
     menuKeyEnabled := values.SetMenuKeyEnabled
     resetKeyEnabled := values.SetResetKeyEnabled
-    centerKeyEnabled := values.SetCenterKeyEnabled
-    hideKeyEnabled := values.SetHideKeyEnabled
     aiKeyEnabled := values.SetAiKeyEnabled
-    aiCompactKeyEnabled := values.SetAiCompactKeyEnabled
-    hudDesign := (values.SetHudDesign = "Расширенный") ? "Expanded" : ((values.SetHudDesign = "Безопасный") ? "Safe" : "Compact")
+    if values.HasOwnProp("SetAiProvider") {
+        providerText := StrLower(Trim(values.SetAiProvider))
+        if InStr(providerText, "deepseek")
+            aiProvider := "deepseek"
+        else if InStr(providerText, "groq")
+            aiProvider := "groq"
+        else
+            aiProvider := "gemini"
+    }
 
     try {
         IniWrite(nick, settingsFile, "Main", "nick")
@@ -6458,25 +6904,23 @@ SaveSettings(*) {
         IniWrite(lastResetDate, settingsFile, "Main", "lastResetDate")
         IniWrite(menuKey, settingsFile, "Keys", "menuKey")
         IniWrite(resetKey, settingsFile, "Keys", "resetKey")
-        IniWrite(centerKey, settingsFile, "Keys", "centerKey")
-        IniWrite(hideKey, settingsFile, "Keys", "hideKey")
         IniWrite(aiKey, settingsFile, "Keys", "aiKey")
-        IniWrite(aiCompactKey, settingsFile, "Keys", "aiCompactKey")
         IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
         IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
-        IniWrite(centerKeyEnabled, settingsFile, "Keys", "centerKeyEnabled")
-        IniWrite(hideKeyEnabled, settingsFile, "Keys", "hideKeyEnabled")
         IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
-        IniWrite(aiCompactKeyEnabled, settingsFile, "Keys", "aiCompactKeyEnabled")
         IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
         IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
+        IniWrite(deepseekApiKey, settingsFile, "AI", "deepseekApiKey")
+        IniWrite(deepseekModel, settingsFile, "AI", "deepseekModel")
+        IniWrite(groqApiKey, settingsFile, "AI", "groqApiKey")
+        IniWrite(groqModel, settingsFile, "AI", "groqModel")
+        IniWrite(aiProvider, settingsFile, "AI", "aiProvider")
         IniWrite(guiX, settingsFile, "GUI", "guiX")
         IniWrite(guiY, settingsFile, "GUI", "guiY")
         IniWrite(menuX, settingsFile, "GUI", "menuX")
         IniWrite(menuY, settingsFile, "GUI", "menuY")
         IniWrite(aiGuiX, settingsFile, "GUI", "aiGuiX")
         IniWrite(aiGuiY, settingsFile, "GUI", "aiGuiY")
-        IniWrite(hudDesign, settingsFile, "GUI", "hudDesign")
         IniWrite(uiTheme, settingsFile, "GUI", "uiTheme")
         SetWindowsStartup(startWithWindows)
     } catch as err {
@@ -6495,7 +6939,6 @@ SaveSettings(*) {
 
     RegisterHotkeys()
 
-    BuildMainHud()
     UpdatePMDisplay()
 }
 
@@ -6565,15 +7008,6 @@ CancelResetPM(*) {
 ; =========================
 ; CENTER GUI
 ; =========================
-CenterGUI(*) {
-    global MainGui, guiX, guiY, settingsFile
-
-    MainGui.Show("xCenter yCenter")
-    MainGui.GetPos(&guiX, &guiY)
-    TryIniWrite(guiX, settingsFile, "GUI", "guiX", "CenterGUI")
-    TryIniWrite(guiY, settingsFile, "GUI", "guiY", "CenterGUI")
-}
-
 SaveAiQuotaLocal() {
     global settingsFile, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate
     aiQuotaDate := FormatTime(, "yyyyMMdd")
@@ -6646,7 +7080,8 @@ ApplySuccessfulAiUse(cloudLimit, cloudUsed, cloudRemaining) {
 
 FetchAiConfigFromCloud(*) {
     global nick, accessUrl, appVersion, settingsFile
-    global geminiApiKey, geminiModel, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiConfigLoaded
+    global geminiApiKey, deepseekApiKey, groqApiKey, geminiModel, deepseekModel, groqModel
+    global aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiConfigLoaded
     global AiLimitCtrl
 
     if (Trim(nick) = "" || nick = "Nick_Name")
@@ -6671,16 +7106,39 @@ FetchAiConfigFromCloud(*) {
     if (parts.Length < 5 || parts[1] != "OK")
         return false
 
-    geminiApiKey := Trim(parts[2])
-    MergeAiQuotaFromCloud(Integer(parts[3]), Integer(parts[4]), Integer(parts[5]))
+    ; Форматы (с конца: limit|used|remaining):
+    ; 7+: OK|gemini|deepseek|groq|limit|used|remaining
+    ; 6:  OK|gemini|deepseek|limit|used|remaining
+    ; 5:  OK|gemini|limit|used|remaining
+    if (parts.Length >= 7) {
+        geminiApiKey := Trim(parts[2])
+        deepseekApiKey := Trim(parts[3])
+        groqApiKey := Trim(parts[4])
+        MergeAiQuotaFromCloud(Integer(parts[5]), Integer(parts[6]), Integer(parts[7]))
+    } else if (parts.Length >= 6) {
+        geminiApiKey := Trim(parts[2])
+        deepseekApiKey := Trim(parts[3])
+        MergeAiQuotaFromCloud(Integer(parts[4]), Integer(parts[5]), Integer(parts[6]))
+    } else {
+        geminiApiKey := Trim(parts[2])
+        MergeAiQuotaFromCloud(Integer(parts[3]), Integer(parts[4]), Integer(parts[5]))
+    }
     aiConfigLoaded := true
 
     if (geminiModel = "" || geminiModel = "gemini-1.5-flash" || geminiModel = "gemini-2.5-flash")
         geminiModel := "gemini-3.6-flash"
+    if (deepseekModel = "")
+        deepseekModel := "deepseek-chat"
+    if (groqModel = "")
+        groqModel := "llama-3.1-8b-instant"
 
     try {
         IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
+        IniWrite(deepseekApiKey, settingsFile, "AI", "deepseekApiKey")
+        IniWrite(groqApiKey, settingsFile, "AI", "groqApiKey")
         IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
+        IniWrite(deepseekModel, settingsFile, "AI", "deepseekModel")
+        IniWrite(groqModel, settingsFile, "AI", "groqModel")
     }
 
     try {
@@ -6743,8 +7201,35 @@ ConsumeAiQuotaFromCloud() {
     return Map("ok", true, "reason", "")
 }
 
+GetCurrentAiApiKey() {
+    global aiProvider, geminiApiKey, deepseekApiKey, groqApiKey
+    if (aiProvider = "deepseek")
+        return Trim(deepseekApiKey)
+    if (aiProvider = "groq")
+        return Trim(groqApiKey)
+    return Trim(geminiApiKey)
+}
+
+GetAiProviderLabel() {
+    global aiProvider
+    if (aiProvider = "deepseek")
+        return "DeepSeek"
+    if (aiProvider = "groq")
+        return "Groq"
+    return "Gemini"
+}
+
+GetAiKeyCellHint() {
+    global aiProvider
+    if (aiProvider = "deepseek")
+        return "A999"
+    if (aiProvider = "groq")
+        return "A998"
+    return "A1000"
+}
+
 GetAiLimitStatusText() {
-    global aiConfigLoaded, aiDailyLimit, aiDailyUsed, aiDailyRemaining, geminiApiKey, cloudAccessState
+    global aiConfigLoaded, aiDailyLimit, aiDailyUsed, aiDailyRemaining, cloudAccessState
     if !aiConfigLoaded {
         if (cloudAccessState = "ok")
             return "Лимит: загрузка из Cloud…"
@@ -6752,9 +7237,9 @@ GetAiLimitStatusText() {
             return "Лимит: ожидание проверки Cloud…"
         return "Лимит: Cloud не подтверждён (" GetCloudStatusText() ")"
     }
-    if (Trim(geminiApiKey) = "")
-        return "Ключ пуст (проверьте A1000 в таблице)"
-    return "Лимит сегодня: " aiDailyUsed "/" aiDailyLimit " (осталось " aiDailyRemaining ")"
+    if (GetCurrentAiApiKey() = "")
+        return "Ключ " GetAiProviderLabel() " пуст (проверьте " GetAiKeyCellHint() " в таблице)"
+    return GetAiProviderLabel() " · лимит сегодня: " aiDailyUsed "/" aiDailyLimit " (осталось " aiDailyRemaining ")"
 }
 
 SetAiAskButtonLoading(isLoading) {
@@ -6865,17 +7350,17 @@ OpenAiAssistant(*) {
 }
 
 RefreshAiConfigAfterOpen(*) {
-    global AiLimitCtrl, AiStatusCtrl, geminiApiKey, colorGreen, colorRed
+    global AiLimitCtrl, AiStatusCtrl, aiProvider, colorGreen, colorRed
     ok := FetchAiConfigFromCloud()
     if IsObject(AiLimitCtrl)
         AiLimitCtrl.Text := GetAiLimitStatusText()
     if !IsObject(AiStatusCtrl)
         return
-    if ok && (Trim(geminiApiKey) != "") {
-        AiStatusCtrl.Text := "Готово. Можно задавать вопрос."
+    if ok && (GetCurrentAiApiKey() != "") {
+        AiStatusCtrl.Text := "Готово (" GetAiProviderLabel() "). Можно задавать вопрос."
         AiStatusCtrl.SetFont("s9 Norm c" colorGreen, "Segoe UI")
     } else if ok {
-        AiStatusCtrl.Text := "Конфиг получен, но ключ пуст (проверьте A1000 в таблице)."
+        AiStatusCtrl.Text := "Конфиг получен, но ключ " GetAiProviderLabel() " пуст (проверьте " GetAiKeyCellHint() ")."
         AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
     } else {
         AiStatusCtrl.Text := "Не удалось загрузить AI-конфиг. Проверьте Cloud и ник."
@@ -6885,7 +7370,7 @@ RefreshAiConfigAfterOpen(*) {
 
 SubmitAiQuestion(*) {
     global AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, aiRequestBusy
-    global geminiApiKey, colorAccent, colorYellow, colorRed, colorMuted, colorGreen
+    global geminiApiKey, aiProvider, colorAccent, colorYellow, colorRed, colorMuted, colorGreen
 
     if !IsObject(AiQuestionCtrl) || aiRequestBusy
         return
@@ -6909,14 +7394,14 @@ SubmitAiQuestion(*) {
     }
 
     ; Не блокируем UI полностью: async HTTP с Sleep внутри
-    if (Trim(geminiApiKey) = "")
+    if (GetCurrentAiApiKey() = "")
         FetchAiConfigFromCloud()
 
-    if (Trim(geminiApiKey) = "") {
+    if (GetCurrentAiApiKey() = "") {
         if IsObject(AiAnswerCtrl)
             AiAnswerCtrl.Value := ""
         if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Ключ пуст. Проверьте A1000 и доступ ника."
+            AiStatusCtrl.Text := "Ключ " GetAiProviderLabel() " пуст. Проверьте " GetAiKeyCellHint() " и доступ ника."
             AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
         }
         SetAiAskButtonLoading(false)
@@ -6941,19 +7426,23 @@ SubmitAiQuestion(*) {
     }
 
     try {
-        answer := AskGemini(question)
+        if IsObject(AiStatusCtrl) {
+            AiStatusCtrl.Text := "Ожидание ответа " GetAiProviderLabel() "…"
+            AiStatusCtrl.SetFont("s9 Norm c" colorAccent, "Segoe UI")
+        }
+        answer := AskAI(question)
         PushAiHistory(question, answer)
         if IsObject(AiAnswerCtrl)
             AiAnswerCtrl.Value := answer
         if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Ответ получен."
+            AiStatusCtrl.Text := "Ответ получен (" GetAiProviderLabel() ")."
             AiStatusCtrl.SetFont("s9 Norm c" colorGreen, "Segoe UI")
         }
         if IsObject(AiLimitCtrl)
             AiLimitCtrl.Text := GetAiLimitStatusText()
         try RefreshAiHistoryPanel()
     } catch as err {
-        LogError("SubmitAiQuestion", "Gemini", err.Message)
+        LogError("SubmitAiQuestion", GetAiProviderLabel(), err.Message)
         if IsObject(AiAnswerCtrl)
             AiAnswerCtrl.Value := "Ошибка: " err.Message
         if IsObject(AiStatusCtrl) {
@@ -7079,6 +7568,27 @@ HttpWaitAsync(http, timeoutMs := 60000) {
     }
 }
 
+; Читает тело ответа WinHttp строго как UTF-8 (иначе кириллица от Groq/DeepSeek → кракозябры).
+HttpResponseTextUtf8(http) {
+    try {
+        stream := ComObject("ADODB.Stream")
+        stream.Type := 1  ; adTypeBinary
+        stream.Open()
+        stream.Write(http.ResponseBody)
+        stream.Position := 0
+        stream.Type := 2  ; adTypeText
+        stream.Charset := "UTF-8"
+        text := stream.ReadText()
+        stream.Close()
+        return Trim(text)
+    } catch {
+        try
+            return Trim(http.ResponseText)
+        catch
+            return ""
+    }
+}
+
 HttpGetTextAsync(url, resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiveMs := 45000) {
     http := ComObject("WinHttp.WinHttpRequest.5.1")
     http.Open("GET", url, true)
@@ -7087,39 +7597,29 @@ HttpGetTextAsync(url, resolveMs := 15000, connectMs := 15000, sendMs := 30000, r
     http.SetRequestHeader("Pragma", "no-cache")
     http.Send()
     HttpWaitAsync(http, resolveMs + connectMs + sendMs + receiveMs + 5000)
-    return Map("status", http.Status, "text", Trim(http.ResponseText))
+    return Map("status", http.Status, "text", HttpResponseTextUtf8(http))
 }
 
-HttpPostJson(url, jsonBody, apiKey := "", resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiveMs := 60000) {
+; authMode: "google" → x-goog-api-key, "bearer" → Authorization: Bearer
+HttpPostJson(url, jsonBody, apiKey := "", authMode := "google", resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiveMs := 60000) {
     http := ComObject("WinHttp.WinHttpRequest.5.1")
     http.Open("POST", url, true)
     try http.SetTimeouts(resolveMs, connectMs, sendMs, receiveMs)
     http.SetRequestHeader("Content-Type", "application/json; charset=utf-8")
+    http.SetRequestHeader("Accept", "application/json")
     http.SetRequestHeader("Cache-Control", "no-cache")
-    if (apiKey != "")
-        http.SetRequestHeader("x-goog-api-key", apiKey)
+    if (apiKey != "") {
+        if (authMode = "bearer")
+            http.SetRequestHeader("Authorization", "Bearer " apiKey)
+        else
+            http.SetRequestHeader("x-goog-api-key", apiKey)
+    }
     http.Send(jsonBody)
     HttpWaitAsync(http, resolveMs + connectMs + sendMs + receiveMs + 5000)
-    return Map("status", http.Status, "text", Trim(http.ResponseText))
+    return Map("status", http.Status, "text", HttpResponseTextUtf8(http))
 }
 
 
-
-OpenAiCompact(*) {
-    global AiCompactGui, lastAiOpenTick
-    if (A_TickCount - lastAiOpenTick < 300)
-        return
-    lastAiOpenTick := A_TickCount
-    if IsObject(AiCompactGui) {
-        try {
-            if WinExist("ahk_id " AiCompactGui.Hwnd) {
-                CloseAiCompact()
-                return
-            }
-        }
-    }
-    ShowAiCompactWindow("Мини-окно AI", "В чате: /ai ваш вопрос + Enter`nF7 — полное AI-меню")
-}
 
 RegisterAiChatHotstring() {
     global aiChatHotstringRegistered, aiKeyEnabled
@@ -7167,125 +7667,46 @@ CaptureAiChatQuestion(*) {
 }
 
 RunAiFromGameChat(question) {
-    global aiRequestBusy, geminiApiKey
+    global aiRequestBusy, aiProvider
     question := Trim(question)
     if (question = "" || aiRequestBusy)
         return
-    ShowAiCompactWindow(question, "Думаю…")
+
+    ; Только in-game UI (ches.js): без компактного окна AHK
+    PushAiThinkingToGameHud(question)
     aiRequestBusy := true
     try {
-        if (Trim(geminiApiKey) = "")
+        if (GetCurrentAiApiKey() = "")
             FetchAiConfigFromCloud()
-        if (Trim(geminiApiKey) = "") {
-            UpdateAiCompact("Ключ AI пуст. Проверьте Cloud / A1000 в таблице.", true)
+        if (GetCurrentAiApiKey() = "") {
+            msg := "Ключ " GetAiProviderLabel() " пуст. Проверьте Cloud / " GetAiKeyCellHint() " в таблице."
+            PushAiToGameHud(question, msg, true)
             return
         }
         quota := ConsumeAiQuotaFromCloud()
         if !quota["ok"] {
-            UpdateAiCompact(quota["reason"], true)
+            PushAiToGameHud(question, quota["reason"], true)
             return
         }
-        answer := AskGemini(question)
+        answer := AskAI(question)
         PushAiHistory(question, answer)
-        UpdateAiCompact(answer, false)
-        ShowToast("✓ AI ответил", 1400)
+        PushAiToGameHud(question, answer, false, 10000)
+        ShowToast("✓ AI ответил (" GetAiProviderLabel() ")", 1400)
     } catch as err {
-        LogError("RunAiFromGameChat", "Gemini", err.Message)
-        UpdateAiCompact("Ошибка: " err.Message, true)
+        LogError("RunAiFromGameChat", GetAiProviderLabel(), err.Message)
+        PushAiToGameHud(question, "Ошибка: " err.Message, true)
     } finally {
         aiRequestBusy := false
     }
 }
 
-ShowAiCompactWindow(question, statusText := "") {
-    global AiCompactGui, AiCompactAnswerCtrl, AiCompactStatusCtrl
-    global aiCompactX, aiCompactY, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, uiDivider
-    question := Trim(question)
-    titleQ := (StrLen(question) > 100) ? SubStr(question, 1, 97) "…" : question
-    if IsObject(AiCompactGui) {
-        try {
-            if WinExist("ahk_id " AiCompactGui.Hwnd) {
-                if IsObject(AiCompactStatusCtrl)
-                    AiCompactStatusCtrl.Text := titleQ
-                if IsObject(AiCompactAnswerCtrl)
-                    AiCompactAnswerCtrl.Value := statusText
-                return
-            }
-        }
-        SafeDestroyGui(&AiCompactGui)
-        AiCompactAnswerCtrl := ""
-        AiCompactStatusCtrl := ""
-    }
-    ; Обычное окно с системным крестиком, как в других меню ChesNova
-    AiCompactGui := Gui("+AlwaysOnTop +Border -MinimizeBox", "ChesNova AI")
-    AiCompactGui.BackColor := colorBg
-    AiCompactGui.MarginX := 0
-    AiCompactGui.MarginY := 0
-    AiCompactGui.OnEvent("Close", CloseAiCompact)
-    AiCompactGui.OnEvent("Escape", CloseAiCompact)
-
-    w := 440
-    h := 360
-    AiCompactGui.Add("Text", "x0 y0 w" w " h" h " Background" colorBg)
-    AiCompactGui.SetFont("s10 Bold c" colorText, "Segoe UI")
-    AiCompactGui.Add("Text", "x14 y12 w410 h20 Background" colorBg, "AI ответ")
-    AiCompactGui.Add("Text", "x14 y36 w412 h1 Background" uiDivider)
-
-    AiCompactGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    AiCompactStatusCtrl := AiCompactGui.Add("Text", "x14 y44 w412 h36 Background" colorBg " c" colorMuted, titleQ)
-
-    AiCompactGui.SetFont("s10 Norm c" colorText, "Segoe UI")
-    AiCompactAnswerCtrl := AiCompactGui.Add("Edit", "x14 y86 w412 h220 +Multi +ReadOnly Wrap +VScroll Background" colorCard " c" colorText, statusText)
-
-    copyBtn := AiCompactGui.Add("Text", "x14 y318 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Копировать")
-    BindTextButton(copyBtn, colorCardAlt, CopyAiCompactAnswer)
-    histBtn := AiCompactGui.Add("Text", "x122 y318 w90 h28 +0x200 Center Background" colorCardAlt " c" colorText, "История")
-    BindTextButton(histBtn, colorCardAlt, ShowAiHistoryDialog)
-    openBtn := AiCompactGui.Add("Text", "x220 y318 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Полное AI")
-    BindTextButton(openBtn, colorCardAlt, (*) => (CloseAiCompact(), OpenAiAssistant()))
-    closeBtn := AiCompactGui.Add("Text", "x328 y318 w98 h28 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
-    BindTextButton(closeBtn, colorAccent, CloseAiCompact)
-
-    showOpts := "w" w " h" h
-    if (aiCompactX = "Center" || aiCompactY = "Center" || aiCompactX = "" || aiCompactY = "")
-        showOpts .= " xCenter yCenter"
-    else
-        showOpts .= " x" aiCompactX " y" aiCompactY
-    AiCompactGui.Show(showOpts)
-}
-
-UpdateAiCompact(text, isError := false) {
-    global AiCompactAnswerCtrl, colorRed, colorText
-    if !IsObject(AiCompactAnswerCtrl)
-        return
-    try {
-        AiCompactAnswerCtrl.Value := text
-        AiCompactAnswerCtrl.SetFont("s10 Norm c" (isError ? colorRed : colorText), "Segoe UI")
-    }
-}
-
-CopyAiCompactAnswer(*) {
-    global AiCompactAnswerCtrl
-    if !IsObject(AiCompactAnswerCtrl)
-        return
-    try {
-        A_Clipboard := AiCompactAnswerCtrl.Value
-        ShowToast("✓ Ответ скопирован", 1200)
-    }
-}
-
-CloseAiCompact(*) {
-    global AiCompactGui, AiCompactAnswerCtrl, AiCompactStatusCtrl, aiCompactX, aiCompactY, settingsFile
-    if IsObject(AiCompactGui) {
-        try {
-            AiCompactGui.GetPos(&aiCompactX, &aiCompactY)
-            TryIniWrite(aiCompactX, settingsFile, "GUI", "aiCompactX", "CloseAiCompact")
-            TryIniWrite(aiCompactY, settingsFile, "GUI", "aiCompactY", "CloseAiCompact")
-        }
-    }
-    SafeDestroyGui(&AiCompactGui)
-    AiCompactAnswerCtrl := ""
-    AiCompactStatusCtrl := ""
+AskAI(question) {
+    global aiProvider
+    if (aiProvider = "deepseek")
+        return AskDeepSeek(question)
+    if (aiProvider = "groq")
+        return AskGroq(question)
+    return AskGemini(question)
 }
 
 AskGemini(question) {
@@ -7302,7 +7723,7 @@ AskGemini(question) {
     body .= '"generationConfig":{"maxOutputTokens":1024}'
     body .= "}"
 
-    result := HttpPostJson(url, body, geminiApiKey)
+    result := HttpPostJson(url, body, geminiApiKey, "google")
     if (result["status"] != 200)
         throw Error("HTTP " result["status"] "`n" SubStr(result["text"], 1, 400))
 
@@ -7312,8 +7733,75 @@ AskGemini(question) {
     return textOut
 }
 
+AskDeepSeek(question) {
+    global deepseekApiKey, deepseekModel
+
+    model := Trim(deepseekModel)
+    if (model = "")
+        model := "deepseek-chat"
+
+    url := "https://api.deepseek.com/chat/completions"
+    body := "{"
+    body .= '"model":"' JsonEscape(model) '",'
+    body .= '"messages":['
+    body .= '{"role":"system","content":"' JsonEscape(GetAiSystemPrompt()) '"},'
+    body .= '{"role":"user","content":"' JsonEscape(question) '"}'
+    body .= '],'
+    body .= '"max_tokens":1024,'
+    body .= '"stream":false'
+    body .= "}"
+
+    result := HttpPostJson(url, body, deepseekApiKey, "bearer")
+    if (result["status"] != 200)
+        throw Error("HTTP " result["status"] "`n" SubStr(result["text"], 1, 400))
+
+    textOut := ExtractOpenAiText(result["text"])
+    if (Trim(textOut) = "")
+        throw Error("Пустой ответ от DeepSeek.")
+    return textOut
+}
+
+AskGroq(question) {
+    global groqApiKey, groqModel
+
+    model := Trim(groqModel)
+    if (model = "")
+        model := "llama-3.1-8b-instant"
+
+    url := "https://api.groq.com/openai/v1/chat/completions"
+    body := "{"
+    body .= '"model":"' JsonEscape(model) '",'
+    body .= '"messages":['
+    body .= '{"role":"system","content":"' JsonEscape(GetAiSystemPrompt()) '"},'
+    body .= '{"role":"user","content":"' JsonEscape(question) '"}'
+    body .= '],'
+    body .= '"max_tokens":1024,'
+    body .= '"stream":false'
+    body .= "}"
+
+    result := HttpPostJson(url, body, groqApiKey, "bearer")
+    if (result["status"] != 200)
+        throw Error("HTTP " result["status"] "`n" SubStr(result["text"], 1, 400))
+
+    textOut := ExtractOpenAiText(result["text"])
+    if (Trim(textOut) = "")
+        throw Error("Пустой ответ от Groq.")
+    return textOut
+}
+
+ExtractOpenAiText(responseText) {
+    ; OpenAI-совместимый ответ: choices[0].message.content
+    if RegExMatch(responseText, '"content"\s*:\s*"((?:\\.|[^"\\])*)"', &m)
+        return GeminiUnescape(m[1])
+    if RegExMatch(responseText, '"message"\s*:\s*"((?:\\.|[^"\\])*)"', &m)
+        return "API: " GeminiUnescape(m[1])
+    if RegExMatch(responseText, '"error"\s*:\s*\{[^}]*"message"\s*:\s*"((?:\\.|[^"\\])*)"', &m)
+        return "API: " GeminiUnescape(m[1])
+    return "Не удалось разобрать ответ API.`n" SubStr(responseText, 1, 400)
+}
+
 RegisterHotkeys() {
-    global menuKey, resetKey, centerKey, hideKey, aiKey, aiCompactKey, menuKeyEnabled, resetKeyEnabled, centerKeyEnabled, hideKeyEnabled, aiKeyEnabled, aiCompactKeyEnabled, RegisteredStandardHotkeys
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
@@ -7328,28 +7816,16 @@ RegisterHotkeys() {
         Hotkey(resetKey, ResetPM, "On")
         RegisteredStandardHotkeys.Push(resetKey)
     }
-    if centerKeyEnabled {
-        Hotkey(centerKey, CenterGUI, "On")
-        RegisteredStandardHotkeys.Push(centerKey)
-    }
-    if hideKeyEnabled {
-        Hotkey(hideKey, ToggleGUI, "On")
-        RegisteredStandardHotkeys.Push(hideKey)
-    }
     if aiKeyEnabled {
         Hotkey(aiKey, OpenAiAssistant, "On")
         RegisteredStandardHotkeys.Push(aiKey)
-    }
-    if aiCompactKeyEnabled {
-        Hotkey(aiCompactKey, OpenAiCompact, "On")
-        RegisteredStandardHotkeys.Push(aiCompactKey)
     }
     RegisterAiChatHotstring()
     try RebuildTrayMenu()
 }
 
 WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
-    global MainGui, SettingsGui, AiCompactGui
+    global MainGui, SettingsGui
 
     if IsObject(MainGui) && (hwnd = MainGui.Hwnd || DllCall("IsChild", "Ptr", MainGui.Hwnd, "Ptr", hwnd, "Int")) {
         DragGuiWindow(MainGui.Hwnd)
@@ -7364,13 +7840,6 @@ WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
         if (relY >= 0 && relY <= 70 && relX < 780)
             DragGuiWindow(SettingsGui.Hwnd)
         return
-    }
-
-    if IsObject(AiCompactGui) && (hwnd = AiCompactGui.Hwnd || DllCall("IsChild", "Ptr", AiCompactGui.Hwnd, "Ptr", hwnd, "Int")) {
-        MouseGetPos(&mouseX, &mouseY)
-        AiCompactGui.GetPos(&winX, &winY)
-        if (mouseY - winY <= 34)
-            DragGuiWindow(AiCompactGui.Hwnd)
     }
 }
 
