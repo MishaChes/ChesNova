@@ -3,9 +3,9 @@
   "download": "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk",
   "changelog": [
     "Тестовая сборка 11.0.4",
-    "Новый AI помощник",
-    "-",
-    "-"
+    "Новый AI помощник Groq",
+    "Системные улучшения",
+    "--"
   ],
   "required": false
 }
