@@ -83,7 +83,7 @@ RebuildTrayMenu() {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "11.0.2"
+CURRENT_VERSION := "11.0.3"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -115,6 +115,7 @@ errorsLogFile := logPath "\errors.log"
 ; HTTP-мост для CEF HUD (ches.js)
 hudBridgePort := 17890
 hudBridgeStateFile := dataPath "\hud_state.json"
+hudBridgePosFile := dataPath "\hud_pos.json"
 hudBridgeScriptFile := dataPath "\hud_http_bridge.ps1"
 hudBridgePidFile := dataPath "\hud_http_bridge.pid"
 hudBridgePid := 0
@@ -732,7 +733,8 @@ AutoDetectGamePaths(silent := false) {
     ; HUD в игре: loader-js.asi + ches.js (при известном корне)
     hudResult := Map("ok", false, "downloaded", 0)
     if gameOk {
-        ; При старте докачиваем, если чего-то нет; уже лежащие не трогаем.
+        ; При каждом старте: ches.js и loader-js.json всегда обновляем;
+        ; loader-js.asi — только если отсутствует (createOnlyMissing).
         hudResult := EnsureChesNovaHudFiles(true, true)
     }
 
@@ -793,7 +795,8 @@ IsChesNovaHudInstalled(gamePath := "") {
 }
 
 ; Скачивает loader-js.asi + loader-js.json в корень игры и ches.js в uiresources\scripts.
-; createOnlyMissing=true — не перезаписывать существующие файлы.
+; createOnlyMissing=true — не перезаписывать существующие файлы,
+; кроме тех, у которых alwaysUpdate=true (ches.js, loader-js.json — всегда после рестарта/обновы).
 EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
     global dataPath, scriptsGamePath
 
@@ -816,17 +819,20 @@ EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
         Map(
             "name", "loader-js.asi",
             "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi",
-            "dest", paths["loader"]
+            "dest", paths["loader"],
+            "alwaysUpdate", false
         ),
         Map(
             "name", "loader-js.json",
             "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json",
-            "dest", paths["loaderJson"]
+            "dest", paths["loaderJson"],
+            "alwaysUpdate", true
         ),
         Map(
             "name", "ches.js",
             "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/ches.js",
-            "dest", paths["ches"]
+            "dest", paths["ches"],
+            "alwaysUpdate", true
         )
     ]
 
@@ -836,7 +842,9 @@ EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
     downloaded := 0
     skipped := 0
     for _, file in files {
-        if (createOnlyMissing && FileExist(file["dest"])) {
+        alwaysUpdate := file.Has("alwaysUpdate") && file["alwaysUpdate"]
+        ; ches.js / loader-js.json — всегда к замене после рестарта или обновы
+        if (createOnlyMissing && !alwaysUpdate && FileExist(file["dest"])) {
             skipped += 1
             continue
         }
@@ -918,15 +926,35 @@ UpdateCloudHudDot() {
 ; 🌐 HTTP bridge → CEF HUD
 ; =========================
 WriteHudBridgeState(*) {
-    global hudBridgeStateFile, nick, pmCount, healthState, healthMessage
+    global hudBridgeStateFile, hudBridgePosFile, nick, pmCount, norm, healthState, healthMessage
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
 
     try {
+        mult := GetNormMultiplier()
         json := "{"
             . '"nick":"' JsonEscape(nick) '",'
             . '"pm":' Integer(pmCount) ','
+            . '"norm":' Integer(norm) ','
+            . '"mult":' Integer(mult) ','
             . '"health":"' JsonEscape(healthState) '",'
             . '"message":"' JsonEscape(healthMessage) '"'
+
+        ; позиция HUD из файла (ches.js сохраняет через мост)
+        hudLeft := ""
+        hudTop := ""
+        try {
+            if FileExist(hudBridgePosFile) {
+                posText := Trim(FileRead(hudBridgePosFile, "UTF-8"))
+                if RegExMatch(posText, '"left"\s*:\s*(-?\d+(?:\.\d+)?)', &lm)
+                    hudLeft := lm[1]
+                if RegExMatch(posText, '"top"\s*:\s*(-?\d+(?:\.\d+)?)', &tm)
+                    hudTop := tm[1]
+            }
+        }
+        if (hudLeft != "" && hudTop != "")
+            json .= ',"hud":{"left":' hudLeft ',"top":' hudTop '}'
+        else
+            json .= ',"hud":null'
 
         if (aiHudThinking) {
             json .= ',"ai":{'
@@ -1007,10 +1035,12 @@ EnsureHudBridgeScript() {
     global hudBridgeScriptFile, hudBridgePort
 
     ; TcpListener — без прав админа и без netsh urlacl
+    ; GET /pos?left=N&top=N — сохранить позицию HUD (CEF localStorage не переживает релог)
     script := (
         "$ErrorActionPreference = 'Continue'`n"
         "$port = " hudBridgePort "`n"
         "$stateFile = $args[0]`n"
+        "$posFile = $args[1]`n"
         "$ip = [System.Net.IPAddress]::Loopback`n"
         "$listener = [System.Net.Sockets.TcpListener]::new($ip, $port)`n"
         "try { $listener.Start() } catch { exit 1 }`n"
@@ -1021,9 +1051,18 @@ EnsureHudBridgeScript() {
         "    $reader = New-Object System.IO.StreamReader($stream)`n"
         "    $requestLine = $reader.ReadLine()`n"
         "    while ($true) { $line = $reader.ReadLine(); if ([string]::IsNullOrEmpty($line)) { break } }`n"
-        "    $json = '{`"nick`":`"`",`"pm`":0,`"health`":`"ok`",`"message`":`"`"}'`n"
-        "    if (Test-Path -LiteralPath $stateFile) {`n"
-        "      try { $json = [System.IO.File]::ReadAllText($stateFile, [System.Text.UTF8Encoding]::new($false)) } catch {}`n"
+        "    if ($requestLine -match 'GET\s+/pos\?left=([0-9.\-]+)&top=([0-9.\-]+)') {`n"
+        "      $left = $Matches[1]; $top = $Matches[2]`n"
+        "      try {`n"
+        "        $posJson = '{`"left`":' + $left + ',`"top`":' + $top + '}'`n"
+        "        [System.IO.File]::WriteAllText($posFile, $posJson, [System.Text.UTF8Encoding]::new($false))`n"
+        "      } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } else {`n"
+        "      $json = '{`"nick`":`"`",`"pm`":0,`"health`":`"ok`",`"message`":`"`",`"hud`":null}'`n"
+        "      if (Test-Path -LiteralPath $stateFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($stateFile, [System.Text.UTF8Encoding]::new($false)) } catch {}`n"
+        "      }`n"
         "    }`n"
         "    $body = [System.Text.Encoding]::UTF8.GetBytes($json)`n"
         "    $header = `"HTTP/1.1 200 OK``r``nContent-Type: application/json; charset=utf-8``r``nAccess-Control-Allow-Origin: *``r``nAccess-Control-Allow-Methods: GET, OPTIONS``r``nCache-Control: no-store``r``nConnection: close``r``nContent-Length: $($body.Length)``r``n``r``n`"`n"
@@ -1067,7 +1106,7 @@ StopHudHttpBridge(*) {
 }
 
 StartHudHttpBridge(*) {
-    global hudBridgePid, hudBridgePidFile, hudBridgeScriptFile, hudBridgeStateFile, hudBridgePort
+    global hudBridgePid, hudBridgePidFile, hudBridgeScriptFile, hudBridgeStateFile, hudBridgePosFile, hudBridgePort
 
     StopHudHttpBridge()
     WriteHudBridgeState()
@@ -1076,7 +1115,7 @@ StartHudHttpBridge(*) {
     try {
         ; Hidden PowerShell HttpListener — ничего дополнительно ставить не нужно
         cmd := 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'
-            . hudBridgeScriptFile '" "' hudBridgeStateFile '"'
+            . hudBridgeScriptFile '" "' hudBridgeStateFile '" "' hudBridgePosFile '"'
         Run(cmd, , "Hide", &pid)
         hudBridgePid := pid
         try {
