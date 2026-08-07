@@ -83,7 +83,7 @@ RebuildTrayMenu() {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "11.0.3"
+CURRENT_VERSION := "11.0.4"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
