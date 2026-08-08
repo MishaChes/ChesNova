@@ -156,6 +156,7 @@ aiKey := "F7"
 menuKeyEnabled := 1
 resetKeyEnabled := 1
 aiKeyEnabled := 1
+aiEnabled := 0  ; по умолчанию выкл. (РФ/блокировки API — без сетевых запросов AI)
 geminiApiKey := ""
 geminiModel := "gemini-3.6-flash"
 deepseekApiKey := ""
@@ -213,6 +214,7 @@ if FileExist(settingsFile)
         menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
         resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
         aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 1)
+        aiEnabled := IniRead(settingsFile, "AI", "aiEnabled", 0)
         geminiApiKey := IniRead(settingsFile, "AI", "geminiApiKey", "")
         geminiModel := IniRead(settingsFile, "AI", "geminiModel", "gemini-3.6-flash")
         deepseekApiKey := IniRead(settingsFile, "AI", "deepseekApiKey", "")
@@ -256,6 +258,7 @@ startWithWindows += 0
 menuKeyEnabled += 0
 resetKeyEnabled += 0
 aiKeyEnabled += 0
+aiEnabled += 0
 geminiApiKey := Trim(geminiApiKey)
 deepseekApiKey := Trim(deepseekApiKey)
 groqApiKey := Trim(groqApiKey)
@@ -358,6 +361,7 @@ SetAiKeyCtrl := ""
 SetMenuKeyEnabledCtrl := ""
 SetResetKeyEnabledCtrl := ""
 SetAiKeyEnabledCtrl := ""
+SetAiEnabledCtrl := ""
 SetAiProviderCtrl := ""
 AiGui := ""
 AiQuestionCtrl := ""
@@ -5726,8 +5730,8 @@ CancelBindEdit(*) {
 }
 
 SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiProvider, uiTheme, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetAiKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiProviderCtrl
+    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiEnabled, aiProvider, uiTheme, logFile
+    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetAiKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiEnabledCtrl, SetAiProviderCtrl
     global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorYellow
 
@@ -5759,9 +5763,11 @@ SettingsView() {
     SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y328 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
     AddViewControl(view, "Text", "x270 y364 w240 h22 Background" colorCard " c" colorMuted, "В игре: /ai вопрос + Enter")
 
-    ; ИИ — отдельная карточка
-    AddViewControl(view, "Text", "x250 y418 w280 h138 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y434 w240 h22 Background" colorCard " c" colorText, "ИИ-модель")
+    ; ИИ — отдельная карточка (по умолчанию выкл.: без запросов к API)
+    AddViewControl(view, "Text", "x250 y418 w280 h168 Background" colorCard)
+    AddViewControl(view, "Text", "x270 y434 w240 h22 Background" colorCard " c" colorText, "ИИ-ассистент")
+    SetAiEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiEnabled x270 y460 Checked" aiEnabled " c" colorText " Background" colorCard, "Включить AI")
+    AddViewControl(view, "Text", "x270 y486 w240 h18 Background" colorCard " c" colorMuted, "Выкл. = без сетевых запросов AI")
     providerChoices := ["Gemini", "DeepSeek · платная", "Groq"]
     if (aiProvider = "deepseek")
         providerIndex := 2
@@ -5769,9 +5775,8 @@ SettingsView() {
         providerIndex := 3
     else
         providerIndex := 1
-    SetAiProviderCtrl := AddViewControl(view, "DropDownList", "vSetAiProvider x270 y464 w240 h120 Choose" providerIndex " c" colorText " Background" uiInputBg, providerChoices)
-    AddViewControl(view, "Text", "x270 y500 w240 h20 Background" colorCard " c" colorMuted, "Gemini и Groq — бесплатно")
-    AddViewControl(view, "Text", "x270 y520 w240 h20 Background" colorCard " c" colorMuted, "DeepSeek — платная")
+    SetAiProviderCtrl := AddViewControl(view, "DropDownList", "vSetAiProvider x270 y508 w240 h120 Choose" providerIndex " c" colorText " Background" uiInputBg, providerChoices)
+    AddViewControl(view, "Text", "x270 y540 w240 h18 Background" colorCard " c" colorMuted, "Gemini/Groq бесплатно · DeepSeek платно")
 
     ; —— Правая колонка ——
     AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
@@ -6205,8 +6210,10 @@ F7  — AI-ассистент (окно в Windows)
 ————————————————
 AI
 
+По умолчанию AI выключен (без сетевых запросов к API).
+Включите в «Настройках» → «Включить AI», если нужен.
 Ключ и дневной лимит — из Cloud по нику.
-В «Настройках» можно выбрать ИИ: Gemini, DeepSeek или Groq.
+Модель: Gemini, DeepSeek или Groq.
   Gemini — A1000, DeepSeek — A999, Groq — A998.
 F7 — полное окно ассистента (история, лимит).
 /ai в игре — быстрый ответ прямо в HUD.
@@ -6547,9 +6554,10 @@ SendCloudPing(*) {
 }
 
 StartupNetworkInit(*) {
-    global checkUpdatesOnStartup
+    global checkUpdatesOnStartup, aiEnabled
     CheckCloudAccess(true, true)
-    FetchAiConfigFromCloud()
+    if aiEnabled
+        FetchAiConfigFromCloud()
     if (checkUpdatesOnStartup)
         CheckForUpdates()
     CheckNotifications()
@@ -6850,7 +6858,7 @@ CloseHelp(*) {
 SaveSettings(*) {
     global SettingsGui
     global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiProvider
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiEnabled, aiProvider
     global geminiApiKey, geminiModel, deepseekApiKey, deepseekModel, groqApiKey, groqModel
     global uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
 
@@ -6880,6 +6888,10 @@ SaveSettings(*) {
     menuKeyEnabled := values.SetMenuKeyEnabled
     resetKeyEnabled := values.SetResetKeyEnabled
     aiKeyEnabled := values.SetAiKeyEnabled
+    if values.HasOwnProp("SetAiEnabled")
+        aiEnabled := values.SetAiEnabled ? 1 : 0
+    else
+        aiEnabled := aiEnabled ? 1 : 0
     if values.HasOwnProp("SetAiProvider") {
         providerText := StrLower(Trim(values.SetAiProvider))
         if InStr(providerText, "deepseek")
@@ -6908,6 +6920,7 @@ SaveSettings(*) {
         IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
         IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
         IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
+        IniWrite(aiEnabled, settingsFile, "AI", "aiEnabled")
         IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
         IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
         IniWrite(deepseekApiKey, settingsFile, "AI", "deepseekApiKey")
@@ -6939,6 +6952,8 @@ SaveSettings(*) {
 
     RegisterHotkeys()
 
+    if aiEnabled
+        SetTimer(FetchAiConfigFromCloud, -200)
     UpdatePMDisplay()
 }
 
@@ -7078,12 +7093,25 @@ ApplySuccessfulAiUse(cloudLimit, cloudUsed, cloudRemaining) {
     RefreshAiLimitUi()
 }
 
+; Безопасный Integer: пустая/нечисловая строка → default (не падаем на ответе Cloud)
+SafeInteger(value, default := 0) {
+    value := Trim(value)
+    if (value = "" || !RegExMatch(value, "^-?\d+$"))
+        return default
+    try
+        return Integer(value)
+    catch
+        return default
+}
+
 FetchAiConfigFromCloud(*) {
-    global nick, accessUrl, appVersion, settingsFile
+    global nick, accessUrl, appVersion, settingsFile, aiEnabled
     global geminiApiKey, deepseekApiKey, groqApiKey, geminiModel, deepseekModel, groqModel
     global aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiConfigLoaded
     global AiLimitCtrl
 
+    if !aiEnabled
+        return false
     if (Trim(nick) = "" || nick = "Nick_Name")
         return false
 
@@ -7114,14 +7142,14 @@ FetchAiConfigFromCloud(*) {
         geminiApiKey := Trim(parts[2])
         deepseekApiKey := Trim(parts[3])
         groqApiKey := Trim(parts[4])
-        MergeAiQuotaFromCloud(Integer(parts[5]), Integer(parts[6]), Integer(parts[7]))
+        MergeAiQuotaFromCloud(SafeInteger(parts[5]), SafeInteger(parts[6]), SafeInteger(parts[7]))
     } else if (parts.Length >= 6) {
         geminiApiKey := Trim(parts[2])
         deepseekApiKey := Trim(parts[3])
-        MergeAiQuotaFromCloud(Integer(parts[4]), Integer(parts[5]), Integer(parts[6]))
+        MergeAiQuotaFromCloud(SafeInteger(parts[4]), SafeInteger(parts[5]), SafeInteger(parts[6]))
     } else {
         geminiApiKey := Trim(parts[2])
-        MergeAiQuotaFromCloud(Integer(parts[3]), Integer(parts[4]), Integer(parts[5]))
+        MergeAiQuotaFromCloud(SafeInteger(parts[3]), SafeInteger(parts[4]), SafeInteger(parts[5]))
     }
     aiConfigLoaded := true
 
@@ -7149,8 +7177,10 @@ FetchAiConfigFromCloud(*) {
 }
 
 ConsumeAiQuotaFromCloud() {
-    global nick, accessUrl, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate
+    global nick, accessUrl, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate, aiEnabled
 
+    if !aiEnabled
+        return Map("ok", false, "reason", "AI отключён в настройках")
     if (Trim(nick) = "")
         return Map("ok", false, "reason", "Нет ника")
 
@@ -7180,9 +7210,9 @@ ConsumeAiQuotaFromCloud() {
         return Map("ok", false, "reason", "Некорректный ответ Cloud")
 
     if (parts[1] = "LIMIT") {
-        cloudLimit := Integer(parts[2])
-        cloudUsed := Integer(parts[3])
-        cloudRemaining := Integer(parts[4])
+        cloudLimit := SafeInteger(parts[2])
+        cloudUsed := SafeInteger(parts[3])
+        cloudRemaining := SafeInteger(parts[4])
         if (cloudLimit > 0)
             aiDailyLimit := cloudLimit
         ; Если Cloud «залип» на LIMIT, но локально ещё есть запас — считаем локально
@@ -7197,7 +7227,7 @@ ConsumeAiQuotaFromCloud() {
     if (parts[1] != "OK")
         return Map("ok", false, "reason", response)
 
-    ApplySuccessfulAiUse(Integer(parts[2]), Integer(parts[3]), Integer(parts[4]))
+    ApplySuccessfulAiUse(SafeInteger(parts[2]), SafeInteger(parts[3]), SafeInteger(parts[4]))
     return Map("ok", true, "reason", "")
 }
 
@@ -7229,7 +7259,9 @@ GetAiKeyCellHint() {
 }
 
 GetAiLimitStatusText() {
-    global aiConfigLoaded, aiDailyLimit, aiDailyUsed, aiDailyRemaining, cloudAccessState
+    global aiConfigLoaded, aiDailyLimit, aiDailyUsed, aiDailyRemaining, cloudAccessState, aiEnabled
+    if !aiEnabled
+        return "AI отключён (включите в Настройках)"
     if !aiConfigLoaded {
         if (cloudAccessState = "ok")
             return "Лимит: загрузка из Cloud…"
@@ -7271,8 +7303,12 @@ SaveAiGuiPosition() {
 OpenAiAssistant(*) {
     global AiGui, AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, AiAskBtnCtrl, lastAiOpenTick
     global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, uiInputBg, uiDivider
-    global aiGuiX, aiGuiY, aiConfigLoaded
+    global aiGuiX, aiGuiY, aiConfigLoaded, aiEnabled
 
+    if !aiEnabled {
+        ShowToast("AI отключён — включите в Настройках", 2800)
+        return
+    }
     if (A_TickCount - lastAiOpenTick < 350)
         return
     lastAiOpenTick := A_TickCount
@@ -7622,13 +7658,13 @@ HttpPostJson(url, jsonBody, apiKey := "", authMode := "google", resolveMs := 150
 
 
 RegisterAiChatHotstring() {
-    global aiChatHotstringRegistered, aiKeyEnabled
+    global aiChatHotstringRegistered, aiKeyEnabled, aiEnabled
     if aiChatHotstringRegistered {
         try Hotstring(":*?B0X:/ai ", "Off")
         try Hotstring(":*?B0X:/AI ", "Off")
         aiChatHotstringRegistered := false
     }
-    if !aiKeyEnabled
+    if !aiEnabled || !aiKeyEnabled
         return
     try {
         Hotstring(":*?B0X:/ai ", OnAiChatPrefix)
@@ -7667,10 +7703,14 @@ CaptureAiChatQuestion(*) {
 }
 
 RunAiFromGameChat(question) {
-    global aiRequestBusy, aiProvider
+    global aiRequestBusy, aiProvider, aiEnabled
     question := Trim(question)
     if (question = "" || aiRequestBusy)
         return
+    if !aiEnabled {
+        PushAiToGameHud(question, "AI отключён в настройках ChesNova", true)
+        return
+    }
 
     ; Только in-game UI (ches.js): без компактного окна AHK
     PushAiThinkingToGameHud(question)
@@ -7691,7 +7731,7 @@ RunAiFromGameChat(question) {
         answer := AskAI(question)
         PushAiHistory(question, answer)
         PushAiToGameHud(question, answer, false, 10000)
-        ShowToast("✓ AI ответил (" GetAiProviderLabel() ")", 1400)
+        ; без тоста AHK — ответ только в in-game панели (ches.js)
     } catch as err {
         LogError("RunAiFromGameChat", GetAiProviderLabel(), err.Message)
         PushAiToGameHud(question, "Ошибка: " err.Message, true)
@@ -7801,7 +7841,7 @@ ExtractOpenAiText(responseText) {
 }
 
 RegisterHotkeys() {
-    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, RegisteredStandardHotkeys
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
@@ -7816,7 +7856,7 @@ RegisterHotkeys() {
         Hotkey(resetKey, ResetPM, "On")
         RegisteredStandardHotkeys.Push(resetKey)
     }
-    if aiKeyEnabled {
+    if aiEnabled && aiKeyEnabled {
         Hotkey(aiKey, OpenAiAssistant, "On")
         RegisteredStandardHotkeys.Push(aiKey)
     }
