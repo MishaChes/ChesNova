@@ -65,10 +65,10 @@
       '#ches-ai .ches-ai-q{color:#AAB4C5;font-size:11px;margin-bottom:6px;max-height:3.2em;overflow:hidden}',
       '#ches-ai .ches-ai-line{height:1px;background:#2B3443;margin:0 0 8px}',
       '#ches-ai .ches-ai-a{color:#F5F7FB;font-size:12px;font-weight:500;overflow:auto;max-height:28vh;white-space:pre-wrap;word-break:break-word}',
-      /* «AI думает…» — левый низ, там же где ответ */
-      '#ches-think{position:fixed;bottom:16px;left:16px;z-index:100001;display:none;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;background:rgba(11,14,20,.88);border:1px solid #2B3443;color:#A0A8B8;font:12px/1.3 "Open Sans","Segoe UI",Arial,sans-serif;letter-spacing:.2px;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.35);backdrop-filter:blur(6px);opacity:0;transform:translateY(6px);transition:opacity .2s ease,transform .2s ease}',
+      /* «AI думает…» — левый низ; margin вместо gap (старый CEF) */
+      '#ches-think{position:fixed;bottom:16px;left:16px;z-index:100001;display:none;align-items:center;padding:10px 14px;border-radius:12px;background:rgba(11,14,20,.88);border:1px solid #2B3443;color:#A0A8B8;font:12px/1.3 "Open Sans","Segoe UI",Arial,sans-serif;letter-spacing:.2px;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.35);backdrop-filter:blur(6px);opacity:0;transform:translateY(6px);transition:opacity .2s ease,transform .2s ease}',
       '#ches-think.ches-think-on{display:flex;opacity:1;transform:translateY(0)}',
-      '#ches-think .ches-think-dot{width:8px;height:8px;border-radius:50%;background:#3B82F6;flex-shrink:0;box-shadow:0 0 0 2px rgba(59,130,246,.2);animation:ches-pulse 1s ease-in-out infinite}',
+      '#ches-think .ches-think-dot{width:8px;height:8px;border-radius:50%;background:#3B82F6;flex-shrink:0;margin-right:10px;box-shadow:0 0 0 2px rgba(59,130,246,.2);animation:ches-pulse 1s ease-in-out infinite}',
       '@keyframes ches-pulse{0%,100%{opacity:.35}50%{opacity:1}}'
     ].join('');
     document.head.appendChild(style);
@@ -251,7 +251,7 @@
     ensureStyles();
     thinkEl = document.createElement('div');
     thinkEl.id = 'ches-think';
-    thinkEl.innerHTML = '<span class="ches-think-dot"></span>AI думает…';
+    thinkEl.innerHTML = '<span class="ches-think-dot"></span> <span class="ches-think-text">AI думает…</span>';
     document.body.appendChild(thinkEl);
   }
 
@@ -259,7 +259,7 @@
     ensureThink();
     if (!thinkEl) return;
     if (on) {
-      thinkEl.innerHTML = '<span class="ches-think-dot"></span><span class="ches-think-text">AI думает…</span>';
+      thinkEl.innerHTML = '<span class="ches-think-dot"></span> <span class="ches-think-text">AI думает…</span>';
       thinkEl.classList.add('ches-think-on');
       hideAiPanel();
     } else {
