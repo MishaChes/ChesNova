@@ -1,0 +1,161 @@
+{
+  "long_tracers": 1,
+  "mode": 2,
+  "override_oldern": 0,
+  "pool_size": 32,
+  "weapon": {
+    "22": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "23": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "24": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.1
+    },
+    "25": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "26": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "27": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "28": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "29": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "30": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "31": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.1
+    },
+    "32": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "33": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "38": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "49": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "default": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "miss": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    },
+    "object": {
+      "color": {
+        "blue": 0,
+        "green": 255,
+        "red": 255
+      },
+      "life_time": 10000,
+      "radius": 0.009999999776482582
+    }
+  }
+}
