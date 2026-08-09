@@ -40,7 +40,7 @@ if (A_LastError = 183) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "11.0.4"
+CURRENT_VERSION := "12.0"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -77,6 +77,7 @@ hudBridgeScriptFile := dataPath "\hud_http_bridge.ps1"
 hudBridgePidFile := dataPath "\hud_http_bridge.pid"
 hudBridgePid := 0
 hudBridgeVisible := 1
+panelToggleSeq := 0
 pendingNormResetConfirm := 0
 hudBridgeSettingsFile := dataPath "\hud_settings_state.json"
 hudBridgePendingSettingsFile := dataPath "\hud_settings_pending.ini"
@@ -905,7 +906,7 @@ UpdateCloudHudDot() {
 ; 🌐 HTTP bridge → CEF HUD
 ; =========================
 WriteHudBridgeState(*) {
-    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, nick, pmCount, norm, healthState, healthMessage
+    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, nick, pmCount, norm, healthState, healthMessage
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
     global logFile, scriptsGamePath
 
@@ -920,6 +921,7 @@ WriteHudBridgeState(*) {
             . '"message":"' JsonEscape(healthMessage) '",'
             . '"hudVisible":' (hudBridgeVisible ? 1 : 0) ','
             . '"confirmReset":' (pendingNormResetConfirm ? 1 : 0) ','
+            . '"panelToggle":' Integer(panelToggleSeq) ','
             . '"daysOff":' CountDaysOffCurrentMonth() ','
             . '"chatlogOk":' ((logFile != "" && FileExist(logFile)) ? 1 : 0) ','
             . '"gameOk":' ((scriptsGamePath != "" && IsValidGameRoot(scriptsGamePath)) ? 1 : 0) ','
@@ -2182,17 +2184,59 @@ InstallScriptPackageFromPanel(packageId) {
         return
     }
 
+    written := 0
+    skippedLocked := 0
+    failedNames := []
     try {
         for _, downloaded in downloadedFiles {
-            destination := gamePath "\" downloaded["file"]["relativePath"]
-            destinationDir := RegExReplace(destination, "\\[^\\]+$")
+            rel := StrReplace(downloaded["file"]["relativePath"], "/", "\")
+            while InStr(rel, "\\")
+                rel := StrReplace(rel, "\\", "\")
+            rel := LTrim(rel, "\")
+            destination := gamePath "\" rel
+            ; SplitPath — не создаём папку с именем файла (баг RegExReplace)
+            SplitPath(destination, &destName, &destinationDir)
+            if (destinationDir = "")
+                destinationDir := gamePath
             if !DirExist(destinationDir)
                 DirCreate(destinationDir)
-            if (package.Has("skipExisting") && package["skipExisting"] && FileExist(destination)) {
+            ; Старый баг: вместо файла могла появиться папка _otools.js
+            if DirExist(destination) {
+                try DirDelete(destination, true)
+                catch as dirErr
+                    LogError("InstallScriptPackageFromPanel", "Не удалось удалить ошибочную папку: " destination, dirErr.Message)
+            }
+            if (package.Has("skipExisting") && package["skipExisting"] && FileExist(destination) && !DirExist(destination)) {
                 try FileDelete(downloaded["temp"])
+                written += 1
                 continue
             }
-            FileMove(downloaded["temp"], destination, 1)
+            destExists := FileExist(destination) && !DirExist(destination)
+            okWrite := false
+            try {
+                FileCopy(downloaded["temp"], destination, 1)
+                okWrite := true
+            } catch {
+                try {
+                    FileMove(downloaded["temp"], destination, 1)
+                    okWrite := true
+                } catch {
+                    okWrite := false
+                }
+            }
+            try {
+                if FileExist(downloaded["temp"])
+                    FileDelete(downloaded["temp"])
+            }
+            if okWrite {
+                written += 1
+            } else if destExists {
+                skippedLocked += 1
+                written += 1
+                LogError("InstallScriptPackageFromPanel", "Файл занят (игра запущена?), пропуск перезаписи: " downloaded["file"]["name"], destination)
+            } else {
+                failedNames.Push(downloaded["file"]["name"])
+            }
         }
     } catch as err {
         for _, downloaded in downloadedFiles {
@@ -2204,8 +2248,18 @@ InstallScriptPackageFromPanel(packageId) {
         return
     }
 
+    if (failedNames.Length > 0) {
+        LogError("InstallScriptPackageFromPanel", "Частичная установка " packageId, "Не записаны: " JoinArrayRange(failedNames, 1, failedNames.Length, ", "))
+        WriteScriptsState()
+        ShowToast("⚠ Часть файлов не записана: " failedNames[1] (failedNames.Length > 1 ? "…" : "") " — закройте игру и повторите", 3600)
+        return
+    }
+
     WriteScriptsState()
-    ShowToast("✓ Пакет " package["displayTitle"] " установлен", 2200)
+    if (skippedLocked > 0)
+        ShowToast("✓ " package["displayTitle"] " установлен (часть .asi уже была, игра могла держать файлы)", 3200)
+    else
+        ShowToast("✓ Пакет " package["displayTitle"] " установлен", 2200)
 }
 
 ; Сохранить путь к игре из панели (GET /scripts/path → hud_commands.ini)
@@ -5229,13 +5283,13 @@ GetScriptPackages() {
             "displayTitle", "Onishi",
             "author", "Takumi Onishi",
             "title", "Onishi",
-            "description", "Основные команды:`n/onishi",
+            "description", "Основные команды:`n/onishi`n`nПри запущенной игре .asi может быть занят — _otools.js ставится в uiresources\\scripts.",
             "authors", "Takumi Onishi",
             "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
             "files", [
-                Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
+                Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js"),
                 Map("name", "loader-js.json", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json", "relativePath", "loader-js.json"),
-                Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
+                Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi")
             ],
             "activationCommands", "/onishi"
         ),
@@ -5736,7 +5790,12 @@ GetScriptPackageInstallStatus(package) {
 
     missingFiles := []
     for _, file in package["files"] {
-        if !FileExist(gamePath "\" file["relativePath"])
+        rel := StrReplace(file["relativePath"], "/", "\")
+        while InStr(rel, "\\")
+            rel := StrReplace(rel, "\\", "\")
+        path := gamePath "\" rel
+        ; Папка с именем файла (баг старых установок) ≠ установленный файл
+        if !FileExist(path) || DirExist(path)
             missingFiles.Push(file["name"])
     }
 
@@ -5745,6 +5804,7 @@ GetScriptPackageInstallStatus(package) {
 
     return Map("installed", false, "text", "Не установлен: " JoinArrayRange(missingFiles, 1, missingFiles.Length, ", "), "color", "FF5B6B")
 }
+
 
 SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw) {
     global historyFile
@@ -6499,6 +6559,12 @@ GetAiLimitStatusText() {
     return GetAiProviderLabel() " · лимит сегодня: " aiDailyUsed "/" aiDailyLimit " (осталось " aiDailyRemaining ")"
 }
 
+ToggleGamePanel(*) {
+    global panelToggleSeq
+    panelToggleSeq += 1
+    WriteHudBridgeState()
+}
+
 ToggleGameHud(*) {
     global hudBridgeVisible
     hudBridgeVisible := hudBridgeVisible ? 0 : 1
@@ -6842,20 +6908,36 @@ ExtractOpenAiText(responseText) {
 
 ; Hotkeys: HUD (aiKey), ручной сброс нормы (resetKey), хотстринг /ai.
 RegisterHotkeys() {
-    global aiKey, aiKeyEnabled, resetKey, resetKeyEnabled, RegisteredStandardHotkeys
+    global aiKey, aiKeyEnabled, resetKey, resetKeyEnabled, menuKey, menuKeyEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
     }
     RegisteredStandardHotkeys := []
 
+    if menuKeyEnabled {
+        try {
+            Hotkey(menuKey, ToggleGamePanel, "On")
+            RegisteredStandardHotkeys.Push(menuKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать menuKey: " menuKey, err.Message)
+        }
+    }
     if aiKeyEnabled {
-        Hotkey(aiKey, ToggleGameHud, "On")
-        RegisteredStandardHotkeys.Push(aiKey)
+        try {
+            Hotkey(aiKey, ToggleGameHud, "On")
+            RegisteredStandardHotkeys.Push(aiKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать aiKey: " aiKey, err.Message)
+        }
     }
     if resetKeyEnabled {
-        Hotkey(resetKey, PromptManualNormReset, "On")
-        RegisteredStandardHotkeys.Push(resetKey)
+        try {
+            Hotkey(resetKey, PromptManualNormReset, "On")
+            RegisteredStandardHotkeys.Push(resetKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать resetKey: " resetKey, err.Message)
+        }
     }
     RegisterAiChatHotstring()
 }
