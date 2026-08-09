@@ -167,33 +167,34 @@
   var SCRIPT_INFO = {
     atools: {
       title: 'aTools',
-      body: 'Основные команды\n/wh\n/ddl\n/unl\n/trec\n\nПолная информация на форуме'
+      body: '\u041e\u0441\u043d\u043e\u0432\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b\n/wh\n/ddl\n/unl\n/trec\n\n\u041f\u043e\u043b\u043d\u0430\u044f \u0438\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u044f \u043d\u0430 \u0444\u043e\u0440\u0443\u043c\u0435'
     },
     onishi: {
       title: 'Onishi',
-      body: 'Основные команды\n/onishi'
+      body: '\u041e\u0441\u043d\u043e\u0432\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b\n/onishi'
     },
     fpsunlocker: {
       title: 'FPS Unlocker',
-      body: 'Снимает ограничитель FPS'
+      body: '\u0421\u043d\u0438\u043c\u0430\u0435\u0442 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0438\u0442\u0435\u043b\u044c FPS'
     },
     camhunt: {
       title: 'CamHunt',
-      body: 'Свободная камера\nИспользуется исключительно для съёмок контента'
+      body: '\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u0430\u044f \u043a\u0430\u043c\u0435\u0440\u0430\n\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f \u0438\u0441\u043a\u043b\u044e\u0447\u0438\u0442\u0435\u043b\u044c\u043d\u043e \u0434\u043b\u044f \u0441\u044a\u0451\u043c\u043e\u043a \u043a\u043e\u043d\u0442\u0435\u043d\u0442\u0430'
     },
     weather_time: {
-      title: 'Погода/Время',
-      body: 'Меняет вашу погоду и время, не затрагивая серверные команды\n\nОсновные команды\n/st\n/sw'
+      title: '\u041f\u043e\u0433\u043e\u0434\u0430/\u0412\u0440\u0435\u043c\u044f',
+      body: '\u041c\u0435\u043d\u044f\u0435\u0442 \u0432\u0430\u0448\u0443 \u043f\u043e\u0433\u043e\u0434\u0443 \u0438 \u0432\u0440\u0435\u043c\u044f, \u043d\u0435 \u0437\u0430\u0442\u0440\u0430\u0433\u0438\u0432\u0430\u044f \u0441\u0435\u0440\u0432\u0435\u0440\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b\n\n\u041e\u0441\u043d\u043e\u0432\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b\n/st\n/sw'
     },
     clientside: {
       title: 'clientside.dll',
-      body: 'Логирует доп. инфу в краш-лог'
+      body: '\u041b\u043e\u0433\u0438\u0440\u0443\u0435\u0442 \u0434\u043e\u043f. \u0438\u043d\u0444\u0443 \u0432 \u043a\u0440\u0430\u0448-\u043b\u043e\u0433'
     },
     tracer: {
-      title: 'Трасера',
-      body: 'Отображает трасер пуль'
+      title: '\u0422\u0440\u0430\u0441\u0435\u0440\u0430',
+      body: '\u041e\u0442\u043e\u0431\u0440\u0430\u0436\u0430\u0435\u0442 \u0442\u0440\u0430\u0441\u0435\u0440 \u043f\u0443\u043b\u044c'
     }
   };
+
 
 
   var testerState = { enabled: false, version: '', info: '', loaded: false };
@@ -440,22 +441,26 @@
     }
     .ches-top-btn.has-badge {
       position: relative;
+      padding-right: 22px;
     }
     .ches-top-btn .ches-notif-badge {
       position: absolute;
-      top: -10px;
-      right: -10px;
-      min-width: 18px;
-      height: 18px;
-      padding: 0 5px;
+      top: 50%;
+      right: 4px;
+      margin-top: -7px;
+      min-width: 14px;
+      height: 14px;
+      padding: 0 3px;
       background: #e5484d;
       color: #fff;
-      font-size: 11px;
+      font-size: 9px;
       font-weight: 700;
-      line-height: 18px;
+      line-height: 14px;
       text-align: center;
-      border-radius: 9px;
+      border-radius: 7px;
       box-sizing: border-box;
+      pointer-events: none;
+      z-index: 2;
     }
     .ches-top-btn .ches-notif-badge.hidden {
       display: none;
@@ -931,15 +936,41 @@
 
 
     .ches-ai-ask {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
     }
-    .ches-ai-ask .ches-inputbox {
-      flex: 1;
-      min-width: 180px;
-      width: auto;
+    .ches-ai-ask-field {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin: 0 0 12px 0;
+    }
+    .ches-ai-ask-field .ches-inputbox {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+    }
+    .ches-ai-ask-actions {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .ches-ai-ask-actions .ches-ai-btn {
+      display: inline-block;
+      vertical-align: middle;
+      margin: 0 10px 6px 0;
+      height: 28px;
+      line-height: 26px;
+      padding: 0 12px;
+      font-size: 11px;
+      border-radius: 6px;
+    }
+    .ches-ai-ask-actions .ches-ai-btn:last-child {
+      margin-right: 0;
     }
     .ches-ai-btn {
       height: 40px;
@@ -982,14 +1013,17 @@
       line-height: 1.45;
     }
     .ches-ai-item {
-      padding: 8px 6px;
+      padding: 10px 8px;
       border-bottom: 1px solid #1b2431;
     }
     .ches-ai-item:last-child { border-bottom: none; }
+    .ches-ai-item + .ches-ai-item {
+      margin-top: 2px;
+    }
     .ches-ai-item-time {
       font-size: 10px;
       color: #5d6879;
-      margin-bottom: 3px;
+      margin-bottom: 5px;
     }
     .ches-ai-item-text {
       font-size: 12px;
@@ -1789,14 +1823,16 @@
       letter-spacing: 0.3px;
     }
     .ches-binds-list-body {
-      min-height: 170px;
-      padding: 10px 12px;
-      flex: 1;
+      min-height: 200px;
+      padding: 0;
+      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      justify-content: flex-start;
+      align-items: stretch;
       overflow-y: auto;
-      max-height: 280px;
+      overflow-x: hidden;
+      max-height: 340px;
     }
     .ches-binds-cell {
       font-size: 12px;
@@ -1862,6 +1898,10 @@
     .ches-binds-list-body.has-rows {
       justify-content: flex-start;
       padding: 0;
+    }
+    .ches-binds-list-body .ches-binds-empty {
+      padding: 24px 12px;
+      text-align: center;
     }
     .ches-binds-item {
       display: flex;
@@ -2281,40 +2321,47 @@
       flex-shrink: 0;
     }
     .ches-scripts-modal {
-      position: absolute;
-      inset: 0;
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: fixed;
+      left: 0;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 10000;
+      display: block;
       background: rgba(0, 0, 0, .55);
-      border-radius: 12px;
     }
     .ches-scripts-modal.hidden {
-      display: none;
+      display: none !important;
     }
     .ches-scripts-modal-box {
-      width: min(420px, 92%);
-      max-height: 80%;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 400px;
+      max-width: 90%;
+      max-height: 78%;
       overflow-y: auto;
       background: #121824;
       border: 1px solid #232c3a;
       border-radius: 12px;
-      padding: 16px 18px;
+      padding: 18px 20px 28px;
       box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+      box-sizing: border-box;
     }
     .ches-scripts-modal-box > * + * {
-      margin-top: 10px;
+      margin-top: 12px;
     }
     .ches-scripts-modal-title {
       font-size: 16px;
       font-weight: 700;
       color: #f5f7fb;
+      margin: 0;
     }
     .ches-scripts-modal-row {
-      font-size: 12px;
+      font-size: 13px;
       color: #aab4c5;
-      line-height: 1.5;
+      line-height: 1.55;
     }
     .ches-scripts-modal-label {
       color: #7c8899;
@@ -2322,11 +2369,13 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: .3px;
-      margin-bottom: 3px;
+      margin-bottom: 4px;
     }
     .ches-scripts-modal-close {
-      align-self: flex-end;
-      margin-top: 6px;
+      display: block;
+      text-align: center;
+      margin-top: 18px;
+      margin-bottom: 8px;
     }
 
 
@@ -3465,18 +3514,23 @@
     var askCard = el('div', 'ches-ai-card');
     askCard.appendChild(el('div', 'ches-ai-pane-title', 'Спросить AI'));
     var askRow = el('div', 'ches-ai-ask');
-    var askIn = makeOnishiInput({ width: '100%', value: '', placeholder: 'Ваш вопрос…' });
+    var askField = el('div', 'ches-ai-ask-field');
+    var askIn = makeOnishiInput({ value: '', placeholder: 'Ваш вопрос…' });
     askIn.input.maxLength = 400;
+    askIn.box.style.width = '100%';
     aiRefs.askIn = askIn.input;
-    askRow.appendChild(askIn.box);
+    askField.appendChild(askIn.box);
+    askRow.appendChild(askField);
+    var askActions = el('div', 'ches-ai-ask-actions');
     var askBtn = el('div', 'ches-ai-btn', 'Спросить');
     aiRefs.askBtn = askBtn;
     askBtn.addEventListener('click', function () { askAiFromPanel(); });
-    askRow.appendChild(askBtn);
+    askActions.appendChild(askBtn);
     var clearBtn = el('div', 'ches-ai-btn ghost', 'Очистить историю');
     aiRefs.clearBtn = clearBtn;
     clearBtn.addEventListener('click', function () { clearAiHistory(); });
-    askRow.appendChild(clearBtn);
+    askActions.appendChild(clearBtn);
+    askRow.appendChild(askActions);
     askCard.appendChild(askRow);
     wrap.appendChild(askCard);
 
@@ -5216,14 +5270,14 @@
 
   function ensureScriptInfoModal() {
     if (scriptsRefs.modal) return scriptsRefs.modal;
-    if (!container) return null;
+    if (!document.body) return null;
     var modal = el('div', 'ches-scripts-modal hidden');
     var box = el('div', 'ches-scripts-modal-box');
     modal.appendChild(box);
     modal.addEventListener('click', function (e) {
       if (e.target === modal) hideScriptInfo();
     });
-    container.appendChild(modal);
+    document.body.appendChild(modal);
     scriptsRefs.modal = modal;
     scriptsRefs.modalBox = box;
     return modal;
@@ -5282,17 +5336,18 @@
     btn.textContent = 'Установка…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', SCRIPTS_INSTALL_URL + '?id=' + encodeURIComponent(id), true);
-    xhr.timeout = 1500;
+    /* Мост только ставит команду; сама установка идёт в AHK и может занять несколько секунд */
+    xhr.timeout = 8000;
     xhr.onload = function () {
-      setTimeout(function () { loadScripts(); }, 700);
+      setTimeout(function () { loadScripts(); }, 2500);
     };
     xhr.onerror = function () {
       btn.textContent = 'Ошибка';
-      setTimeout(function () { loadScripts(); }, 1500);
+      setTimeout(function () { loadScripts(); }, 2000);
     };
     xhr.ontimeout = function () {
-      btn.textContent = 'Ошибка';
-      setTimeout(function () { loadScripts(); }, 1500);
+      /* Таймаут XHR ≠ провал установки: команда могла уйти, ждём статус */
+      setTimeout(function () { loadScripts(); }, 3000);
     };
     xhr.send();
   }
@@ -6436,6 +6491,7 @@
   var resetConfirmTextEl = null;
   var resetConfirmShown = false;
   var resetConfirmSuppressUntil = 0;
+  var lastPanelToggle = 0;
 
   var hudEl = null;
   var hudDotEl = null;
@@ -6862,6 +6918,16 @@
 
   function applyState(data) {
     if (!data || typeof data !== 'object') return;
+    if (data.panelToggle != null) {
+      var pt = parseInt(data.panelToggle, 10);
+      if (!isNaN(pt) && pt > 0 && pt !== lastPanelToggle) {
+        lastPanelToggle = pt;
+        try {
+          if (window.ChesPanel && typeof window.ChesPanel.toggle === 'function')
+            window.ChesPanel.toggle();
+        } catch (e) {}
+      }
+    }
     if (data.confirmReset != null) {
       var needConfirm = data.confirmReset === 1 || data.confirmReset === '1' || data.confirmReset === true;
       var suppressed = Date.now() < resetConfirmSuppressUntil;
