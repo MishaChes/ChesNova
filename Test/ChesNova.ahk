@@ -1,6 +1,11 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Off
 FileEncoding "CP0"
+#Warn All, Off
+
+; Запуск с --syntax-check — только проверка парсинга, логика не запускается.
+if (A_Args.Length >= 1 && A_Args[1] = "--syntax-check")
+    ExitApp()
 
 launchedByLauncher := false
 for arg in A_Args {
@@ -24,54 +29,6 @@ if (A_LastError = 183) {
 ; ChesNova
 ; AutoHotkey v2 script
 ; ============================================================
-
-; =========================
-; 🧩 TRAY MENU
-; =========================
-
-; Трей пересобирается после загрузки настроек (RebuildTrayMenu)
-A_TrayMenu.Delete()
-A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
-A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
-A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
-A_TrayMenu.Add()
-A_TrayMenu.Add("🔁 Перезапуск", TrayRestart)
-A_TrayMenu.Add("❌ Выход", TrayExit)
-A_TrayMenu.Default := "🏠 Открыть меню"
-A_TrayMenu.ClickCount := 1
-
-TrayOpenMenu(*) {
-    OpenMenu()
-}
-
-TrayOpenSettings(*) {
-    BuildMainWindow("Settings")
-}
-
-TrayOpenAi(*) {
-    OpenAiAssistant()
-}
-
-TrayRestart(*) {
-    RestartChesNova()
-}
-
-TrayExit(*) {
-    ExitApp()
-}
-
-RebuildTrayMenu() {
-    A_TrayMenu.Delete()
-    A_TrayMenu.Add("🏠 Открыть меню", TrayOpenMenu)
-    A_TrayMenu.Add("⚙ Настройки", TrayOpenSettings)
-    A_TrayMenu.Add("🤖 AI-ассистент", TrayOpenAi)
-    A_TrayMenu.Add()
-    A_TrayMenu.Add("🔁 Перезапуск", TrayRestart)
-    A_TrayMenu.Add("❌ Выход", TrayExit)
-    A_TrayMenu.Default := "🏠 Открыть меню"
-    A_TrayMenu.ClickCount := 1
-}
-
 ; ------------------------------------------------------------
 ; 01. Startup, paths, settings and main HUD
 ; ------------------------------------------------------------
@@ -83,7 +40,7 @@ RebuildTrayMenu() {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "11.0.4"
+CURRENT_VERSION := "12.0"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -119,6 +76,33 @@ hudBridgePosFile := dataPath "\hud_pos.json"
 hudBridgeScriptFile := dataPath "\hud_http_bridge.ps1"
 hudBridgePidFile := dataPath "\hud_http_bridge.pid"
 hudBridgePid := 0
+hudBridgeVisible := 1
+panelToggleSeq := 0
+pendingNormResetConfirm := 0
+hudBridgeSettingsFile := dataPath "\hud_settings_state.json"
+hudBridgePendingSettingsFile := dataPath "\hud_settings_pending.ini"
+hudBridgePunishmentsFile := dataPath "\hud_punishments_state.json"
+hudBridgePunishmentsCacheStamp := ""
+hudBridgePmLogsFile := dataPath "\hud_pmlogs_state.json"
+hudBridgePmLogsCacheStamp := ""
+hudBridgeCommandFile := dataPath "\hud_commands.ini"
+hudBridgeResetPendingFile := dataPath "\hud_reset_pending.txt"
+hudBridgeNormFile := dataPath "\hud_norm_state.json"
+hudBridgeNormCacheStamp := ""
+hudBridgeDaysoffFile := dataPath "\hud_daysoff_state.json"
+hudBridgeDaysoffCacheStamp := ""
+hudBridgeScriptsFile := dataPath "\hud_scripts_state.json"
+hudBridgeBindsFile := dataPath "\hud_binds_state.json"
+hudBridgeBindsCacheStamp := ""
+hudBridgeBindsContentFile := dataPath "\hud_binds_content.tmp"
+hudBridgeTesterFile := dataPath "\hud_tester_state.json"
+hudBridgeUpdatesFile := dataPath "\hud_updates_state.json"
+hudBridgeNotificationsFile := dataPath "\hud_notifications_state.json"
+hudBridgeCloudFile := dataPath "\hud_cloud_state.json"
+hudBridgeHelpFile := dataPath "\hud_help_state.json"
+hudBridgeDiagnosticsFile := dataPath "\hud_diagnostics_state.json"
+hudBridgeAiFile := dataPath "\hud_ai_state.json"
+hudBridgeAiQuestionFile := dataPath "\hud_ai_question.tmp"
 ; AI-ответ для in-game панели (ches.js), ~10 сек
 aiHudId := 0
 aiHudQuestion := ""
@@ -146,6 +130,14 @@ autoResetEnabled := 0
 bindsEnabled := 0
 checkUpdatesOnStartup := 1
 testerMode := 0
+testerLastCheck := ""
+updatesLatestVersion := ""
+updatesHasUpdate := 0
+updatesRequired := 0
+updatesChangelog := []
+updatesDownloadUrl := ""
+updatesLastCheck := ""
+updatesMessage := ""
 startWithWindows := 0
 resetHour := 0
 resetMinute := 0
@@ -272,7 +264,6 @@ if (deepseekModel = "")
 if (groqModel = "")
     groqModel := "llama-3.1-8b-instant"
 
-ApplyTheme(uiTheme)
 LoadAiHistory()
 
 ; Локальный кэш лимита AI: если дата не сегодня — обнуляем used
@@ -468,31 +459,6 @@ if (logFile != "" && FileExist(logFile))
     lastSize := FileGetSize(logFile)
 
 
-; =========================
-; 🎨 THEME
-; =========================
-ApplyTheme(theme := "dark") {
-    global uiTheme, colorBg, colorSidebar, colorCard, colorCardAlt, colorAccent
-    global colorText, colorMuted, colorGreen, colorRed, colorYellow, uiDivider, uiInputBg
-    global dotRed, dotGreen
-
-    uiTheme := "dark"
-    ; Тёмная палитра (акцент можно сменить одним colorAccent)
-    colorBg := "080B12"
-    colorSidebar := "0E131C"
-    colorCard := "151C28"
-    colorCardAlt := "1E2736"
-    colorAccent := "3B82F6"
-    colorText := "F5F7FB"
-    colorMuted := "A0A8B8"
-    colorGreen := "3DDB7A"
-    colorRed := "FF5B6B"
-    colorYellow := "F6A623"
-    uiDivider := "2E3848"
-    uiInputBg := "0F141D"
-    dotRed := colorRed
-    dotGreen := colorGreen
-}
 
 ; =========================
 ; 🤖 AI HISTORY
@@ -583,20 +549,11 @@ HighlightSearchMatch(text, search) {
 ; =========================
 ; 🖥 MAIN GUI (AHK-HUD отключён — счётчик в игре через ches.js)
 ; =========================
-MainGui := ""
-StatusDotCtrl := ""
-CloudDotCtrl := ""
-PMCountTextCtrl := ""
-HudNickCtrl := ""
-HudStatsCtrl := ""
-OnMessage(0x201, WM_LBUTTONDOWN)
-OnMessage(0x84, WM_NCHITTEST)
 
 ; =========================
 ; ⌨️ HOTKEYS
 ; =========================
 RegisterHotkeys()
-RebuildTrayMenu()
 InitializeBinds()
 MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
@@ -607,7 +564,6 @@ UpdatePMDisplay()
 SetTimer(CheckChatlogPathOnStartup, -1500)
 StartHudHttpBridge()
 OnExit(HudBridgeOnExit)
-
 ; ------------------------------------------------------------
 ; 02. Statistics helpers
 ; ------------------------------------------------------------
@@ -950,8 +906,9 @@ UpdateCloudHudDot() {
 ; 🌐 HTTP bridge → CEF HUD
 ; =========================
 WriteHudBridgeState(*) {
-    global hudBridgeStateFile, hudBridgePosFile, nick, pmCount, norm, healthState, healthMessage
+    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, nick, pmCount, norm, healthState, healthMessage
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
+    global logFile, scriptsGamePath
 
     try {
         mult := GetNormMultiplier()
@@ -961,7 +918,14 @@ WriteHudBridgeState(*) {
             . '"norm":' Integer(norm) ','
             . '"mult":' Integer(mult) ','
             . '"health":"' JsonEscape(healthState) '",'
-            . '"message":"' JsonEscape(healthMessage) '"'
+            . '"message":"' JsonEscape(healthMessage) '",'
+            . '"hudVisible":' (hudBridgeVisible ? 1 : 0) ','
+            . '"confirmReset":' (pendingNormResetConfirm ? 1 : 0) ','
+            . '"panelToggle":' Integer(panelToggleSeq) ','
+            . '"daysOff":' CountDaysOffCurrentMonth() ','
+            . '"chatlogOk":' ((logFile != "" && FileExist(logFile)) ? 1 : 0) ','
+            . '"gameOk":' ((scriptsGamePath != "" && IsValidGameRoot(scriptsGamePath)) ? 1 : 0) ','
+            . '"hudOk":' ((scriptsGamePath != "" && IsChesNovaHudInstalled(scriptsGamePath)) ? 1 : 0)
 
         ; позиция HUD из файла (ches.js сохраняет через мост)
         hudLeft := ""
@@ -1014,6 +978,1307 @@ WriteHudBridgeState(*) {
     }
 }
 
+; Текущие настройки для панели (GET /settings) — пишется при старте, сохранении и раз в сек
+WriteSettingsState(*) {
+    global hudBridgeSettingsFile, nick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled
+
+    try {
+        json := "{"
+            . '"nick":"' JsonEscape(nick) '",'
+            . '"norm":' Integer(norm) ','
+            . '"autoReset":' (autoResetEnabled ? 1 : 0) ','
+            . '"startWithWindows":' (startWithWindows ? 1 : 0) ','
+            . '"hours":"' Format("{:02}", resetHour) '",'
+            . '"minutes":"' Format("{:02}", resetMinute) '",'
+            . '"menuKey":"' JsonEscape(menuKey) '",'
+            . '"resetKey":"' JsonEscape(resetKey) '",'
+            . '"aiKey":"' JsonEscape(aiKey) '",'
+            . '"menuKeyEnabled":' (menuKeyEnabled ? 1 : 0) ','
+            . '"resetKeyEnabled":' (resetKeyEnabled ? 1 : 0) ','
+            . '"aiKeyEnabled":' (aiKeyEnabled ? 1 : 0)
+            . "}"
+        f := FileOpen(hudBridgeSettingsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Данные наказаний для панели (GET /punishments) — пишется при изменении файла истории
+WritePunishmentsState(*) {
+    global hudBridgePunishmentsFile, hudBridgePunishmentsCacheStamp, punishmentsFile
+    global viewHistoryScanLimit, viewHistoryDisplayLimit
+
+    try {
+        if !FileExist(punishmentsFile) {
+            if (hudBridgePunishmentsCacheStamp = "empty")
+                return
+            hudBridgePunishmentsCacheStamp := "empty"
+            f := FileOpen(hudBridgePunishmentsFile, "w", "UTF-8")
+            f.Write('{"ok":true,"records":[]}')
+            f.Close()
+            return
+        }
+
+        stamp := ""
+        try stamp := FileGetTime(punishmentsFile, "M")
+        catch
+            stamp := ""
+        if (stamp != "" && stamp = hudBridgePunishmentsCacheStamp)
+            return
+        hudBridgePunishmentsCacheStamp := stamp
+
+        records := []
+        lines := SortRecordsNewestFirst(ReadRecentLines(punishmentsFile, viewHistoryScanLimit, "WritePunishmentsState"), "punishment")
+        for _, line in lines {
+            if (Trim(line) = "")
+                continue
+
+            part := StrSplit(line, "|")
+            if (part.Length < 6)
+                continue
+            if !IsCurrentAdminPunishment(part[3])
+                continue
+
+            rowType := NormalizePunishmentType(part[5])
+            duration := ""
+            if (part.Length >= 7)
+                duration := part[7]
+            if (duration = "")
+                duration := ""
+
+            rec := '{'
+                . '"date":"' JsonEscape(part[1]) '",'
+                . '"time":"' JsonEscape(part[2]) '",'
+                . '"type":"' JsonEscape(rowType) '",'
+                . '"player":"' JsonEscape(part[4]) '",'
+                . '"reason":"' JsonEscape(part[6]) '",'
+                . '"duration":"' JsonEscape(duration) '"'
+                . '}'
+            records.Push(rec)
+
+            if (records.Length >= viewHistoryDisplayLimit)
+                break
+        }
+
+        json := '{"ok":true,"records":['
+        for i, rec in records {
+            if (i > 1)
+                json .= ","
+            json .= rec
+        }
+        json .= "]}"
+        f := FileOpen(hudBridgePunishmentsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Очистить PM-логи из панели (GET /pmlogs/clear)
+ClearPmLogsFromPanel(*) {
+    global pmLogsFile, hudBridgePmLogsCacheStamp
+
+    if !CreateBackupBeforeClear(pmLogsFile)
+        return
+    try {
+        file := FileOpen(pmLogsFile, "w")
+        file.Close()
+        hudBridgePmLogsCacheStamp := ""
+        WritePmLogsState()
+    } catch as err {
+        LogError("ClearPmLogsFromPanel", "Ошибка очистки PM-логов", err.Message)
+    }
+}
+
+; Вкл/выкл всех биндов из панели (GET /binds/toggle)
+SetBindsEnabledFromPanel(enabledRaw) {
+    global settingsFile, bindsEnabled
+
+    newValue := Trim(enabledRaw)
+    if (newValue = "0" || newValue = "1") {
+        newValue := Integer(newValue)
+        if (newValue != bindsEnabled) {
+            bindsEnabled := newValue
+            TryIniWrite(bindsEnabled, settingsFile, "Main", "bindsEnabled", "SetBindsEnabledFromPanel")
+            RegisterCustomBinds()
+            WriteBindsState()
+        }
+    }
+}
+
+; Сохранить бинд из панели (GET /binds/save → hud_commands.ini)
+SaveBindFromPanel(bindType, category, bindName, trigger, content, enabled, originalTrigger) {
+    bindType := NormalizeBindType(bindType)
+    category := Trim(category)
+    bindName := Trim(bindName)
+    trigger := Trim(trigger)
+    enabled := (Trim(enabled) = "1") ? 1 : 0
+    originalTrigger := Trim(originalTrigger)
+
+    if (category = "" || bindName = "" || trigger = "" || Trim(content) = "") {
+        ShowToast("⚠ Бинд: заполните все поля", 2200)
+        return
+    }
+    if !BindCategoryExists(category) {
+        ShowToast("⚠ Такой категории нет: " category, 2200)
+        return
+    }
+    if (bindType = "hotstring" || bindType = "macro")
+        trigger := RegExReplace(trigger, "^:\*?\??:|::$")
+    if BindTriggerExists(trigger, originalTrigger) {
+        ShowToast("⚠ Бинд с таким триггером уже существует", 2200)
+        return
+    }
+
+    binds := ReadBinds()
+    updated := false
+    newBind := Map("type", bindType, "category", category, "name", bindName, "trigger", trigger, "content", content, "enabled", enabled)
+    for i, bind in binds {
+        if (bind["trigger"] = originalTrigger) {
+            binds[i] := newBind
+            updated := true
+            break
+        }
+    }
+    if !updated
+        binds.Push(newBind)
+
+    if !WriteBinds(binds)
+        return
+    RegisterCustomBinds()
+    WriteBindsState()
+    ShowToast("✓ Бинд сохранён", 1800)
+}
+
+; Удалить бинды из панели (GET /binds/delete → hud_commands.ini)
+DeleteBindsFromPanel(triggersRaw) {
+    triggers := []
+    for _, t in StrSplit(triggersRaw, ",") {
+        t := Trim(t)
+        if (t != "" && !ArrayHasValue(triggers, t))
+            triggers.Push(t)
+    }
+    if (triggers.Length = 0)
+        return
+
+    newBinds := []
+    for _, bind in ReadBinds() {
+        if !ArrayHasValue(triggers, bind["trigger"])
+            newBinds.Push(bind)
+    }
+    if !WriteBinds(newBinds)
+        return
+    RegisterCustomBinds()
+    WriteBindsState()
+    ShowToast("✓ Бинды удалены", 1800)
+}
+
+; Вкл/выкл отдельных биндов из панели (GET /binds/enable → hud_commands.ini)
+SetBindEnabledFromPanel(triggersRaw, enabledRaw) {
+    enabled := (Trim(enabledRaw) = "1") ? 1 : 0
+    triggers := []
+    for _, t in StrSplit(triggersRaw, ",") {
+        t := Trim(t)
+        if (t != "" && !ArrayHasValue(triggers, t))
+            triggers.Push(t)
+    }
+    if (triggers.Length = 0)
+        return
+
+    binds := ReadBinds()
+    changed := false
+    for _, bind in binds {
+        if ArrayHasValue(triggers, bind["trigger"]) {
+            newValue := enabled
+            if ((bind["enabled"] + 0) != newValue) {
+                bind["enabled"] := newValue
+                changed := true
+            }
+        }
+    }
+    if !changed
+        return
+    if !WriteBinds(binds)
+        return
+    RegisterCustomBinds()
+    WriteBindsState()
+    ShowToast(enabled ? "✓ Бинды включены" : "✓ Бинды выключены", 1800)
+}
+
+; Добавить категорию биндов из панели (GET /binds/category/add → hud_commands.ini)
+AddBindCategoryFromPanel(category) {
+    category := Trim(category)
+    if (category = "") {
+        ShowToast("⚠ Категории: введите название", 2200)
+        return
+    }
+    if BindCategoryExists(category) {
+        ShowToast("⚠ Такая категория уже существует: " category, 2200)
+        return
+    }
+    if !AddBindCategoryByName(category) {
+        ShowToast("⚠ Не удалось создать категорию", 2200)
+        return
+    }
+    RegisterCustomBinds()
+    WriteBindsState()
+    ShowToast("✓ Категория добавлена: " category, 1800)
+}
+
+; Вкл/выкл категории биндов из панели (GET /binds/category/toggle → hud_commands.ini)
+SetBindCategoryEnabledFromPanel(category, enabledRaw) {
+    category := Trim(category)
+    if (category = "")
+        return
+    enabled := (Trim(enabledRaw) = "1") ? 1 : 0
+    if !SetBindCategoryEnabled(category, enabled)
+        return
+    RegisterCustomBinds()
+    WriteBindsState()
+    ShowToast(enabled ? "✓ Категория включена: " category : "✓ Категория выключена: " category, 1800)
+}
+
+; Удалить категорию биндов из панели (GET /binds/category/delete → hud_commands.ini)
+DeleteBindCategoryFromPanel(category) {
+    category := Trim(category)
+    if (category = "" || category = "Все") {
+        ShowToast("⚠ Эту категорию нельзя удалить", 2200)
+        return
+    }
+
+    records := ReadBindCategoryRecords()
+    found := false
+    newRecords := []
+    for _, record in records {
+        if (record["name"] = category) {
+            found := true
+            continue
+        }
+        newRecords.Push(record)
+    }
+    if !found
+        return
+
+    binds := ReadBinds()
+    movedCount := 0
+    for _, bind in binds {
+        if (bind["category"] = category) {
+            bind["category"] := "Все"
+            movedCount += 1
+        }
+    }
+
+    categoryFile := GetBindCategoryFile(category)
+
+    if !SaveBindCategoryRecords(newRecords)
+        return
+
+    if !WriteBinds(binds) {
+        SaveBindCategoryRecords(records)
+        ShowToast("⚠ Не удалось удалить категорию", 2200)
+        return
+    }
+
+    TryFileDelete(categoryFile, "DeleteBindCategoryFromPanel", "Ошибка удаления файла категории")
+
+    RegisterCustomBinds()
+    WriteBindsState()
+    ShowToast("✓ Категория удалена: " category, 1800)
+}
+
+WritePmLogsState(*) {
+    global hudBridgePmLogsFile, hudBridgePmLogsCacheStamp, pmLogsFile
+    global viewHistoryDisplayLimit
+
+    try {
+        if !FileExist(pmLogsFile) {
+            if (hudBridgePmLogsCacheStamp = "empty")
+                return
+            hudBridgePmLogsCacheStamp := "empty"
+            f := FileOpen(hudBridgePmLogsFile, "w", "UTF-8")
+            f.Write('{"ok":true,"records":[]}')
+            f.Close()
+            return
+        }
+
+        stamp := ""
+        try stamp := FileGetTime(pmLogsFile, "M")
+        catch
+            stamp := ""
+        if (stamp != "" && stamp = hudBridgePmLogsCacheStamp)
+            return
+        hudBridgePmLogsCacheStamp := stamp
+
+        records := []
+        lines := ReadRecentLines(pmLogsFile, viewHistoryDisplayLimit, "WritePmLogsState")
+        for _, line in lines {
+            if (Trim(line) = "")
+                continue
+
+            part := StrSplit(line, "|")
+            if (part.Length < 4)
+                continue
+
+            message := ""
+            Loop part.Length - 3 {
+                if (A_Index > 1)
+                    message .= "|"
+                message .= part[A_Index + 3]
+            }
+
+            rec := '{'
+                . '"date":"' JsonEscape(part[1]) '",'
+                . '"time":"' JsonEscape(part[2]) '",'
+                . '"nick":"' JsonEscape(part[3]) '",'
+                . '"message":"' JsonEscape(message) '"'
+                . '}'
+            records.Push(rec)
+        }
+
+        reversed := []
+        Loop records.Length {
+            reversed.Push(records[records.Length - A_Index + 1])
+        }
+
+        json := '{"ok":true,"records":['
+        for i, rec in reversed {
+            if (i > 1)
+                json .= ","
+            json .= rec
+        }
+        json .= "]}"
+        f := FileOpen(hudBridgePmLogsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; История нормы для панели (GET /norm) — пишется при изменении файла истории
+WriteNormHistoryState(*) {
+    global hudBridgeNormFile, hudBridgeNormCacheStamp, historyFile
+
+    try {
+        if !FileExist(historyFile) {
+            if (hudBridgeNormCacheStamp = "empty")
+                return
+            hudBridgeNormCacheStamp := "empty"
+            f := FileOpen(hudBridgeNormFile, "w", "UTF-8")
+            f.Write('{"ok":true,"records":[]}')
+            f.Close()
+            return
+        }
+
+        stamp := ""
+        try stamp := FileGetTime(historyFile, "M")
+        catch
+            stamp := ""
+        if (stamp != "" && stamp = hudBridgeNormCacheStamp)
+            return
+        hudBridgeNormCacheStamp := stamp
+
+        records := []
+        lines := SortRecordsNewestFirst(ReadFileLines(historyFile, "WriteNormHistoryState"), "history")
+        for _, line in lines {
+            if (Trim(line) = "")
+                continue
+
+            part := StrSplit(line, ",")
+            if (part.Length < 3)
+                continue
+
+            date := part[1]
+            displayDate := date
+            if RegExMatch(date, "^(\d{4})-(\d{2})-(\d{2})$", &dm)
+                displayDate := dm[3] "." dm[2] "." dm[1]
+
+            pm := part[2] + 0
+            normVal := part[3] + 0
+
+            rec := '{'
+                . '"date":"' JsonEscape(displayDate) '",'
+                . '"raw":"' JsonEscape(date) '",'
+                . '"pm":' Integer(pm) ','
+                . '"norm":' Integer(normVal)
+                . '}'
+            records.Push(rec)
+        }
+
+        json := '{"ok":true,"records":['
+        for i, rec in records {
+            if (i > 1)
+                json .= ","
+            json .= rec
+        }
+        json .= "]}"
+        f := FileOpen(hudBridgeNormFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Раз в секунду обновляем и state, и settings для панели
+UpdateHudBridgeState(*) {
+    WriteHudBridgeState()
+    WriteSettingsState()
+    WritePunishmentsState()
+    WritePmLogsState()
+    WriteNormHistoryState()
+    WriteDaysoffState()
+    WriteScriptsState()
+    WriteBindsState()
+}
+
+; Список отгулов для панели (GET /daysoff → hud_daysoff_state.json)
+WriteDaysoffState(*) {
+    global hudBridgeDaysoffFile, hudBridgeDaysoffCacheStamp, daysOffFile
+
+    try {
+        if !FileExist(daysOffFile) {
+            if (hudBridgeDaysoffCacheStamp = "empty")
+                return
+            hudBridgeDaysoffCacheStamp := "empty"
+            f := FileOpen(hudBridgeDaysoffFile, "w", "UTF-8")
+            f.Write('{"ok":true,"records":[]}')
+            f.Close()
+            return
+        }
+
+        stamp := ""
+        try stamp := FileGetTime(daysOffFile, "M")
+        catch
+            stamp := ""
+        if (stamp != "" && stamp = hudBridgeDaysoffCacheStamp)
+            return
+        hudBridgeDaysoffCacheStamp := stamp
+
+        records := []
+        lines := SortRecordsNewestFirst(ReadFileLines(daysOffFile, "WriteDaysoffState"), "dayoff")
+        for _, line in lines {
+            if (Trim(line) = "")
+                continue
+            rec := ParseDayOffRecord(line)
+            if !IsObject(rec)
+                continue
+            records.Push(Map("date", rec["date"], "forumUploaded", rec["forumUploaded"]))
+        }
+
+        json := '{"ok":true,"records":['
+        for i, record in records {
+            if (i > 1)
+                json .= ","
+            json .= '{"date":"' JsonEscape(record["date"]) '","forum":' Integer(record["forumUploaded"]) '}'
+        }
+        json .= "]}"
+        f := FileOpen(hudBridgeDaysoffFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Добавить отгул из панели (GET /daysoff/add → hud_commands.ini)
+AddDayOffFromPanel(date, uploaded) {
+    global daysOffFile, hudBridgeDaysoffCacheStamp
+
+    dayOffDate := NormalizeDayOffDate(date)
+    if (dayOffDate = "")
+        return
+    if IsDayOff(dayOffDate)
+        return
+
+    forumUploaded := (uploaded = "1") ? 1 : 0
+    if !TryFileAppend(FormatDayOffRecord(dayOffDate, forumUploaded) "`n", daysOffFile, "AddDayOffFromPanel", "Ошибка записи days_off.csv")
+        return
+    hudBridgeDaysoffCacheStamp := ""
+    WriteDaysoffState()
+    ShowToast("✓ Отгул за " dayOffDate " добавлен", 1800)
+}
+
+; Удалить отгулы из панели (GET /daysoff/delete → hud_commands.ini)
+DeleteDayOffFromPanel(dates) {
+    global daysOffFile, hudBridgeDaysoffCacheStamp
+
+    selectedDates := StrSplit(dates, ",")
+    if (selectedDates.Length = 0)
+        return
+
+    newRecords := []
+    for _, record in GetDayOffRecords() {
+        if !ArrayHasValue(selectedDates, record["date"])
+            newRecords.Push(record)
+    }
+
+    if !WriteDayOffRecords(newRecords, "DeleteDayOffFromPanel")
+        return
+    hudBridgeDaysoffCacheStamp := ""
+    WriteDaysoffState()
+    ShowToast("✓ Отгул(ы) удалены", 1800)
+}
+
+; Залить / снять с форума из панели (GET /daysoff/forum → hud_commands.ini)
+SetDayOffForumFromPanel(dates, uploaded) {
+    global daysOffFile, hudBridgeDaysoffCacheStamp
+
+    selectedDates := StrSplit(dates, ",")
+    if (selectedDates.Length = 0)
+        return
+
+    records := GetDayOffRecords()
+    for _, record in records {
+        if ArrayHasValue(selectedDates, record["date"])
+            record["forumUploaded"] := (uploaded = "1") ? 1 : 0
+    }
+
+    if !WriteDayOffRecords(records, "SetDayOffForumFromPanel")
+        return
+    hudBridgeDaysoffCacheStamp := ""
+    WriteDaysoffState()
+    ShowToast(uploaded = "1" ? "✓ Отмечено как залито" : "✓ Отмечено как не залито", 1800)
+}
+
+; Список скриптов и их статус для панели (GET /scripts → hud_scripts_state.json)
+WriteScriptsState(*) {
+    global hudBridgeScriptsFile, scriptsGamePath, settingsFile
+
+    try {
+        gamePath := Trim(scriptsGamePath)
+        gamePath := RTrim(gamePath, "\/")
+        gameOk := (gamePath != "" && IsValidGameRoot(gamePath))
+
+        packages := '['
+        for i, package in GetScriptPackages() {
+            status := GetScriptPackageInstallStatus(package)
+            note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
+            if (package["id"] = "onishi")
+                note := "Loader + json, без //loader"
+            if (i > 1)
+                packages .= ","
+            fileNames := ""
+            for fi, file in package["files"] {
+                if (fi > 1)
+                    fileNames .= ", "
+                fileNames .= file["name"]
+            }
+            desc := package.Has("description") ? package["description"] : ""
+            authors := package.Has("authors") ? package["authors"] : package["author"]
+            activation := package.Has("activationCommands") ? package["activationCommands"] : ""
+            packages .= '{'
+                . '"id":"' JsonEscape(package["id"]) '",'
+                . '"title":"' JsonEscape(package["displayTitle"]) '",'
+                . '"author":"' JsonEscape(package["author"]) '",'
+                . '"authors":"' JsonEscape(authors) '",'
+                . '"description":"' JsonEscape(desc) '",'
+                . '"files":"' JsonEscape(fileNames) '",'
+                . '"activation":"' JsonEscape(activation) '",'
+                . '"note":"' JsonEscape(note) '",'
+                . '"topic":"' JsonEscape(package["topic"]) '",'
+                . '"installed":' (status["installed"] ? 1 : 0) ','
+                . '"status":"' JsonEscape(status["text"]) '"'
+                . '}'
+        }
+        packages .= ']'
+
+        json := '{"ok":true,"gamePath":"' JsonEscape(gamePath) '","gameOk":' (gameOk ? 1 : 0) ',"packages":' packages '}'
+        f := FileOpen(hudBridgeScriptsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Список биндов для панели (GET /binds → hud_binds_state.json)
+WriteBindsState(*) {
+    global hudBridgeBindsFile, hudBridgeBindsCacheStamp, bindsEnabled
+
+    try {
+        cats := '['
+        catCount := 0
+        for _, record in ReadBindCategoryRecords() {
+            if (record["name"] = "Все")
+                continue
+            if (catCount > 0)
+                cats .= ","
+            cats .= '{"name":"' JsonEscape(record["name"]) '","enabled":' Integer(record["enabled"]) '}'
+            catCount += 1
+        }
+        cats .= ']'
+
+        binds := '['
+        bindCount := 0
+        for _, bind in ReadBinds() {
+            if (bindCount > 0)
+                binds .= ","
+            binds .= '{'
+                . '"type":"' JsonEscape(bind["type"]) '",'
+                . '"category":"' JsonEscape(bind["category"]) '",'
+                . '"name":"' JsonEscape(bind["name"]) '",'
+                . '"trigger":"' JsonEscape(bind["trigger"]) '",'
+                . '"content":"' JsonEscape(bind["content"]) '",'
+                . '"enabled":' Integer(bind["enabled"]) ','
+                . '"runtime":"' JsonEscape(GetBindRuntimeStatusText(bind)) '"'
+                . '}'
+            bindCount += 1
+        }
+        binds .= ']'
+
+        json := '{"ok":true,"enabled":' (bindsEnabled ? 1 : 0) ',"categories":' cats ',"binds":' binds '}'
+        f := FileOpen(hudBridgeBindsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Состояние тестера для панели (GET /tester → hud_tester_state.json)
+WriteTesterState(*) {
+    global hudBridgeTesterFile, testerMode, CURRENT_VERSION, testerLastCheck
+
+    try {
+        info := testerLastCheck
+        if (info = "")
+            info := testerMode
+                ? "Нажми «Проверить», чтобы загрузить информацию о тестовой версии."
+                : "Включи «Я тестировщик», затем нажми «Проверить»."
+
+        json := '{"ok":true,'
+            . '"enabled":' (testerMode ? 1 : 0) ','
+            . '"version":"' JsonEscape(CURRENT_VERSION) '",'
+            . '"info":"' JsonEscape(info) '"'
+            . '}'
+        f := FileOpen(hudBridgeTesterFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Состояние обновлений для панели (GET /updates → hud_updates_state.json)
+WriteUpdatesState(*) {
+    global hudBridgeUpdatesFile, CURRENT_VERSION, checkUpdatesOnStartup
+    global updatesLatestVersion, updatesHasUpdate, updatesRequired, updatesChangelog, updatesDownloadUrl, updatesLastCheck, updatesMessage
+
+    try {
+        changelogJson := '['
+        changelogCount := 0
+        for _, entry in updatesChangelog {
+            if (changelogCount > 0)
+                changelogJson .= ","
+            changelogJson .= '"' JsonEscape(entry) '"'
+            changelogCount += 1
+        }
+        changelogJson .= ']'
+
+        json := '{"ok":true,'
+            . '"version":"' JsonEscape(CURRENT_VERSION) '",'
+            . '"latest":"' JsonEscape(updatesLatestVersion) '",'
+            . '"hasUpdate":' (updatesHasUpdate ? 1 : 0) ','
+            . '"required":' (updatesRequired ? 1 : 0) ','
+            . '"changelog":' changelogJson ','
+            . '"download":"' JsonEscape(updatesDownloadUrl) '",'
+            . '"checkOnStartup":' (checkUpdatesOnStartup ? 1 : 0) ','
+            . '"lastCheck":"' JsonEscape(updatesLastCheck) '",'
+            . '"message":"' JsonEscape(updatesMessage) '"'
+            . '}'
+        f := FileOpen(hudBridgeUpdatesFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Состояние уведомлений для панели (GET /notifications → hud_notifications_state.json)
+WriteNotificationsState(*) {
+    global hudBridgeNotificationsFile, notifications, notificationStates
+
+    try {
+        items := '['
+        itemCount := 0
+        for _, notification in notifications {
+            id := notification["id"]
+            dismissed := 0
+            read := 0
+            if notificationStates.Has(id) {
+                read := notificationStates[id].Get("read", 0)
+                dismissed := notificationStates[id].Get("dismissed", 0)
+            }
+            if (dismissed)
+                continue
+            if (itemCount > 0)
+                items .= ","
+            items .= '{'
+                . '"id":"' JsonEscape(id) '",'
+                . '"title":"' JsonEscape(notification["title"]) '",'
+                . '"text":"' JsonEscape(notification["text"]) '",'
+                . '"type":"' JsonEscape(notification["type"]) '",'
+                . '"date":"' JsonEscape(notification["date"]) '",'
+                . '"read":' Integer(read)
+                . '}'
+            itemCount += 1
+        }
+        items .= ']'
+
+        json := '{"ok":true,"items":' items '}'
+        f := FileOpen(hudBridgeNotificationsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Состояние Cloud для панели (GET /cloud → hud_cloud_state.json)
+WriteCloudState(*) {
+    global hudBridgeCloudFile, nick, cloudAccessState, cloudAccessMessage, cloudLastCheck
+
+    try {
+        json := '{"ok":true,'
+            . '"nick":"' JsonEscape(nick) '",'
+            . '"status":"' JsonEscape(cloudAccessState) '",'
+            . '"message":"' JsonEscape(cloudAccessMessage) '",'
+            . '"lastCheck":"' JsonEscape(cloudLastCheck) '"'
+            . '}'
+        f := FileOpen(hudBridgeCloudFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+
+; Состояние AI для панели (GET /ai → hud_ai_state.json)
+WriteAiState(*) {
+    global hudBridgeAiFile, aiEnabled, aiProvider, aiConfigLoaded
+    global aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiHistory, aiRequestBusy
+    global cloudAccessState
+
+    try {
+        items := "["
+        itemCount := 0
+        ; новые сверху
+        i := aiHistory.Length
+        while (i >= 1) {
+            item := aiHistory[i]
+            if (itemCount > 0)
+                items .= ","
+            tVal := item.Has("t") ? item["t"] : ""
+            rec := "{"
+                . '"q":"' JsonEscape(item["q"]) '",'
+                . '"a":"' JsonEscape(item["a"]) '",'
+                . '"t":"' JsonEscape(tVal) '"'
+                . "}"
+            items .= rec
+            itemCount += 1
+            i -= 1
+        }
+        items .= "]"
+
+        limitText := GetAiLimitStatusText()
+        json := "{"
+            . '"ok":true,'
+            . '"enabled":' (aiEnabled ? 1 : 0) ','
+            . '"provider":"' JsonEscape(aiProvider) '",'
+            . '"busy":' (aiRequestBusy ? 1 : 0) ','
+            . '"configLoaded":' (aiConfigLoaded ? 1 : 0) ','
+            . '"limit":' Integer(aiDailyLimit) ','
+            . '"used":' Integer(aiDailyUsed) ','
+            . '"remaining":' Integer(aiDailyRemaining) ','
+            . '"limitText":"' JsonEscape(limitText) '",'
+            . '"cloud":"' JsonEscape(cloudAccessState) '",'
+            . '"history":' items
+            . "}"
+        f := FileOpen(hudBridgeAiFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+SetAiEnabledFromPanel(enabledRaw) {
+    global settingsFile, aiEnabled
+
+    newValue := Trim(enabledRaw)
+    if (newValue != "0" && newValue != "1")
+        return
+    newValue := Integer(newValue)
+    if (newValue = aiEnabled) {
+        WriteAiState()
+        return
+    }
+    aiEnabled := newValue
+    TryIniWrite(aiEnabled, settingsFile, "AI", "aiEnabled", "SetAiEnabledFromPanel")
+    RegisterAiChatHotstring()
+    if aiEnabled
+        SetTimer(FetchAiConfigFromCloud, -500)
+    WriteAiState()
+    ShowToast(aiEnabled ? "✓ AI включён" : "AI выключен", 1800)
+}
+
+SetAiProviderFromPanel(providerRaw) {
+    global settingsFile, aiProvider
+
+    provider := StrLower(Trim(providerRaw))
+    if (provider != "gemini" && provider != "deepseek" && provider != "groq")
+        return
+    if (provider = aiProvider) {
+        WriteAiState()
+        return
+    }
+    aiProvider := provider
+    TryIniWrite(aiProvider, settingsFile, "AI", "aiProvider", "SetAiProviderFromPanel")
+    WriteAiState()
+    ShowToast("✓ Провайдер: " GetAiProviderLabel(), 1600)
+}
+
+ClearAiHistoryFromPanel(*) {
+    global aiHistory
+    aiHistory := []
+    SaveAiHistory()
+    WriteAiState()
+    ShowToast("✓ История AI очищена", 1600)
+}
+
+AskAiFromPanel(*) {
+    global hudBridgeAiQuestionFile, aiRequestBusy, aiEnabled
+
+    question := ""
+    try {
+        if FileExist(hudBridgeAiQuestionFile)
+            question := Trim(FileRead(hudBridgeAiQuestionFile, "UTF-8"))
+    }
+    try {
+        if FileExist(hudBridgeAiQuestionFile)
+            FileDelete(hudBridgeAiQuestionFile)
+    }
+    question := Trim(question)
+    if (question = "" || StrLen(question) < 2) {
+        ShowToast("⚠ Введите вопрос", 1800)
+        return
+    }
+    if aiRequestBusy {
+        ShowToast("⚠ AI уже обрабатывает запрос", 1800)
+        return
+    }
+    if !aiEnabled {
+        PushAiToGameHud(question, "AI отключён в настройках ChesNova", true)
+        WriteAiState()
+        return
+    }
+
+    PushAiThinkingToGameHud(question)
+    WriteAiState()
+    aiRequestBusy := true
+    try {
+        if (GetCurrentAiApiKey() = "")
+            FetchAiConfigFromCloud()
+        if (GetCurrentAiApiKey() = "") {
+            msg := "Ключ " GetAiProviderLabel() " пуст. Проверьте Cloud / " GetAiKeyCellHint() " в таблице."
+            PushAiToGameHud(question, msg, true)
+            WriteAiState()
+            return
+        }
+        quota := ConsumeAiQuotaFromCloud()
+        if !quota["ok"] {
+            PushAiToGameHud(question, quota["reason"], true)
+            WriteAiState()
+            return
+        }
+        answer := AskAI(question)
+        PushAiHistory(question, answer)
+        PushAiToGameHud(question, answer, false, 10000)
+        WriteAiState()
+    } catch as err {
+        LogError("AskAiFromPanel", GetAiProviderLabel(), err.Message)
+        PushAiToGameHud(question, "Ошибка: " err.Message, true)
+        WriteAiState()
+    } finally {
+        aiRequestBusy := false
+        WriteAiState()
+    }
+}
+
+; Состояние помощи для панели (GET /help → hud_help_state.json)
+WriteHelpState(*) {
+    global hudBridgeHelpFile
+
+    try {
+        text := GetLastErrorLogLines(30)
+        errors := '['
+        errorCount := 0
+        for _, line in StrSplit(RTrim(text, "`n"), "`n") {
+            line := RTrim(line, "`r")
+            if (Trim(line) = "")
+                continue
+            if (errorCount > 0)
+                errors .= ","
+            timeMatch := ""
+            msg := line
+            if RegExMatch(line, "^\[([^\]]+)\]\s+\[([^\]]+)\]", &m) {
+                timeMatch := m[1]
+                msg := "[" m[2] "] " StrReplace(SubStr(line, m.Pos + m.Len), "`r", "")
+            }
+            errors .= '{'
+                . '"time":"' JsonEscape(timeMatch) '",'
+                . '"msg":"' JsonEscape(msg) '"'
+                . '}'
+            errorCount += 1
+        }
+        errors .= ']'
+
+        json := '{"ok":true,"errors":' errors '}'
+        f := FileOpen(hudBridgeHelpFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Состояние диагностики для панели (GET /diagnostics → hud_diagnostics_state.json)
+WriteDiagnosticsState(*) {
+    global hudBridgeDiagnosticsFile, healthState, healthMessage
+
+    try {
+        json := '{"ok":true,'
+            . '"health":"' JsonEscape(healthState) '",'
+            . '"healthMsg":"' JsonEscape(healthMessage) '",'
+            . '"text":"' JsonEscape(BuildDiagnosticsText()) '"'
+            . '}'
+        f := FileOpen(hudBridgeDiagnosticsFile, "w", "UTF-8")
+        f.Write(json)
+        f.Close()
+    } catch as err {
+        ; тихо
+    }
+}
+
+; Проверить обновления из панели (GET /updates/check → hud_commands.ini)
+CheckUpdatesFromPanel() {
+    global CURRENT_VERSION, updatesLatestVersion, updatesHasUpdate, updatesRequired, updatesChangelog, updatesDownloadUrl, updatesLastCheck, updatesMessage
+
+    updatesMessage := "Проверка…"
+    updatesLastCheck := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+    WriteUpdatesState()
+
+    try {
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        if (versionInfo["latest"] = "")
+            throw Error("В version.json нет поля latest.")
+
+        updatesLatestVersion := versionInfo["latest"]
+        updatesDownloadUrl := versionInfo["download"]
+        updatesChangelog := versionInfo["changelog"]
+        updatesRequired := versionInfo["required"]
+        updatesHasUpdate := (CompareVersions(updatesLatestVersion, CURRENT_VERSION) > 0)
+        updatesMessage := updatesHasUpdate
+            ? "Доступна новая версия v" updatesLatestVersion
+            : "Установлена последняя версия v" CURRENT_VERSION
+        ShowToast(updatesHasUpdate ? "✓ Есть обновление v" updatesLatestVersion : "✓ Версия актуальна", 2000)
+    } catch as err {
+        updatesMessage := "Не удалось проверить: " err.Message
+        LogError("CheckUpdatesFromPanel", "Ошибка проверки обновлений", err.Message)
+        ShowToast("⚠ Не удалось проверить обновления", 2200)
+    }
+    WriteUpdatesState()
+}
+
+; Сохранить настройку проверки обновлений при запуске (GET /updates/save → hud_commands.ini)
+SetUpdateCheckFromPanel(valueRaw) {
+    global settingsFile, checkUpdatesOnStartup
+
+    value := Trim(valueRaw)
+    if (value = "0" || value = "1") {
+        newValue := Integer(value)
+        if (newValue != checkUpdatesOnStartup) {
+            checkUpdatesOnStartup := newValue
+            TryIniWrite(checkUpdatesOnStartup, settingsFile, "Updates", "checkOnStartup", "SetUpdateCheckFromPanel")
+            WriteUpdatesState()
+        }
+    }
+}
+
+; Скачать последнюю версию из панели (GET /updates/download → hud_commands.ini)
+DownloadUpdateFromPanel() {
+    try {
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        OpenUpdateDownload(versionInfo["download"])
+        ShowToast("✓ Ссылка на скачивание открыта", 1800)
+    } catch as err {
+        LogError("DownloadUpdateFromPanel", "Ошибка скачивания обновления", err.Message)
+        ShowToast("⚠ Не удалось получить ссылку", 2200)
+    }
+}
+
+; Установить обновление из панели (GET /updates/install → hud_commands.ini)
+InstallUpdateFromPanel() {
+    global CURRENT_VERSION, basePath, backupPath
+
+    mainScript := basePath "\ChesNova.ahk"
+    newScript := basePath "\ChesNova_new.ahk"
+    updateUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/ChesNova.ahk"
+
+    try {
+        versionInfo := ParseVersionManifest(DownloadVersionManifest())
+        if (versionInfo["latest"] = "")
+            throw Error("В version.json отсутствует поле latest.")
+        if (CompareVersions(versionInfo["latest"], CURRENT_VERSION) <= 0) {
+            ShowToast("✓ Установлена последняя версия v" CURRENT_VERSION, 2000)
+            return
+        }
+        if !FileExist(mainScript)
+            throw Error("Текущий файл ChesNova.ahk не найден.")
+
+        if FileExist(newScript)
+            FileDelete(newScript)
+
+        Download(updateUrl, newScript)
+        if !FileExist(newScript) || FileGetSize(newScript) = 0
+            throw Error("Загруженный файл пустой.")
+
+        DirCreate(backupPath)
+        backupFile := backupPath "\ChesNova_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".ahk"
+        FileCopy(mainScript, backupFile, 0)
+
+        try {
+            FileDelete(mainScript)
+            FileMove(newScript, mainScript, 0)
+        } catch as installErr {
+            if !FileExist(mainScript) && FileExist(backupFile)
+                FileCopy(backupFile, mainScript, 1)
+            throw installErr
+        }
+
+        ShowToast("✓ Обновление установлено, перезапустите ChesNova", 2500)
+        PromptRestartAfterUpdate("Обновление", "Новая версия v" versionInfo["latest"] " установлена.")
+    } catch as err {
+        if FileExist(newScript)
+            try FileDelete(newScript)
+        LogError("InstallUpdateFromPanel", "Ошибка установки обновления", err.Message)
+        ShowToast("⚠ Не удалось установить обновление", 2200)
+    }
+}
+
+; Проверить уведомления из панели (GET /notifications/refresh → hud_commands.ini)
+RefreshNotificationsFromPanel() {
+    CheckNotifications()
+    WriteNotificationsState()
+    WriteHudBridgeState()
+}
+
+; Отметить уведомления прочитанными из панели (GET /notifications/read → hud_commands.ini)
+MarkNotificationsReadFromPanel() {
+    MarkNotificationsRead()
+    WriteNotificationsState()
+}
+
+; Проверить доступ Cloud из панели (GET /cloud/check → hud_commands.ini)
+CheckCloudFromPanel() {
+    CheckCloudAccess(false, false)
+    WriteCloudState()
+    WriteHudBridgeState()
+    ShowToast("✓ Cloud: " GetCloudStatusText(), 2000)
+}
+
+; Сменить ник из панели (GET /cloud/nick → hud_commands.ini)
+SetCloudNickFromPanel(newNickRaw) {
+    global settingsFile, nick, userNick
+
+    newNick := Trim(newNickRaw)
+    if (newNick = "" || newNick = "Nick_Name")
+        return
+    if (newNick != nick) {
+        nick := newNick
+        userNick := newNick
+        TryIniWrite(nick, settingsFile, "Main", "nick", "SetCloudNickFromPanel")
+        WriteSettingsState()
+    }
+    CheckCloudAccess(false, false)
+    WriteCloudState()
+    WriteHudBridgeState()
+    ShowToast("✓ Ник сохранён: " nick, 2000)
+}
+
+; Очистить errors.log из панели (GET /help/clear → hud_commands.ini)
+ClearErrorsLogFromPanel() {
+    global errorsLogFile
+
+    try {
+        file := FileOpen(errorsLogFile, "w", "UTF-8")
+        file.Close()
+        WriteHelpState()
+        ShowToast("✓ Лог ошибок очищен", 1800)
+    } catch as err {
+        LogError("ClearErrorsLogFromPanel", "Не удалось очистить errors.log", err.Message)
+        ShowToast("⚠ Не удалось очистить errors.log", 2200)
+    }
+}
+
+; Обновить диагностику из панели (GET /diagnostics/refresh → hud_commands.ini)
+RefreshDiagnosticsFromPanel() {
+    RunHealthCheck()
+    WriteDiagnosticsState()
+}
+
+; Установить пакет скрипта из панели (GET /scripts/install → hud_commands.ini)
+InstallScriptPackageFromPanel(packageId) {
+    global dataPath
+
+    package := GetScriptPackageById(packageId)
+    if !IsObject(package) {
+        ShowToast("⚠ Пакет скрипта не найден", 2200)
+        return
+    }
+
+    gamePath := GetScriptsGamePath()
+    if (gamePath = "") {
+        ShowToast("⚠ Укажите путь к корню игры", 2200)
+        return
+    }
+    if !DirExist(gamePath) {
+        ShowToast("⚠ Папка игры не найдена: " gamePath, 2800)
+        return
+    }
+
+    uiResourcesPath := gamePath "\uiresources"
+    scriptsPath := uiResourcesPath "\scripts"
+    try {
+        if !DirExist(uiResourcesPath)
+            DirCreate(uiResourcesPath)
+        if !DirExist(scriptsPath)
+            DirCreate(scriptsPath)
+    } catch as err {
+        LogError("InstallScriptPackageFromPanel", "Не удалось создать папки для пакета " packageId, err.Message)
+        ShowToast("⚠ Не удалось создать папки uiresources/scripts", 2600)
+        return
+    }
+
+    downloadedFiles := []
+    downloadsPath := dataPath "\downloads"
+    DirCreate(downloadsPath)
+    try {
+        for index, file in package["files"] {
+            tempFile := downloadsPath "\ChesNova_" package["id"] "_" A_TickCount "_" index ".tmp"
+            Download(file["url"], tempFile)
+            downloadedFiles.Push(Map("temp", tempFile, "file", file))
+        }
+    } catch as err {
+        for _, downloaded in downloadedFiles {
+            try FileDelete(downloaded["temp"])
+        }
+        LogError("InstallScriptPackageFromPanel", "Не удалось скачать файл " file["name"], err.Message)
+        ShowToast("⚠ Не удалось скачать " file["name"], 2600)
+        return
+    }
+
+    written := 0
+    skippedLocked := 0
+    failedNames := []
+    try {
+        for _, downloaded in downloadedFiles {
+            rel := StrReplace(downloaded["file"]["relativePath"], "/", "\")
+            while InStr(rel, "\\")
+                rel := StrReplace(rel, "\\", "\")
+            rel := LTrim(rel, "\")
+            destination := gamePath "\" rel
+            ; SplitPath — не создаём папку с именем файла (баг RegExReplace)
+            SplitPath(destination, &destName, &destinationDir)
+            if (destinationDir = "")
+                destinationDir := gamePath
+            if !DirExist(destinationDir)
+                DirCreate(destinationDir)
+            ; Старый баг: вместо файла могла появиться папка _otools.js
+            if DirExist(destination) {
+                try DirDelete(destination, true)
+                catch as dirErr
+                    LogError("InstallScriptPackageFromPanel", "Не удалось удалить ошибочную папку: " destination, dirErr.Message)
+            }
+            if (package.Has("skipExisting") && package["skipExisting"] && FileExist(destination) && !DirExist(destination)) {
+                try FileDelete(downloaded["temp"])
+                written += 1
+                continue
+            }
+            destExists := FileExist(destination) && !DirExist(destination)
+            okWrite := false
+            try {
+                FileCopy(downloaded["temp"], destination, 1)
+                okWrite := true
+            } catch {
+                try {
+                    FileMove(downloaded["temp"], destination, 1)
+                    okWrite := true
+                } catch {
+                    okWrite := false
+                }
+            }
+            try {
+                if FileExist(downloaded["temp"])
+                    FileDelete(downloaded["temp"])
+            }
+            if okWrite {
+                written += 1
+            } else if destExists {
+                skippedLocked += 1
+                written += 1
+                LogError("InstallScriptPackageFromPanel", "Файл занят (игра запущена?), пропуск перезаписи: " downloaded["file"]["name"], destination)
+            } else {
+                failedNames.Push(downloaded["file"]["name"])
+            }
+        }
+    } catch as err {
+        for _, downloaded in downloadedFiles {
+            if FileExist(downloaded["temp"])
+                try FileDelete(downloaded["temp"])
+        }
+        LogError("InstallScriptPackageFromPanel", "Не удалось установить пакет " packageId " в " gamePath, err.Message)
+        ShowToast("⚠ Не удалось записать файлы в папку игры", 2600)
+        return
+    }
+
+    if (failedNames.Length > 0) {
+        LogError("InstallScriptPackageFromPanel", "Частичная установка " packageId, "Не записаны: " JoinArrayRange(failedNames, 1, failedNames.Length, ", "))
+        WriteScriptsState()
+        ShowToast("⚠ Часть файлов не записана: " failedNames[1] (failedNames.Length > 1 ? "…" : "") " — закройте игру и повторите", 3600)
+        return
+    }
+
+    WriteScriptsState()
+    if (skippedLocked > 0)
+        ShowToast("✓ " package["displayTitle"] " установлен (часть .asi уже была, игра могла держать файлы)", 3200)
+    else
+        ShowToast("✓ Пакет " package["displayTitle"] " установлен", 2200)
+}
+
+; Сохранить путь к игре из панели (GET /scripts/path → hud_commands.ini)
+SaveScriptsPathFromPanel(path) {
+    global scriptsGamePath, settingsFile
+
+    path := RTrim(Trim(path), "\/")
+    if (path = "")
+        return
+    if !DirExist(path) {
+        ShowToast("⚠ Папка не найдена", 2000)
+        return
+    }
+    scriptsGamePath := path
+    TryIniWrite(path, settingsFile, "Scripts", "gamePath", "SaveScriptsPathFromPanel")
+    WriteScriptsState()
+    ShowToast("✓ Путь к игре сохранён", 1800)
+}
+
 ; Индикатор «AI думает…» в ches.js
 PushAiThinkingToGameHud(question := "") {
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
@@ -1060,11 +2325,30 @@ EnsureHudBridgeScript() {
 
     ; TcpListener — без прав админа и без netsh urlacl
     ; GET /pos?left=N&top=N — сохранить позицию HUD (CEF localStorage не переживает релог)
+    ; GET /settings?k=v&k2=v2 — сохранить настройки (пишется hud_settings_pending.ini)
+    ; GET /settings — отдать текущие настройки панели (hud_settings_state.json)
     script := (
         "$ErrorActionPreference = 'Continue'`n"
         "$port = " hudBridgePort "`n"
         "$stateFile = $args[0]`n"
         "$posFile = $args[1]`n"
+        "$settingsFile = $args[2]`n"
+        "$pendingFile = $args[3]`n"
+        "$punFile = $args[4]`n"
+        "$pmFile = $args[5]`n"
+        "$cmdFile = $args[6]`n"
+        "$normFile = $args[7]`n"
+        "$daysOffFile = $args[8]`n"
+        "$scriptsFile = $args[9]`n"
+        "$bindsFile = $args[10]`n"
+        "$testerFile = $args[11]`n"
+        "$updatesFile = $args[12]`n"
+        "$notificationsFile = $args[13]`n"
+        "$cloudFile = $args[14]`n"
+        "$helpFile = $args[15]`n"
+        "$diagnosticsFile = $args[16]`n"
+        "$aiFile = $args[17]`n"
+        "$aiQuestionFile = $args[18]`n"
         "$ip = [System.Net.IPAddress]::Loopback`n"
         "$listener = [System.Net.Sockets.TcpListener]::new($ip, $port)`n"
         "try { $listener.Start() } catch { exit 1 }`n"
@@ -1075,7 +2359,389 @@ EnsureHudBridgeScript() {
         "    $reader = New-Object System.IO.StreamReader($stream)`n"
         "    $requestLine = $reader.ReadLine()`n"
         "    while ($true) { $line = $reader.ReadLine(); if ([string]::IsNullOrEmpty($line)) { break } }`n"
-        "    if ($requestLine -match 'GET\s+/pos\?left=([0-9.\-]+)&top=([0-9.\-]+)') {`n"
+        "    if ($requestLine -match 'GET\s+/settings\?([^\s]+)') {`n"
+        "      $query = $Matches[1]`n"
+        "      $pairs = $query -split '&'`n"
+        "      $lines = @('[Settings]')`n"
+        "      foreach ($pair in $pairs) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) {`n"
+        "          $k = [System.Uri]::UnescapeDataString($kv[0])`n"
+        "          $v = [System.Uri]::UnescapeDataString($kv[1])`n"
+        "          $lines += ($k + '=' + $v)`n"
+        "        }`n"
+        "      }`n"
+        "      try { [System.IO.File]::WriteAllLines($pendingFile, $lines, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/settings') {`n"
+        "      $json = '{`"ok`":true}'`n"
+        "      if (Test-Path -LiteralPath $settingsFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($settingsFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/norm/save\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveNorm=1' + [Environment]::NewLine + 'normOrigDate=' + $vals['orig'] + [Environment]::NewLine + 'normDate=' + $vals['date'] + [Environment]::NewLine + 'normPm=' + $vals['pm'] + [Environment]::NewLine + 'normValue=' + $vals['norm'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/norm') {`n"
+        "      $json = '{`"ok`":true,`"records`":[]}'`n"
+        "      if (Test-Path -LiteralPath $normFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($normFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/pmlogs/clear') {`n"
+        "      $json = '{`"ok`":true}'`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, '[Commands]`nclearPmLogs=1`n', [System.Text.Encoding]::Unicode) } catch {}`n"
+        "    } elseif ($requestLine -match 'GET\s+/reset/confirm') {`n"
+        "      $json = '{`"ok`":true}'`n"
+        "      try {`n"
+        "        $resetFile = Join-Path (Split-Path $cmdFile -Parent) 'hud_reset_pending.txt'`n"
+        "        [System.IO.File]::WriteAllText($resetFile, 'confirm', [System.Text.UTF8Encoding]::new($false))`n"
+        "      } catch {}`n"
+        "    } elseif ($requestLine -match 'GET\s+/reset/cancel') {`n"
+        "      $json = '{`"ok`":true}'`n"
+        "      try {`n"
+        "        $resetFile = Join-Path (Split-Path $cmdFile -Parent) 'hud_reset_pending.txt'`n"
+        "        [System.IO.File]::WriteAllText($resetFile, 'cancel', [System.Text.UTF8Encoding]::new($false))`n"
+        "      } catch {}`n"
+        "    } elseif ($requestLine -match 'GET\s+/pmlogs') {`n"
+        "      $json = '{`"ok`":true,`"records`":[]}'`n"
+        "      if (Test-Path -LiteralPath $pmFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($pmFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/daysoff/add\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'addDayOff=1' + [Environment]::NewLine + 'dayOffDate=' + $vals['date'] + [Environment]::NewLine + 'dayOffForum=' + $vals['forum'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/daysoff/delete\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'deleteDayOff=1' + [Environment]::NewLine + 'dayOffDates=' + $vals['dates'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/daysoff/forum\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'setDayOffForum=1' + [Environment]::NewLine + 'dayOffDates=' + $vals['dates'] + [Environment]::NewLine + 'dayOffUploaded=' + $vals['uploaded'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/daysoff') {`n"
+        "      $json = '{`"ok`":true,`"records`":[]}'`n"
+        "      if (Test-Path -LiteralPath $daysOffFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($daysOffFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/scripts/install\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'installScript=' + $vals['id'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/scripts/path\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveScriptsPath=' + $vals['path'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/scripts/topic\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'openScriptTopic=' + $vals['url'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/scripts') {`n"
+        "      $json = '{`"ok`":true,`"gamePath`":`"`",`"gameOk`":0,`"packages`":[]}'`n"
+        "      if (Test-Path -LiteralPath $scriptsFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($scriptsFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/punishments') {`n"
+        "      $json = '{`"ok`":true,`"records`":[]}'`n"
+        "      if (Test-Path -LiteralPath $punFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($punFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/toggle\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'setBindsEnabled=' + $vals['enabled'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/save\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $dataPath = Split-Path $cmdFile -Parent`n"
+        "      try { [System.IO.File]::WriteAllText((Join-Path $dataPath 'hud_binds_content.tmp'), [string]$vals['content'], [System.Text.UTF8Encoding]::new($false)) } catch {}`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveBind=1' + [Environment]::NewLine + 'bindType=' + $vals['type'] + [Environment]::NewLine + 'bindCategory=' + $vals['category'] + [Environment]::NewLine + 'bindName=' + $vals['name'] + [Environment]::NewLine + 'bindTrigger=' + $vals['trigger'] + [Environment]::NewLine + 'bindEnabled=' + $vals['enabled'] + [Environment]::NewLine + 'bindOriginalTrigger=' + $vals['originalTrigger'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/delete\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'deleteBind=' + $vals['triggers'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/enable\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'setBindEnabled=' + $vals['triggers'] + [Environment]::NewLine + 'bindEnabledValue=' + $vals['enabled'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/category/add\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'addBindCategory=' + $vals['name'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/category/toggle\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'setBindCategory=' + $vals['name'] + [Environment]::NewLine + 'bindCategoryEnabled=' + $vals['enabled'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds/category/delete\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'deleteBindCategory=' + $vals['name'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/binds') {`n"
+        "      $json = '{`"ok`":true,`"enabled`":0,`"categories`":[],`"binds`":[]}'`n"
+        "      if (Test-Path -LiteralPath $bindsFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($bindsFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/tester/toggle\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      $vals = @{}`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+    "      }`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'setTesterMode=' + $vals['enabled'] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/tester/check') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'checkTestUpdates=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/tester/download') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'downloadTestUpdate=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/tester/install') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'installTestUpdate=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/tester/rollback') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'rollbackStable=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/tester') {`n"
+    "      $json = '{`"ok`":true,`"enabled`":0,`"version`":`"`",`"info`":`"`"}'`n"
+    "      if (Test-Path -LiteralPath $testerFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($testerFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/updates/check') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'checkUpdates=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/updates/save\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      $vals = @{}`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+    "      }`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'setUpdateCheck=' + $vals['checkOnStartup'] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/updates/download') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'downloadUpdate=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/updates/install') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'installUpdate=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/updates') {`n"
+    "      $json = '{`"ok`":true,`"version`":`"`",`"latest`":`"`",`"hasUpdate`":0,`"required`":0,`"changelog`":[],`"download`":`"`",`"checkOnStartup`":1,`"lastCheck`":`"`",`"message`":`"`"}'`n"
+    "      if (Test-Path -LiteralPath $updatesFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($updatesFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/notifications/refresh') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'refreshNotifications=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/notifications/read') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'markNotificationsRead=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/notifications') {`n"
+    "      $json = '{`"ok`":true,`"items`":[]}'`n"
+    "      if (Test-Path -LiteralPath $notificationsFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($notificationsFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/cloud/check') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'checkCloud=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/cloud/nick\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      $vals = @{}`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+    "      }`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'setCloudNick=' + $vals['nick'] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/cloud') {`n"
+    "      $json = '{`"ok`":true,`"nick`":`"`",`"status`":`"pending`",`"message`":`"`",`"lastCheck`":`"`"}'`n"
+    "      if (Test-Path -LiteralPath $cloudFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($cloudFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/help/open') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'openErrorsLog=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/help/clear') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'clearErrorsLog=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/help') {`n"
+    "      $json = '{`"ok`":true,`"errors`":[]}'`n"
+    "      if (Test-Path -LiteralPath $helpFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($helpFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/ai/toggle\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      $vals = @{}`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+    "      }`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'setAiEnabled=' + $vals['enabled'] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/ai/provider\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      $vals = @{}`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+    "      }`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'setAiProvider=' + $vals['id'] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/ai/clear') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'clearAiHistory=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/ai/ask\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      $vals = @{}`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+    "      }`n"
+    "      try {`n"
+    "        if ($vals.ContainsKey('q')) { [System.IO.File]::WriteAllText($aiQuestionFile, $vals['q'], [System.Text.UTF8Encoding]::new($false)) }`n"
+    "      } catch {}`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'askAi=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/ai') {`n"
+    "      $json = '{`"ok`":true,`"enabled`":0,`"provider`":`"gemini`",`"busy`":0,`"history`":[],`"limitText`":`"`"}'`n"
+    "      if (Test-Path -LiteralPath $aiFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($aiFile, [System.Text.Encoding]::UTF8) } catch {`n"
+    "          try { $json = [System.IO.File]::ReadAllText($aiFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "        }`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/diagnostics/refresh') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'refreshDiagnostics=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/diagnostics') {`n"
+    "      $json = '{`"ok`":true,`"health`":`"ok`",`"healthMsg`":`"`",`"text`":`"`"}'`n"
+    "      if (Test-Path -LiteralPath $diagnosticsFile) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($diagnosticsFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/pos\?left=([0-9.\-]+)&top=([0-9.\-]+)') {`n"
         "      $left = $Matches[1]; $top = $Matches[2]`n"
         "      try {`n"
         "        $posJson = '{`"left`":' + $left + ',`"top`":' + $top + '}'`n"
@@ -1085,7 +2751,7 @@ EnsureHudBridgeScript() {
         "    } else {`n"
         "      $json = '{`"nick`":`"`",`"pm`":0,`"health`":`"ok`",`"message`":`"`",`"hud`":null}'`n"
         "      if (Test-Path -LiteralPath $stateFile) {`n"
-        "        try { $json = [System.IO.File]::ReadAllText($stateFile, [System.Text.UTF8Encoding]::new($false)) } catch {}`n"
+        "        try { $json = [System.IO.File]::ReadAllText($stateFile, [System.Text.Encoding]::Unicode) } catch {}`n"
         "      }`n"
         "    }`n"
         "    $body = [System.Text.Encoding]::UTF8.GetBytes($json)`n"
@@ -1131,15 +2797,40 @@ StopHudHttpBridge(*) {
 
 StartHudHttpBridge(*) {
     global hudBridgePid, hudBridgePidFile, hudBridgeScriptFile, hudBridgeStateFile, hudBridgePosFile, hudBridgePort
+    global hudBridgeSettingsFile, hudBridgePendingSettingsFile, hudBridgePunishmentsFile, hudBridgePmLogsFile
+    global hudBridgeCommandFile, hudBridgeNormFile, hudBridgeDaysoffFile, hudBridgeScriptsFile
+    global hudBridgeBindsFile, hudBridgeTesterFile
+    global hudBridgeUpdatesFile, hudBridgeNotificationsFile, hudBridgeCloudFile, hudBridgeHelpFile, hudBridgeDiagnosticsFile
+    global hudBridgeAiFile, hudBridgeAiQuestionFile
 
     StopHudHttpBridge()
     WriteHudBridgeState()
+    WriteSettingsState()
+    WritePunishmentsState()
+    WritePmLogsState()
+    WriteNormHistoryState()
+    WriteDaysoffState()
+    WriteScriptsState()
+    WriteBindsState()
+    WriteTesterState()
+    WriteUpdatesState()
+    WriteNotificationsState()
+    WriteCloudState()
+    WriteHelpState()
+    WriteDiagnosticsState()
+    WriteAiState()
     EnsureHudBridgeScript()
 
     try {
         ; Hidden PowerShell HttpListener — ничего дополнительно ставить не нужно
         cmd := 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'
-            . hudBridgeScriptFile '" "' hudBridgeStateFile '" "' hudBridgePosFile '"'
+            . hudBridgeScriptFile '" "' hudBridgeStateFile '" "' hudBridgePosFile '" "'
+            . hudBridgeSettingsFile '" "' hudBridgePendingSettingsFile '" "' hudBridgePunishmentsFile '" "'
+            . hudBridgePmLogsFile '" "' hudBridgeCommandFile '" "' hudBridgeNormFile '" "'
+            . hudBridgeDaysoffFile '" "' hudBridgeScriptsFile '" "' hudBridgeBindsFile '" "' hudBridgeTesterFile '" "'
+            . hudBridgeUpdatesFile '" "' hudBridgeNotificationsFile '" "' hudBridgeCloudFile '" "'
+            . hudBridgeHelpFile '" "' hudBridgeDiagnosticsFile '" "'
+            . hudBridgeAiFile '" "' hudBridgeAiQuestionFile '"'
         Run(cmd, , "Hide", &pid)
         hudBridgePid := pid
         try {
@@ -1147,10 +2838,375 @@ StartHudHttpBridge(*) {
             f.Write(String(pid))
             f.Close()
         }
-        ; На всякий случай обновляем state раз в секунду
-        SetTimer(WriteHudBridgeState, 1000)
+        ; На всякий случай обновляем state и настройки раз в секунду
+        SetTimer(UpdateHudBridgeState, 1000)
+        SetTimer(CheckPendingSettings, 250)
+        SetTimer(CheckPendingCommands, 250)
+        SetTimer(CheckPendingReset, 200)
     } catch as err {
         LogError("StartHudHttpBridge", "Не удалось запустить HTTP-мост HUD", err.Message)
+    }
+}
+
+; Команды от панели (GET /pmlogs/clear → hud_commands.ini)
+CheckPendingReset(*) {
+    global hudBridgeResetPendingFile
+
+    if !FileExist(hudBridgeResetPendingFile)
+        return
+    action := ""
+    try {
+        action := Trim(FileRead(hudBridgeResetPendingFile, "UTF-8"))
+    } catch {
+        action := ""
+    }
+    try {
+        if FileExist(hudBridgeResetPendingFile)
+            FileDelete(hudBridgeResetPendingFile)
+    } catch {
+    }
+    if (action = "confirm")
+        DoManualNormReset()
+    else if (action = "cancel")
+        CancelPendingNormReset()
+}
+
+CheckPendingCommands(*) {
+    global hudBridgeCommandFile
+
+    try {
+        if !FileExist(hudBridgeCommandFile)
+            return
+        if IniRead(hudBridgeCommandFile, "Commands", "clearPmLogs", "") = "1" {
+            ClearPmLogsFromPanel()
+        }
+        setBindsEnabled := IniRead(hudBridgeCommandFile, "Commands", "setBindsEnabled", "")
+        if (setBindsEnabled != "") {
+            SetBindsEnabledFromPanel(setBindsEnabled)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "saveNorm", "") = "1" {
+            origDate := Trim(IniRead(hudBridgeCommandFile, "Commands", "normOrigDate", ""))
+            newDate := Trim(IniRead(hudBridgeCommandFile, "Commands", "normDate", ""))
+            newPmRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "normPm", ""))
+            newNormRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "normValue", ""))
+            if (origDate != "" && newDate != "" && newPmRaw != "" && newNormRaw != "") {
+                SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "addDayOff", "") = "1" {
+            dayOffDate := Trim(IniRead(hudBridgeCommandFile, "Commands", "dayOffDate", ""))
+            dayOffForum := Trim(IniRead(hudBridgeCommandFile, "Commands", "dayOffForum", "0"))
+            if (dayOffDate != "") {
+                AddDayOffFromPanel(dayOffDate, dayOffForum)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "deleteDayOff", "") = "1" {
+            deleteDates := Trim(IniRead(hudBridgeCommandFile, "Commands", "dayOffDates", ""))
+            if (deleteDates != "") {
+                DeleteDayOffFromPanel(deleteDates)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "setDayOffForum", "") = "1" {
+            forumDates := Trim(IniRead(hudBridgeCommandFile, "Commands", "dayOffDates", ""))
+            forumUploaded := Trim(IniRead(hudBridgeCommandFile, "Commands", "dayOffUploaded", "0"))
+            if (forumDates != "") {
+                SetDayOffForumFromPanel(forumDates, forumUploaded)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "installScript", "") != "" {
+            installScriptId := Trim(IniRead(hudBridgeCommandFile, "Commands", "installScript", ""))
+            if (installScriptId != "") {
+                InstallScriptPackageFromPanel(installScriptId)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "saveScriptsPath", "") != "" {
+            scriptsPathRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "saveScriptsPath", ""))
+            if (scriptsPathRaw != "") {
+                SaveScriptsPathFromPanel(scriptsPathRaw)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "openScriptTopic", "") != "" {
+            topicUrl := Trim(IniRead(hudBridgeCommandFile, "Commands", "openScriptTopic", ""))
+            if (topicUrl != "") {
+                OpenScriptTopic(topicUrl)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "saveBind", "") = "1" {
+            bindType := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindType", ""))
+            bindCategory := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindCategory", ""))
+            bindName := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindName", ""))
+            bindTrigger := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindTrigger", ""))
+            bindEnabled := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindEnabled", ""))
+            bindOriginalTrigger := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindOriginalTrigger", ""))
+            bindContent := ""
+            try {
+                if FileExist(hudBridgeBindsContentFile)
+                    bindContent := FileRead(hudBridgeBindsContentFile, "UTF-8")
+            }
+            SaveBindFromPanel(bindType, bindCategory, bindName, bindTrigger, bindContent, bindEnabled, bindOriginalTrigger)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "deleteBind", "") != "" {
+            deleteBindTriggers := Trim(IniRead(hudBridgeCommandFile, "Commands", "deleteBind", ""))
+            if (deleteBindTriggers != "") {
+                DeleteBindsFromPanel(deleteBindTriggers)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "setBindEnabled", "") != "" {
+            enableBindTriggers := Trim(IniRead(hudBridgeCommandFile, "Commands", "setBindEnabled", ""))
+            enableBindValue := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindEnabledValue", ""))
+            if (enableBindTriggers != "") {
+                SetBindEnabledFromPanel(enableBindTriggers, enableBindValue)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "addBindCategory", "") != "" {
+            newCategoryName := Trim(IniRead(hudBridgeCommandFile, "Commands", "addBindCategory", ""))
+            if (newCategoryName != "") {
+                AddBindCategoryFromPanel(newCategoryName)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "setBindCategory", "") != "" {
+            toggleCategoryName := Trim(IniRead(hudBridgeCommandFile, "Commands", "setBindCategory", ""))
+            toggleCategoryValue := Trim(IniRead(hudBridgeCommandFile, "Commands", "bindCategoryEnabled", "0"))
+            if (toggleCategoryName != "") {
+                SetBindCategoryEnabledFromPanel(toggleCategoryName, toggleCategoryValue)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "deleteBindCategory", "") != "" {
+            deleteCategoryName := Trim(IniRead(hudBridgeCommandFile, "Commands", "deleteBindCategory", ""))
+            if (deleteCategoryName != "") {
+                DeleteBindCategoryFromPanel(deleteCategoryName)
+            }
+        }
+        setTesterMode := IniRead(hudBridgeCommandFile, "Commands", "setTesterMode", "")
+        if (setTesterMode != "") {
+            ToggleTesterModeFromPanel(setTesterMode)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "checkTestUpdates", "") = "1" {
+            CheckTestUpdatesFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "downloadTestUpdate", "") = "1" {
+            DownloadTestUpdateFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "installTestUpdate", "") = "1" {
+            InstallTestUpdateFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "rollbackStable", "") = "1" {
+            RollbackToStableReleaseFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "checkUpdates", "") = "1" {
+            CheckUpdatesFromPanel()
+        }
+        setUpdateCheck := IniRead(hudBridgeCommandFile, "Commands", "setUpdateCheck", "")
+        if (setUpdateCheck != "") {
+            SetUpdateCheckFromPanel(setUpdateCheck)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "downloadUpdate", "") = "1" {
+            DownloadUpdateFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "installUpdate", "") = "1" {
+            InstallUpdateFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "refreshNotifications", "") = "1" {
+            RefreshNotificationsFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "markNotificationsRead", "") = "1" {
+            MarkNotificationsReadFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "checkCloud", "") = "1" {
+            CheckCloudFromPanel()
+        }
+        setCloudNick := Trim(IniRead(hudBridgeCommandFile, "Commands", "setCloudNick", ""))
+        if (setCloudNick != "") {
+            SetCloudNickFromPanel(setCloudNick)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "openErrorsLog", "") = "1" {
+            OpenErrorsLogFile()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "clearErrorsLog", "") = "1" {
+            ClearErrorsLogFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "refreshDiagnostics", "") = "1" {
+            RefreshDiagnosticsFromPanel()
+        }
+        setAiEnabled := IniRead(hudBridgeCommandFile, "Commands", "setAiEnabled", "")
+        if (setAiEnabled != "") {
+            SetAiEnabledFromPanel(setAiEnabled)
+        }
+        setAiProvider := Trim(IniRead(hudBridgeCommandFile, "Commands", "setAiProvider", ""))
+        if (setAiProvider != "") {
+            SetAiProviderFromPanel(setAiProvider)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "clearAiHistory", "") = "1" {
+            ClearAiHistoryFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "askAi", "") = "1" {
+            AskAiFromPanel()
+        }
+    } catch as err {
+        LogError("CheckPendingCommands", "Не удалось разобрать команды из панели", err.Message)
+    }
+
+    try {
+        if FileExist(hudBridgeCommandFile)
+            FileDelete(hudBridgeCommandFile)
+    }
+}
+
+; Применение настроек, присланных панелью (GET /settings?k=v → hud_settings_pending.ini)
+CheckPendingSettings(*) {
+    global hudBridgePendingSettingsFile, settingsFile
+    global nick, userNick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
+    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled
+
+    if !FileExist(hudBridgePendingSettingsFile)
+        return
+
+    try {
+        newNick := IniRead(hudBridgePendingSettingsFile, "Settings", "nick", "")
+        newNorm := IniRead(hudBridgePendingSettingsFile, "Settings", "norm", "")
+        newAutoReset := IniRead(hudBridgePendingSettingsFile, "Settings", "autoReset", "")
+        newStartWithWindows := IniRead(hudBridgePendingSettingsFile, "Settings", "startWithWindows", "")
+        newHours := IniRead(hudBridgePendingSettingsFile, "Settings", "hours", "")
+        newMinutes := IniRead(hudBridgePendingSettingsFile, "Settings", "minutes", "")
+        newMenuKey := IniRead(hudBridgePendingSettingsFile, "Settings", "menuKey", "")
+        newResetKey := IniRead(hudBridgePendingSettingsFile, "Settings", "resetKey", "")
+        newAiKey := IniRead(hudBridgePendingSettingsFile, "Settings", "aiKey", "")
+        newMenuKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "menuKeyEnabled", "")
+        newResetKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "resetKeyEnabled", "")
+        newAiKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "aiKeyEnabled", "")
+    } catch as err {
+        return
+    }
+
+    ; применяем только те, что реально пришли (пустая строка = не менять)
+    changed := false
+    try {
+        if (newNick != "") {
+            if (Trim(newNick) != nick) {
+                nick := Trim(newNick)
+                userNick := nick
+                changed := true
+            }
+        }
+        if (newNorm != "" && RegExMatch(newNorm, "^\d+$")) {
+            newNormVal := Integer(newNorm)
+            if (newNormVal != norm) {
+                norm := newNormVal
+                changed := true
+            }
+        }
+        if (newAutoReset != "" && RegExMatch(newAutoReset, "^\d+$")) {
+            newAr := Integer(newAutoReset)
+            if (newAr != autoResetEnabled) {
+                autoResetEnabled := newAr
+                changed := true
+            }
+        }
+        if (newStartWithWindows != "" && RegExMatch(newStartWithWindows, "^\d+$")) {
+            newSw := Integer(newStartWithWindows)
+            if (newSw != startWithWindows) {
+                startWithWindows := newSw
+                try SetWindowsStartup(startWithWindows)
+                changed := true
+            }
+        }
+        if (newHours != "" && RegExMatch(newHours, "^\d+$")) {
+            newH := Integer(newHours)
+            if (newH < 0)
+                newH := 0
+            if (newH > 23)
+                newH := 23
+            if (newH != resetHour) {
+                resetHour := newH
+                changed := true
+            }
+        }
+        if (newMinutes != "" && RegExMatch(newMinutes, "^\d+$")) {
+            newM := Integer(newMinutes)
+            if (newM < 0)
+                newM := 0
+            if (newM > 59)
+                newM := 59
+            if (newM != resetMinute) {
+                resetMinute := newM
+                changed := true
+            }
+        }
+        if (newMenuKey != "") {
+            if (newMenuKey != menuKey) {
+                menuKey := newMenuKey
+                changed := true
+            }
+        }
+        if (newResetKey != "") {
+            if (newResetKey != resetKey) {
+                resetKey := newResetKey
+                changed := true
+            }
+        }
+        if (newAiKey != "") {
+            if (newAiKey != aiKey) {
+                aiKey := newAiKey
+                changed := true
+            }
+        }
+        if (newMenuKeyEnabled != "" && RegExMatch(newMenuKeyEnabled, "^\d+$")) {
+            newMke := Integer(newMenuKeyEnabled)
+            if (newMke != menuKeyEnabled) {
+                menuKeyEnabled := newMke
+                changed := true
+            }
+        }
+        if (newResetKeyEnabled != "" && RegExMatch(newResetKeyEnabled, "^\d+$")) {
+            newRke := Integer(newResetKeyEnabled)
+            if (newRke != resetKeyEnabled) {
+                resetKeyEnabled := newRke
+                changed := true
+            }
+        }
+        if (newAiKeyEnabled != "" && RegExMatch(newAiKeyEnabled, "^\d+$")) {
+            newAke := Integer(newAiKeyEnabled)
+            if (newAke != aiKeyEnabled) {
+                aiKeyEnabled := newAke
+                changed := true
+            }
+        }
+    } catch as err {
+        LogError("CheckPendingSettings", "Не удалось разобрать настройки из панели", err.Message)
+    }
+
+    if (changed) {
+        ; сохраняем в settings.ini, пере-регистрируем хоткеи и обновляем state
+        try {
+            IniWrite(nick, settingsFile, "Main", "nick")
+            IniWrite(norm, settingsFile, "Main", "norm")
+            IniWrite(autoResetEnabled, settingsFile, "Main", "autoResetEnabled")
+            IniWrite(startWithWindows, settingsFile, "Launcher", "startWithWindows")
+            IniWrite(resetHour, settingsFile, "Main", "resetHour")
+            IniWrite(resetMinute, settingsFile, "Main", "resetMinute")
+            IniWrite(menuKey, settingsFile, "Keys", "menuKey")
+            IniWrite(resetKey, settingsFile, "Keys", "resetKey")
+            IniWrite(aiKey, settingsFile, "Keys", "aiKey")
+            IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
+            IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
+            IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
+        } catch as err {
+            LogError("CheckPendingSettings", "Ошибка записи settings.ini", err.Message)
+        }
+        try {
+            RegisterHotkeys()
+        } catch as err {
+            LogError("CheckPendingSettings", "Ошибка регистрации хоткеев из панели", err.Message)
+        }
+        UpdatePMDisplay()
+        WriteHudBridgeState()
+        WriteSettingsState()
+        ShowToast("✓ Настройки из панели применены", 1800)
+    }
+
+    try {
+        if FileExist(hudBridgePendingSettingsFile)
+            FileDelete(hudBridgePendingSettingsFile)
     }
 }
 
@@ -1626,83 +3682,6 @@ NormalizePunishmentDurationMinutes(duration) {
     return duration
 }
 
-UpdatePunishmentTypeButtons(days, search := "") {
-    global PunishmentButtonCtrls
-
-    types := GetPunishmentTypes()
-    for _, type in types
-    {
-        buttonLabel := (type = "all") ? "Все" : type
-        buttonText := buttonLabel " (" CountPunishmentsByType(type, days, search) ")"
-        if (PunishmentButtonCtrls.Has(type) && IsObject(PunishmentButtonCtrls[type]))
-            PunishmentButtonCtrls[type].Text := buttonText
-    }
-    UpdatePunishmentFilterStyles()
-}
-
-UpdatePunishmentFilterStyles() {
-    global PunishmentButtonCtrls, PunishmentPeriodButtonCtrls
-    global selectedPunishmentType, selectedPunishmentDays
-    global colorAccent, colorCardAlt, colorText
-
-    selectedType := NormalizePunishmentType(selectedPunishmentType)
-    for typeName, ctrl in PunishmentButtonCtrls {
-        if !IsObject(ctrl)
-            continue
-        bg := (typeName = selectedType) ? colorAccent : colorCardAlt
-        try {
-            ctrl.Opt("Background" bg " c" colorText)
-            ctrl.SetFont("s9 Bold c" colorText, "Segoe UI")
-        }
-    }
-
-    for daysKey, ctrl in PunishmentPeriodButtonCtrls {
-        if !IsObject(ctrl)
-            continue
-        bg := ((daysKey + 0) = (selectedPunishmentDays + 0)) ? colorAccent : colorCardAlt
-        try {
-            ctrl.Opt("Background" bg " c" colorText)
-            ctrl.SetFont("s9 Bold c" colorText, "Segoe UI")
-        }
-    }
-}
-
-RenderPunishmentView(*) {
-    global selectedPunishmentType, selectedPunishmentDays, punishmentSearch
-    global SettingsGui, PunishmentSearchCtrl, PunishmentTypeTitleCtrl, PunishmentDetailsCtrl
-
-    if IsObject(SettingsGui) {
-        try values := SettingsGui.Submit(false)
-        if IsSet(values) && values.HasOwnProp("PunishmentSearch")
-            punishmentSearch := values.PunishmentSearch
-    } else if IsObject(PunishmentSearchCtrl) {
-        punishmentSearch := PunishmentSearchCtrl.Value
-    }
-
-    details := BuildPunishmentTypeDetails(selectedPunishmentType, selectedPunishmentDays, punishmentSearch)
-    UpdatePunishmentTypeButtons(selectedPunishmentDays, punishmentSearch)
-    if IsObject(PunishmentTypeTitleCtrl)
-        PunishmentTypeTitleCtrl.Text := "Тип: " (NormalizePunishmentType(selectedPunishmentType) = "all" ? "все" : NormalizePunishmentType(selectedPunishmentType)) " / " GetPunishmentPeriodText(selectedPunishmentDays)
-    if IsObject(PunishmentDetailsCtrl)
-        PunishmentDetailsCtrl.Value := details
-}
-
-ShowPunishmentType(type, *) {
-    global selectedPunishmentType
-
-    selectedPunishmentType := NormalizePunishmentType(type)
-    RenderPunishmentView()
-}
-
-SetPunishmentPeriod(days, *) {
-    global selectedPunishmentDays
-
-    selectedPunishmentDays := days
-    RenderPunishmentView()
-}
-; =========================
-; 📊 SAVE STATS (с защитой от дублей)
-; =========================
 GetHistorySaveDate() {
     completedGameDay := DateAdd(A_Now, -1, "Days")
     return FormatTime(completedGameDay, "yyyy-MM-dd")
@@ -1823,36 +3802,6 @@ BuildPmLogsText(search := "") {
     return logsText
 }
 
-ConfirmClearData(filePath, title, refreshCallback := "") {
-    global punishmentTotals
-    message := "Очистить данные раздела " . Chr(34) . title . Chr(34) . "?`nЭто действие нельзя отменить."
-    result := ShowAppDialog("Подтверждение очистки", message, "OKCancel")
-    if (result != "OK")
-        return
-
-    if !CreateBackupBeforeClear(filePath)
-        return
-
-    try {
-        file := FileOpen(filePath, "w")
-        file.Close()
-    } catch as err {
-        LogError("ConfirmClearData", "Ошибка очистки файла: " filePath, err.Message)
-        MsgBox("Не удалось очистить файл:`n" filePath "`n`n" err.Message, "Ошибка", "Iconx")
-        return
-    }
-
-    if (refreshCallback = "RefreshPMLogsAfterClear")
-        RefreshPMLogsAfterClear()
-    else if (refreshCallback = "FillNormHistoryList")
-        FillNormHistoryList()
-    else if (refreshCallback = "RenderPunishmentView") {
-        punishmentTotals := CreatePunishmentTotals()
-        RenderPunishmentView()
-        UpdatePMDisplay()
-    }
-}
-
 CreateBackupBeforeClear(filePath) {
     global backupPath
 
@@ -1900,28 +3849,6 @@ GetBackupFileName(filePath) {
         return "days_off_" timestamp ".csv"
 
     return ""
-}
-
-ClearPMLogs(*) {
-    global pmLogsFile
-    ConfirmClearData(pmLogsFile, "PM Логи", "RefreshPMLogsAfterClear")
-}
-
-RefreshPMLogsAfterClear() {
-    global PmLogsTextCtrl, PMLogsSearchCtrl
-
-    if IsObject(PmLogsTextCtrl)
-        PmLogsTextCtrl.Value := BuildPmLogsText(IsObject(PMLogsSearchCtrl) ? PMLogsSearchCtrl.Value : "")
-}
-
-ClearNormHistory(*) {
-    global historyFile
-    ConfirmClearData(historyFile, "История нормы", "FillNormHistoryList")
-}
-
-ClearPunishments(*) {
-    global punishmentsFile
-    ConfirmClearData(punishmentsFile, "Наказания", "RenderPunishmentView")
 }
 
 NormalizeDayOffDate(value) {
@@ -2043,54 +3970,6 @@ MaybeRotateDaysOffMonthly() {
     try IniWrite(currentMonth, settingsFile, "Main", "lastDaysOffMonth")
 }
 
-AddDayOff(*) {
-    global daysOffFile, DaysOffDateCtrl, DaysOffForumCtrl
-
-    if !IsObject(DaysOffDateCtrl)
-        return
-
-    dayOffDate := NormalizeDayOffDate(DaysOffDateCtrl.Value)
-    if (dayOffDate = "") {
-        ShowAppDialog("Отгулы", "Введите дату в формате yyyy-MM-dd.")
-        return
-    }
-
-    if IsDayOff(dayOffDate) {
-        ShowAppDialog("Отгулы", "Отгул на эту дату уже добавлен.")
-        return
-    }
-
-    forumUploaded := (IsObject(DaysOffForumCtrl) && DaysOffForumCtrl.Value) ? 1 : 0
-    if !TryFileAppend(FormatDayOffRecord(dayOffDate, forumUploaded) "`n", daysOffFile, "AddDayOff", "Ошибка записи days_off.csv")
-        return
-    DaysOffDateCtrl.Value := ""
-    if IsObject(DaysOffForumCtrl)
-        DaysOffForumCtrl.Value := 0
-    UpdateDayOffForumStatus()
-    FillDaysOffList()
-    FillNormHistoryList()
-    RefreshNormDaysOffInfo()
-}
-
-GetSelectedDayOffDates() {
-    global DaysOffListCtrl
-
-    dates := []
-
-    if !IsObject(DaysOffListCtrl)
-        return dates
-
-    row := 0
-    while (row := DaysOffListCtrl.GetNext(row)) {
-        dayOffDate := NormalizeDayOffDate(DaysOffListCtrl.GetText(row, 1))
-        if (dayOffDate != "")
-            dates.Push(dayOffDate)
-    }
-
-    return dates
-}
-
-
 WriteDayOffRecords(records, source := "WriteDayOffRecords") {
     global daysOffFile
 
@@ -2105,110 +3984,6 @@ WriteDayOffRecords(records, source := "WriteDayOffRecords") {
         MsgBox("Не удалось сохранить список отгулов.`n`n" err.Message, "Ошибка", "Iconx")
         return false
     }
-}
-
-DeleteSelectedDayOff(*) {
-    global DaysOffListCtrl
-
-    if !IsObject(DaysOffListCtrl)
-        return
-
-    selectedDates := GetSelectedDayOffDates()
-    if (selectedDates.Length = 0) {
-        ShowAppDialog("Отгулы", "Выберите один или несколько отгулов для удаления.")
-        return
-    }
-
-    message := (selectedDates.Length = 1)
-        ? "Удалить отгул за " selectedDates[1] "?"
-        : "Удалить выбранные отгулы: " selectedDates.Length " шт.?"
-
-    result := ShowAppDialog("Удаление отгула", message, "OKCancel")
-    if (result != "OK")
-        return
-
-    newRecords := []
-    for _, record in GetDayOffRecords() {
-        if !ArrayHasValue(selectedDates, record["date"])
-            newRecords.Push(record)
-    }
-
-    if !WriteDayOffRecords(newRecords, "DeleteSelectedDayOff")
-        return
-
-    FillDaysOffList()
-    FillNormHistoryList()
-}
-
-
-SetSelectedDayOffForumStatus(uploaded, *) {
-    selectedDates := GetSelectedDayOffDates()
-    if (selectedDates.Length = 0) {
-        ShowAppDialog("Отгулы", "Выберите дату отгула в списке.")
-        return
-    }
-
-    records := GetDayOffRecords()
-    for _, record in records {
-        if ArrayHasValue(selectedDates, record["date"])
-            record["forumUploaded"] := uploaded ? 1 : 0
-    }
-
-    if !WriteDayOffRecords(records, "SetSelectedDayOffForumStatus")
-        return
-
-    FillDaysOffList()
-}
-
-ToggleSelectedDayOffForumStatus(*) {
-    selectedDates := GetSelectedDayOffDates()
-    if (selectedDates.Length = 0)
-        return
-
-    records := GetDayOffRecords()
-    for _, record in records {
-        if ArrayHasValue(selectedDates, record["date"])
-            record["forumUploaded"] := record["forumUploaded"] ? 0 : 1
-    }
-
-    if !WriteDayOffRecords(records, "ToggleSelectedDayOffForumStatus")
-        return
-
-    FillDaysOffList()
-}
-
-FillDaysOffList() {
-    global daysOffFile, DaysOffListCtrl
-
-    if !IsObject(DaysOffListCtrl)
-        return
-
-    DaysOffListCtrl.Delete()
-    lines := []
-
-    for _, record in GetDayOffRecords()
-        lines.Push(FormatDayOffRecord(record["date"], record["forumUploaded"]))
-
-    lines := SortRecordsNewestFirst(lines, "dayoff")
-    for _, line in lines {
-        record := ParseDayOffRecord(line)
-        if IsObject(record) {
-            forumText := record["forumUploaded"] ? "Залито" : "Не залито"
-            DaysOffListCtrl.Add(, record["date"], forumText)
-        }
-    }
-    RefreshNormDaysOffInfo()
-}
-
-UpdateDayOffForumStatus(*) {
-    global DaysOffForumCtrl, DaysOffForumStatusCtrl, colorGreen, colorRed
-
-    if !IsObject(DaysOffForumStatusCtrl)
-        return
-
-    uploaded := IsObject(DaysOffForumCtrl) && DaysOffForumCtrl.Value
-    DaysOffForumStatusCtrl.Text := uploaded ? "На форуме залито" : "Не залито"
-    DaysOffForumStatusCtrl.SetFont("s9 Bold c" (uploaded ? colorGreen : colorRed), "Segoe UI")
 }
 
 ; =========================
@@ -3488,263 +5263,42 @@ CheckAutoReset(*) {
 ; 04. HUD actions
 ; ------------------------------------------------------------
 
-; =========================
-; 👁 TOGGLE GUI
-; =========================
-; ------------------------------------------------------------
-; 05. Settings window
-; ------------------------------------------------------------
-
-; =========================
-; 📂 SETTINGS MENU
-; =========================
-OpenMenu(*) {
-    global SettingsGui, settingsMenuHidden, settingsMenuBuilding, lastMenuOpenTick, menuX, menuY
-
-    if (settingsMenuBuilding)
-        return
-
-    if IsObject(SettingsGui) {
-        if (A_TickCount - lastMenuOpenTick < 500)
-            return
-        if (settingsMenuHidden) {
-            SettingsGui.Show("w920 h590 x" menuX " y" menuY)
-            settingsMenuHidden := false
-            lastMenuOpenTick := A_TickCount
-            return
-        }
-        CloseSettings()
-        return
-    }
-
-    BuildMainWindow("Dashboard")
-}
-
-BuildMainWindow(initialView := "Dashboard") {
-    global SettingsGui, settingsMenuHidden, settingsMenuBuilding, lastMenuOpenTick, GuiViewCtrls, NavButtonCtrls, NavIndicatorCtrls, CurrentView
-    global menuX, menuY, appVersion, colorBg, colorSidebar, colorText, colorMuted, colorCard, colorCardAlt, colorRed, colorGreen
-    global NotificationButtonCtrl, NotificationIndicatorCtrl
-
-    if (settingsMenuBuilding)
-        return
-
-    settingsMenuBuilding := true
-    Critical("On")
-
-    SaveMenuPosition()
-    SafeDestroyGui(&SettingsGui)
-    settingsMenuHidden := false
-    ResetDashboardControls()
-    ResetDiagnosticsControls()
-    ResetCloudControls()
-    ResetNotificationControls()
-    GuiViewCtrls := Map()
-    NavButtonCtrls := Map()
-    NavIndicatorCtrls := Map()
-    CurrentView := ""
-
-    SettingsGui := Gui("+Border -Caption", "ChesNova " appVersion)
-    SettingsGui.OnEvent("Close", CloseSettings)
-    SettingsGui.BackColor := colorBg
-    SettingsGui.MarginX := 0
-    SettingsGui.MarginY := 0
-    SettingsGui.SetFont("s10 c" colorText, "Segoe UI")
-
-    windowHeight := 590
-    ; Верхняя строка и левая панель повторяют структуру макета.
-    SettingsGui.Add("Text", "x0 y0 w920 h28 Background" colorCard)
-    SettingsGui.Add("Text", "x0 y28 w216 h" (windowHeight - 28) " Background" colorSidebar)
-    SettingsGui.Add("Text", "x216 y28 w704 h" (windowHeight - 28) " Background" colorBg)
-    SettingsGui.Add("Text", "x0 y27 w920 h1 Background" uiDivider)
-    SettingsGui.Add("Text", "x215 y28 w1 h" (windowHeight - 28) " Background" uiDivider)
-    SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
-    SettingsGui.Add("Text", "x18 y5 w300 h18 Background" colorCard, "ChesNova " appVersion)
-    SettingsGui.SetFont("s10 Bold c" colorText, "Segoe UI")
-    cloudBtn := SettingsGui.Add("Text", "x704 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "☁")
-    BindTextButton(cloudBtn, colorCardAlt, (*) => ShowView("Cloud"))
-    diagnosticsBtn := SettingsGui.Add("Text", "x670 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "D")
-    BindTextButton(diagnosticsBtn, colorCardAlt, (*) => ShowView("Diagnostics"))
-    settingsBtn := SettingsGui.Add("Text", "x738 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "⚙")
-    BindTextButton(settingsBtn, colorCardAlt, (*) => ShowView("Settings"))
-    NotificationButtonCtrl := SettingsGui.Add("Text", "x772 y3 w30 h22 +0x200 Center Background" colorCardAlt " c" colorText, "🔔")
-    BindTextButton(NotificationButtonCtrl, colorCardAlt, OpenNotifications)
-    NotificationButtonCtrl.SetFont("s10 Norm c" colorText, "Segoe UI Emoji")
-    NotificationIndicatorCtrl := SettingsGui.Add("Text", "x794 y2 w7 h8 +0x200 Center Background" colorCardAlt " c" colorGreen, "●")
-    NotificationIndicatorCtrl.SetFont("s6 Bold c" colorGreen, "Segoe UI")
-    hideWindowBtn := SettingsGui.Add("Text", "x846 y3 w32 h22 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x2212))
-    BindTextButton(hideWindowBtn, colorCardAlt, HideSettingsMenu)
-    closeWindowBtn := SettingsGui.Add("Text", "x882 y3 w32 h22 +0x200 Center Background" colorCardAlt " c" colorText, Chr(0x00D7))
-    BindTextButton(closeWindowBtn, colorCardAlt, CloseSettings)
-
-    ; Сайдбар: сверху частое, снизу редкое
-    BuildNavButton("Dashboard", "⌂   Главная", 48)
-    BuildNavButton("Punishments", "⚖   Наказания", 88)
-    BuildNavButton("PMLogs", "▤   PM логи", 128)
-    BuildNavButton("NormHistory", "◷   Норма", 168)
-    BuildNavButton("DaysOff", "☀   Отгулы", 208)
-    BuildNavButton("Binds", "⌨   Бинды", 248)
-    BuildNavButton("Scripts", "✦   Скрипты", 288)
-    BuildNavButton("Tester", "🧪  Тестировщик", 328)
-    BuildNavButton("Updates", "↻   Обновления", windowHeight - 82)
-    BuildNavButton("Help", "?   Помощь", windowHeight - 42)
-
-    DashboardView()
-    PMLogsView()
-    PunishmentsView()
-    NormHistoryView()
-    DaysOffView()
-    BindsView()
-    SettingsView()
-    UpdatesView()
-    HelpView()
-    CloudView()
-    DiagnosticsView()
-    ScriptsViewCompact()
-    TesterView()
-    UpdateNotificationIndicator()
-
-    if (menuX = "Center")
-        SettingsGui.Show("w920 h" windowHeight " xCenter yCenter")
-    else
-        SettingsGui.Show("w920 h" windowHeight " x" menuX " y" menuY)
-    ShowView(initialView)
-    lastMenuOpenTick := A_TickCount
-    settingsMenuBuilding := false
-    Critical("Off")
-}
-
-BuildNavButton(viewName, label, y) {
-    global SettingsGui, NavButtonCtrls, NavIndicatorCtrls, colorSidebar, colorMuted
-
-    SettingsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
-    ctrl := SettingsGui.Add("Text", "x24 y" y " w178 h34 +0x200 Background" colorSidebar, "  " label)
-    ctrl.OnEvent("Click", (*) => ShowView(viewName))
-    NavButtonCtrls[viewName] := ctrl
-    indicator := SettingsGui.Add("Text", "x14 y" (y + 6) " w3 h22 Background" colorSidebar)
-    NavIndicatorCtrls[viewName] := indicator
-    return ctrl
-}
-
-BuildSidebarActionButton(label, y, callback) {
-    global SettingsGui, colorCard, colorMuted
-
-    SettingsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
-    ctrl := SettingsGui.Add("Text", "x24 y" y " w178 h34 +0x200 Background" colorCard, "  " label)
-    BindTextButton(ctrl, colorCard, callback)
-    return ctrl
-}
-
-AddViewControl(viewName, controlType, options, text := "") {
-    global SettingsGui, GuiViewCtrls
-
-    if (!GuiViewCtrls.Has(viewName))
-        GuiViewCtrls[viewName] := []
-
-    ctrl := SettingsGui.Add(controlType, options, text)
-    GuiViewCtrls[viewName].Push(ctrl)
-    return ctrl
-}
-
-ShowView(viewName, *) {
-    global GuiViewCtrls, NavButtonCtrls, NavIndicatorCtrls, CurrentView
-    global selectedPunishmentDays, selectedPunishmentType, punishmentSearch
-    global PmLogsTextCtrl, PMLogsSearchCtrl
-    global colorAccent, colorText, colorMuted, colorSidebar, colorCardAlt
-
-    if (!GuiViewCtrls.Has(viewName))
-        return
-
-    for name, ctrls in GuiViewCtrls {
-        for _, ctrl in ctrls
-            ctrl.Visible := (name = viewName)
-    }
-
-    for name, ctrl in NavButtonCtrls {
-        if (name = viewName) {
-            ctrl.Opt("Background" colorCardAlt " c" colorText)
-            ctrl.SetFont("s10 Bold c" colorText, "Segoe UI")
-            if NavIndicatorCtrls.Has(name)
-                NavIndicatorCtrls[name].Opt("Background" colorAccent)
-        } else {
-            ctrl.Opt("Background" colorSidebar " c" colorMuted)
-            ctrl.SetFont("s10 Norm c" colorMuted, "Segoe UI")
-            if NavIndicatorCtrls.Has(name)
-                NavIndicatorCtrls[name].Opt("Background" colorSidebar)
-        }
-    }
-
-    CurrentView := viewName
-
-    if (viewName = "Dashboard")
-        RefreshDashboardView()
-    else if (viewName = "PMLogs" && IsObject(PmLogsTextCtrl))
-        PmLogsTextCtrl.Value := BuildPmLogsText(IsObject(PMLogsSearchCtrl) ? PMLogsSearchCtrl.Value : "")
-    else if (viewName = "Punishments") {
-        UpdatePunishmentTypeButtons(selectedPunishmentDays, punishmentSearch)
-        ShowPunishmentType(selectedPunishmentType)
-    } else if (viewName = "NormHistory")
-        FillNormHistoryList()
-    else if (viewName = "DaysOff")
-        FillDaysOffList()
-    else if (viewName = "Binds")
-        RefreshBindsList()
-    else if (viewName = "Settings")
-        RefreshSettingsView()
-    else if (viewName = "Updates")
-        RefreshUpdatesView()
-    else if (viewName = "Help")
-        RefreshErrorsLogView()
-    else if (viewName = "Cloud")
-        RefreshCloudView()
-    else if (viewName = "Diagnostics")
-        RefreshDiagnosticsView()
-    else if (viewName = "Scripts")
-        RefreshScriptsView()
-    else if (viewName = "Tester")
-        RefreshTesterView()
-}
-
-; =========================
-; 🛠️ SCRIPTS
-; Реестр пакетов: чтобы добавить новый скрипт, достаточно добавить ещё
-; одну карту в GetScriptPackages() — интерфейс и установщик останутся общими.
-; =========================
 GetScriptPackages() {
     return [
         Map(
             "id", "atools",
             "displayTitle", "aTools",
             "author", "Anthony Fernandez",
-            "title", "🛠️ aTools",
-            "description", "Установка необходимых файлов для работы aTools и _otools.",
-            "authors", "aTools — Anthony Fernandez`n_otools — Takumi Onishi",
+            "title", "aTools",
+            "description", "Основные команды:`n/wh`n/ddl`n/unl`n/trec`n`nПолная информация на форуме.",
+            "authors", "Anthony Fernandez",
             "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
             "files", [
                 Map("name", "aTools.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/aTools.asi", "relativePath", "aTools.asi")
             ],
-            "activationCommands", ""
+            "activationCommands", "/wh  /ddl  /unl  /trec"
         ),
         Map(
             "id", "onishi",
             "displayTitle", "Onishi",
             "author", "Takumi Onishi",
             "title", "Onishi",
-            "description", "Onishi script with loader (скрипты уже в loader-js.json).",
+            "description", "Основные команды:`n/onishi`n`nПри запущенной игре .asi может быть занят — _otools.js ставится в uiresources\\scripts.",
             "authors", "Takumi Onishi",
             "topic", "https://forum.radmir.games/threads/instrumenty-dlya-administratsii.2840899/",
             "files", [
-                Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi"),
+                Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js"),
                 Map("name", "loader-js.json", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/loader-js.json", "relativePath", "loader-js.json"),
-                Map("name", "_otools.js", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/_otools.js", "relativePath", "uiresources\scripts\_otools.js")
+                Map("name", "loader-js.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/loader-js.asi", "relativePath", "loader-js.asi")
             ],
-            "activationCommands", ""
+            "activationCommands", "/onishi"
         ),
         Map(
             "id", "fpsunlocker",
             "displayTitle", "FPSUnlocker",
             "author", "Misha Ches",
             "title", "FPSUnlocker",
-            "description", "Разблокировка FPS для более плавной игры.",
+            "description", "Снимает ограничитель FPS.",
             "authors", "Misha Ches",
             "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/FPSUnlock.asi",
             "files", [
@@ -3757,7 +5311,7 @@ GetScriptPackages() {
             "displayTitle", "CamHunt",
             "author", "Misha Ches",
             "title", "CamHunt",
-            "description", "Камхак CamHunt. Установщик добавляет только недостающие файлы.",
+            "description", "Свободная камера.`nИспользуется исключительно для съёмок контента.",
             "authors", "Misha Ches",
             "topic", "https://github.com/MishaChes/ChesNova/tree/main/files/CamHunt",
             "skipExisting", true,
@@ -3781,25 +5335,39 @@ GetScriptPackages() {
             "displayTitle", "Погода/Время",
             "author", "Misha Ches",
             "title", "Погода/Время",
-            "description", "Скрипт погоды и времени с конфигурационным файлом.",
+            "description", "Меняет вашу погоду и время, не затрагивая серверные команды.`n`nОсновные команды:`n/st  /sw",
             "authors", "Misha Ches",
             "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/weather_time.asi",
             "files", [
                 Map("name", "weather_time.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/weather_time.asi", "relativePath", "weather_time.asi"),
                 Map("name", "weather_time.ini", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/weather_time.ini", "relativePath", "weather_time.ini")
             ],
-            "activationCommands", ""
+            "activationCommands", "/st  /sw"
         ),
         Map(
             "id", "clientside",
             "displayTitle", "clientside.dll",
             "author", "Юсиф",
             "title", "clientside.dll",
-            "description", "Новый скрипт для crashlog'ов.",
+            "description", "Логирует доп. информацию в краш-лог.",
             "authors", "Юсиф",
             "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/clientside.dll",
             "files", [
                 Map("name", "clientside.dll", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/clientside.dll", "relativePath", "clientside.dll")
+            ],
+            "activationCommands", ""
+        ),
+        Map(
+            "id", "tracer",
+            "displayTitle", "Трасера",
+            "author", "Юра",
+            "title", "Трасера",
+            "description", "Отображает трасер пуль.",
+            "authors", "Юра",
+            "topic", "https://github.com/MishaChes/ChesNova/blob/main/files/BulletTrace.asi",
+            "files", [
+                Map("name", "BulletTrace.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/BulletTrace.asi", "relativePath", "BulletTrace.asi"),
+                Map("name", "BulletTrace.json", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/BulletTrace.json", "relativePath", "BulletTrace.json")
             ],
             "activationCommands", ""
         )
@@ -3818,10 +5386,6 @@ GetScriptPackageById(packageId) {
 ; 🆕 VERSION CHECK
 ; Отдельный модуль: в будущем сюда можно добавить скачивание и автоустановку.
 ; =========================
-CheckForUpdatesManual(*) {
-    CheckForUpdates(true)
-}
-
 CheckForUpdates(manual := false) {
     global CURRENT_VERSION
 
@@ -3831,13 +5395,9 @@ CheckForUpdates(manual := false) {
             throw Error("В version.json отсутствует поле latest.")
 
         if (CompareVersions(versionInfo["latest"], CURRENT_VERSION) > 0)
-            ShowUpdateDialog(versionInfo)
-        else if manual
-            ShowAppDialog("Обновления", "У вас уже установлена последняя версия: v" CURRENT_VERSION ".")
+            LogError("CheckForUpdates", "Доступна новая версия: v" versionInfo["latest"])
     } catch as err {
         LogError("CheckForUpdates", "Не удалось проверить наличие обновлений", err.Message)
-        if manual
-            ShowAppDialog("Обновления", "Не удалось проверить обновления. Проверьте подключение к интернету и повторите попытку.")
     }
 }
 
@@ -3906,64 +5466,9 @@ CompareVersions(firstVersion, secondVersion) {
     return 0
 }
 
-ShowUpdateDialog(versionInfo) {
-    global CURRENT_VERSION, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorRed
-
-    lineBreak := Chr(10)
-    changelogText := ""
-    for _, entry in versionInfo["changelog"]
-        changelogText .= "• " entry lineBreak
-    if (changelogText = "")
-        changelogText := "• Список изменений не указан." lineBreak
-
-    isRequired := versionInfo["required"]
-    dlgHeight := isRequired ? 330 : 300
-    dlg := Gui("+Border", "Обновление ChesNova")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-    dlg.Add("Text", "x0 y0 w520 h" dlgHeight " Background" colorBg)
-    dlg.Add("Text", "x18 y18 w484 h" (dlgHeight - 90) " Background" colorCard)
-    dlg.SetFont("s13 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y34 w400 h28 Background" colorCard, "🆕 Доступна новая версия ChesNova")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y74 w400 h42 Background" colorCard, "Текущая версия: v" CURRENT_VERSION lineBreak "Новая версия: v" versionInfo["latest"])
-    dlg.SetFont("s10 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y128 w180 h20 Background" colorCard, "Что нового:")
-    dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y152 w430 h" (isRequired ? 100 : 76) " Background" colorCard, RTrim(changelogText, lineBreak))
-    startupLaterButton := dlg.Add("Text", "x206 y" (dlgHeight - 52) " w128 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Позже")
-    BindTextButton(startupLaterButton, colorCardAlt, (*) => dlg.Destroy())
-    startupUpdateButton := dlg.Add("Text", "x346 y" (dlgHeight - 52) " w136 h30 +0x200 Center Background" colorAccent " c" colorText, "Обновить")
-    BindTextButton(startupUpdateButton, colorAccent, StartManualUpdateFromDialog.Bind(dlg))
-
-    if isRequired {
-        dlg.SetFont("s9 Bold c" colorRed, "Segoe UI")
-        dlg.Add("Text", "x38 y" (dlgHeight - 112) " w280 h20 Background" colorCard, "Это обязательное обновление")
-        downloadButton := dlg.Add("Text", "x314 y" (dlgHeight - 52) " w168 h30 +0x200 Center Background" colorAccent " c" colorText, "📥 Скачать")
-    } else {
-        laterButton := dlg.Add("Text", "x206 y" (dlgHeight - 52) " w128 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Позже")
-        BindTextButton(laterButton, colorCardAlt, (*) => dlg.Destroy())
-        downloadButton := dlg.Add("Text", "x346 y" (dlgHeight - 52) " w136 h30 +0x200 Center Background" colorAccent " c" colorText, "📥 Скачать")
-    }
-
-    BindTextButton(downloadButton, colorAccent, OpenUpdateDownload.Bind(versionInfo["download"], dlg))
-    downloadButton.Visible := false
-    if IsSet(laterButton)
-        laterButton.Visible := false
-    dlg.Show("w520 h" dlgHeight)
-    try WinActivate(dlg.Hwnd)
-}
-
-StartManualUpdateFromDialog(dlg, *) {
-    try dlg.Destroy()
-    ManualUpdateChesNova()
-}
-
 OpenUpdateDownload(downloadUrl, dlg := "", *) {
     if (downloadUrl = "") {
-        ShowAppDialog("Обновления", "В version.json не указана ссылка для скачивания.")
+        LogError("OpenUpdateDownload", "В version.json не указана ссылка для скачивания")
         return
     }
 
@@ -3973,92 +5478,7 @@ OpenUpdateDownload(downloadUrl, dlg := "", *) {
             dlg.Destroy()
     } catch as err {
         LogError("OpenUpdateDownload", "Не удалось открыть ссылку на обновление", err.Message)
-        ShowAppDialog("Обновления", "Не удалось открыть ссылку для скачивания." Chr(10) Chr(10) err.Message)
     }
-}
-
-DownloadLatestUpdate(*) {
-    try {
-        versionInfo := ParseVersionManifest(DownloadVersionManifest())
-        OpenUpdateDownload(versionInfo["download"])
-    } catch as err {
-        LogError("DownloadLatestUpdate", "Не удалось получить ссылку на обновление", err.Message)
-        ShowAppDialog("Обновления", "Не удалось получить ссылку на обновление." Chr(10) Chr(10) err.Message)
-    }
-}
-
-ManualUpdateChesNova(*) {
-    global basePath, backupPath, CURRENT_VERSION
-
-    mainScript := basePath "\ChesNova.ahk"
-    newScript := basePath "\ChesNova_new.ahk"
-    updateUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/ChesNova.ahk"
-
-    try {
-        if !FileExist(mainScript)
-            throw Error("Текущий файл ChesNova.ahk не найден.")
-
-        versionInfo := ParseVersionManifest(DownloadVersionManifest())
-        if (versionInfo["latest"] = "")
-            throw Error("В version.json отсутствует поле latest.")
-        if (CompareVersions(versionInfo["latest"], CURRENT_VERSION) <= 0) {
-            ShowAppDialog("Обновления", "У вас уже установлена последняя версия: v" CURRENT_VERSION ".")
-            return
-        }
-
-        if FileExist(newScript)
-            FileDelete(newScript)
-
-        ; The working file remains untouched until the complete new file is on disk.
-        Download(updateUrl, newScript)
-        if !FileExist(newScript) || FileGetSize(newScript) = 0
-            throw Error("Загруженный файл пустой.")
-
-        DirCreate(backupPath)
-        backupFile := backupPath "\ChesNova_" FormatTime(A_Now, "yyyy-MM-dd_HH-mm-ss") ".ahk"
-        FileCopy(mainScript, backupFile, 0)
-
-        try {
-            FileDelete(mainScript)
-            FileMove(newScript, mainScript, 0)
-        } catch as installErr {
-            ; If replacing fails, immediately restore the known-working backup.
-            if !FileExist(mainScript) && FileExist(backupFile)
-                FileCopy(backupFile, mainScript, 1)
-            throw installErr
-        }
-    } catch as err {
-        if FileExist(newScript)
-            try FileDelete(newScript)
-        LogError("ManualUpdateChesNova", "Не удалось установить обновление", err.Message)
-        MsgBox("Не удалось загрузить обновление.`n`nПроверьте подключение к интернету.", "ChesNova", "Iconx")
-        return
-    }
-
-    ShowUpdateInstalledDialog()
-}
-
-ShowUpdateInstalledDialog() {
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    dlg := Gui("+Border", "Обновление ChesNova")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.Add("Text", "x0 y0 w560 h208 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w524 h126 Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y34 w460 h26 Background" colorCard, "✅ Обновление успешно загружено.")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y74 w460 h42 Background" colorCard, "Для применения изменений необходимо перезапустить ChesNova.")
-    dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
-    laterButton := dlg.Add("Text", "x250 y160 w108 h30 +0x200 Center Background" colorCardAlt, "Позже")
-    BindTextButton(laterButton, colorCardAlt, (*) => dlg.Destroy())
-    restartButton := dlg.Add("Text", "x370 y160 w172 h30 +0x200 Center Background" colorAccent, "Перезапустить сейчас")
-    BindTextButton(restartButton, colorAccent, RestartChesNova.Bind(dlg))
-    dlg.OnEvent("Close", (*) => dlg.Destroy())
-    dlg.Show("w560 h208")
-    try WinActivate(dlg.Hwnd)
 }
 
 RestartChesNova(dlg := "", *) {
@@ -4086,7 +5506,6 @@ PromptRestartAfterUpdate(title, message) {
     if (result = "Yes")
         RestartChesNova()
 }
-
 LoadNotificationsCache() {
     global notificationsCacheFile, notifications
 
@@ -4247,64 +5666,6 @@ MarkNotificationsRead() {
         SaveNotificationStates()
 }
 
-ClearNotifications(*) {
-    global notifications, notificationStates, NotificationsGui
-
-    for _, notification in notifications {
-        id := notification["id"]
-        if !notificationStates.Has(id)
-            notificationStates[id] := Map("received", A_Now, "read", 1, "dismissed", 1)
-        else {
-            notificationStates[id]["read"] := 1
-            notificationStates[id]["dismissed"] := 1
-        }
-    }
-
-    SaveNotificationStates()
-    UpdateNotificationIndicator()
-    SafeDestroyGui(&NotificationsGui)
-    OpenNotifications()
-}
-
-OpenNotifications(*) {
-    global NotificationsGui, notifications, notificationStates
-    global colorBg, colorCardAlt, colorAccent, colorText, colorMuted
-
-    MarkNotificationsRead()
-    UpdateNotificationIndicator()
-    SafeDestroyGui(&NotificationsGui)
-
-    visibleNotifications := GetVisibleNotifications()
-    visibleNotificationCount := CountVisibleNotifications()
-
-    NotificationsGui := Gui("+Border", "Уведомления")
-    NotificationsGui.BackColor := colorBg
-    NotificationsGui.MarginX := 0
-    NotificationsGui.MarginY := 0
-    NotificationsGui.SetFont("s10 c" colorText, "Segoe UI")
-    NotificationsGui.Add("Text", "x0 y0 w560 h530 Background" colorBg)
-    NotificationsGui.SetFont("s14 Bold c" colorText, "Segoe UI")
-    NotificationsGui.Add("Text", "x24 y20 w400 h28 Background" colorBg, "🔔 Уведомления (" visibleNotificationCount ")")
-    NotificationsGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    NotificationsGui.Add("Text", "x24 y54 w500 h20 Background" colorBg, "Последние 10 уведомлений. Новые отображаются сверху.")
-
-    if (visibleNotifications.Length = 0) {
-        NotificationsGui.SetFont("s10 Norm c" colorMuted, "Segoe UI")
-        NotificationsGui.Add("Text", "x24 y112 w512 h350 +0x200 Center Background" colorBg, "Уведомлений пока нет.")
-    } else {
-        NotificationsGui.SetFont("s10 Norm c" colorText, "Segoe UI")
-        feedText := BuildNotificationsFeed(visibleNotifications)
-        NotificationsGui.Add("Edit", "x24 y88 w512 h374 +ReadOnly +VScroll -HScroll Background" colorBg " c" colorText, feedText)
-    }
-
-    clearButton := NotificationsGui.Add("Text", "x270 y478 w126 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
-    BindTextButton(clearButton, colorCardAlt, ClearNotifications)
-    closeButton := NotificationsGui.Add("Text", "x408 y478 w128 h30 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
-    BindTextButton(closeButton, colorAccent, (*) => SafeDestroyGui(&NotificationsGui))
-    NotificationsGui.OnEvent("Close", (*) => SafeDestroyGui(&NotificationsGui))
-    NotificationsGui.Show("w560 h530")
-}
-
 CountVisibleNotifications() {
     global notifications, notificationStates
 
@@ -4404,113 +5765,6 @@ FormatNotificationDate(dateValue) {
     return FormatTime(dateValue, "dd.MM.yyyy • HH:mm")
 }
 
-ScriptsView() {
-    global ScriptsGamePathCtrl, ScriptPackageStatusCtrls, scriptsGamePath
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
-
-    view := "Scripts"
-    ScriptPackageStatusCtrls := Map()
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Скрипты")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y84 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры. Автопоиск пути не используется.")
-
-    ; Путь + действия в одну линию (x250..x850)
-    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w340 h28 c" colorText " Background" uiInputBg, scriptsGamePath)
-    pathButton := AddViewControl(view, "Text", "x598 y112 w118 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Папка")
-    BindTextButton(pathButton, colorCardAlt, SelectScriptsGamePath)
-    checkButton := AddViewControl(view, "Text", "x724 y112 w126 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить")
-    BindTextButton(checkButton, colorCardAlt, CheckScriptPackages)
-
-    cardH := 64
-    cardGap := 8
-    startY := 150
-    for index, package in GetScriptPackages() {
-        cardY := startY + ((index - 1) * (cardH + cardGap))
-        ; Карточка
-        AddViewControl(view, "Text", "x250 y" cardY " w600 h" cardH " Background" colorCard)
-        AddViewControl(view, "Text", "x250 y" cardY " w4 h" cardH " Background" colorAccent)
-
-        ; Верхний ряд: название | статус | установить
-        AddViewControl(view, "Text", "x272 y" (cardY + 8) " w200 h20 Background" colorCard " c" colorText, package["displayTitle"])
-        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x480 y" (cardY + 10) " w180 h18 Background" colorCard " c" colorRed, "●")
-        installButton := AddViewControl(view, "Text", "x678 y" (cardY + 6) " w152 h28 +0x200 Center Background" colorAccent " c" colorText, "Установить")
-        BindTextButton(installButton, colorAccent, InstallScriptPackage.Bind(package["id"]))
-
-        ; Нижний ряд: автор / заметка | ссылка
-        note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
-        if (package["id"] = "onishi")
-            note := "Loader + json, без //loader"
-        AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
-        AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
-        topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
-        BindTextButton(topicButton, colorCardAlt, OpenScriptTopic.Bind(package["topic"]))
-    }
-
-    RefreshScriptsView()
-}
-
-
-
-ScriptsViewCompact() {
-    global ScriptsGamePathCtrl, ScriptPackageStatusCtrls, scriptsGamePath
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
-
-    view := "Scripts"
-    ScriptPackageStatusCtrls := Map()
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Скрипты")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y84 w600 h20 Background" colorBg " c" colorMuted, "Укажите корень игры. Автопоиск пути не используется.")
-
-    ; Путь + действия в одну линию (x250..x850)
-    ScriptsGamePathCtrl := AddViewControl(view, "Edit", "x250 y112 w340 h28 c" colorText " Background" uiInputBg, scriptsGamePath)
-    pathButton := AddViewControl(view, "Text", "x598 y112 w118 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Папка")
-    BindTextButton(pathButton, colorCardAlt, SelectScriptsGamePath)
-    checkButton := AddViewControl(view, "Text", "x724 y112 w126 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить")
-    BindTextButton(checkButton, colorCardAlt, CheckScriptPackages)
-
-    cardH := 64
-    cardGap := 8
-    startY := 150
-    for index, package in GetScriptPackages() {
-        cardY := startY + ((index - 1) * (cardH + cardGap))
-        ; Карточка
-        AddViewControl(view, "Text", "x250 y" cardY " w600 h" cardH " Background" colorCard)
-        AddViewControl(view, "Text", "x250 y" cardY " w4 h" cardH " Background" colorAccent)
-
-        ; Верхний ряд: название | статус | установить
-        AddViewControl(view, "Text", "x272 y" (cardY + 8) " w200 h20 Background" colorCard " c" colorText, package["displayTitle"])
-        ScriptPackageStatusCtrls[package["id"]] := AddViewControl(view, "Text", "x480 y" (cardY + 10) " w180 h18 Background" colorCard " c" colorRed, "●")
-        installButton := AddViewControl(view, "Text", "x678 y" (cardY + 6) " w152 h28 +0x200 Center Background" colorAccent " c" colorText, "Установить")
-        BindTextButton(installButton, colorAccent, InstallScriptPackage.Bind(package["id"]))
-
-        ; Нижний ряд: автор / заметка | ссылка
-        note := package.Has("skipExisting") && package["skipExisting"] ? "Только недостающие файлы" : "Отдельный пакет"
-        if (package["id"] = "onishi")
-            note := "Loader + json, без //loader"
-        AddViewControl(view, "Text", "x272 y" (cardY + 38) " w250 h18 Background" colorCard " c" colorMuted, "Автор: " package["author"])
-        AddViewControl(view, "Text", "x520 y" (cardY + 38) " w150 h18 Background" colorCard " c" colorMuted, note)
-        topicButton := AddViewControl(view, "Text", "x678 y" (cardY + 36) " w152 h24 +0x200 Center Background" colorCardAlt " c" colorText, "Ссылка")
-        BindTextButton(topicButton, colorCardAlt, OpenScriptTopic.Bind(package["topic"]))
-    }
-
-    RefreshScriptsView()
-}
-
-
-
-SelectScriptsGamePath(*) {
-    global ScriptsGamePathCtrl, scriptsGamePath, settingsFile
-
-    selectedPath := FileSelect("D", scriptsGamePath, "Выберите корень игры")
-    if (selectedPath = "")
-        return
-
-    scriptsGamePath := RTrim(selectedPath, "\/")
-    if IsObject(ScriptsGamePathCtrl)
-        ScriptsGamePathCtrl.Value := scriptsGamePath
-    TryIniWrite(scriptsGamePath, settingsFile, "Scripts", "gamePath", "SelectScriptsGamePath")
-}
-
 GetScriptsGamePath() {
     global ScriptsGamePathCtrl, scriptsGamePath, settingsFile
 
@@ -4532,580 +5786,53 @@ GetScriptsGamePath() {
 GetScriptPackageInstallStatus(package) {
     gamePath := GetScriptsGamePath()
     if (gamePath = "")
-        return Map("installed", false, "text", "● Не установлен — укажите путь к игре.", "color", "FF5B6B")
+        return Map("installed", false, "text", "Не установлен — укажите путь к игре.", "color", "FF5B6B")
 
     missingFiles := []
     for _, file in package["files"] {
-        if !FileExist(gamePath "\" file["relativePath"])
+        rel := StrReplace(file["relativePath"], "/", "\")
+        while InStr(rel, "\\")
+            rel := StrReplace(rel, "\\", "\")
+        path := gamePath "\" rel
+        ; Папка с именем файла (баг старых установок) ≠ установленный файл
+        if !FileExist(path) || DirExist(path)
             missingFiles.Push(file["name"])
     }
 
     if (missingFiles.Length = 0)
-        return Map("installed", true, "text", "● Установлен", "color", "41D07A")
+        return Map("installed", true, "text", "Установлен", "color", "41D07A")
 
-    return Map("installed", false, "text", "● Не установлен: " JoinArrayRange(missingFiles, 1, missingFiles.Length, ", "), "color", "FF5B6B")
-}
-
-RefreshScriptsView(*) {
-    global ScriptPackageStatusCtrls
-
-    for _, package in GetScriptPackages() {
-        if !ScriptPackageStatusCtrls.Has(package["id"])
-            continue
-
-        status := GetScriptPackageInstallStatus(package)
-        ctrl := ScriptPackageStatusCtrls[package["id"]]
-        ctrl.Text := status["installed"] ? "● Установлен" : "● Не установлен"
-        ctrl.SetFont("s9 Bold c" status["color"], "Segoe UI")
-    }
-}
-
-CheckScriptPackages(*) {
-    missingPackages := []
-    installedPackages := []
-    lineBreak := Chr(10)
-
-    for _, package in GetScriptPackages() {
-        status := GetScriptPackageInstallStatus(package)
-        if status["installed"]
-            installedPackages.Push(package["title"])
-        else
-            missingPackages.Push(package["title"] lineBreak status["text"])
-    }
-
-    RefreshScriptsView()
-    ShowScriptCheckResultDialog(installedPackages, missingPackages)
+    return Map("installed", false, "text", "Не установлен: " JoinArrayRange(missingFiles, 1, missingFiles.Length, ", "), "color", "FF5B6B")
 }
 
 
-ShowScriptCheckResultDialog(installedPackages, missingPackages) {
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
+SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw) {
+    global historyFile
 
-    lineBreak := Chr(10)
-    hasMissing := missingPackages.Length > 0
-    body := hasMissing
-        ? "Требуется установка:" lineBreak lineBreak JoinArrayRange(missingPackages, 1, missingPackages.Length, lineBreak lineBreak)
-        : "Установлено:" lineBreak lineBreak JoinArrayRange(installedPackages, 1, installedPackages.Length, lineBreak)
-
-    dlg := Gui("+Border", "Проверка скриптов")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-
-    dlg.Add("Text", "x0 y0 w560 h360 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w524 h278 Background" colorCard)
-    dlg.SetFont("s12 Bold c" (hasMissing ? colorRed : colorGreen), "Segoe UI")
-    dlg.Add("Text", "x38 y34 w460 h26 Background" colorCard, hasMissing ? "⚠️ Требуется установка" : "✅ Все скрипты установлены")
-    dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
-    resultText := dlg.Add("Edit", "x38 y72 w484 h196 ReadOnly -Wrap +VScroll Background" uiInputBg " cFFFFFF", body)
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y272 w484 h18 Background" colorCard, "Если список длинный, используйте прокрутку внутри поля.")
-    closeButton := dlg.Add("Text", "x414 y314 w108 h28 +0x200 Center Background" colorAccent " c" colorText, "OK")
-    BindTextButton(closeButton, colorAccent, (*) => dlg.Destroy())
-    dlg.OnEvent("Close", (*) => dlg.Destroy())
-    dlg.Show("w560 h360")
-}
-
-OpenScriptTopic(url, *) {
-    try Run(url)
-    catch as err
-        ShowAppDialog("Скрипты", "Не удалось открыть официальную тему.`n`n" err.Message)
-}
-
-IsGameProcessRunning() {
-    ; Типичные процессы SA-MP / Radmir / GTA SA
-    processNames := [
-        "gta_sa.exe",
-        "gta-sa.exe",
-        "samp.exe",
-        "samp_debug.exe",
-        "proxy_sa.exe",
-        "ragemp_v.exe",
-        "multiplayer_sa.exe"
-    ]
-    for _, name in processNames {
-        if ProcessExist(name)
-            return true
-    }
-    try {
-        if WinExist("ahk_exe gta_sa.exe") || WinExist("ahk_exe gta-sa.exe")
-            return true
-    }
-    return false
-}
-
-InstallScriptPackage(packageId, *) {
-    global dataPath
-
-    package := GetScriptPackageById(packageId)
-    if !IsObject(package) {
-        ShowAppDialog("Скрипты", "Пакет скрипта не найден.")
-        return
-    }
-
-    gamePath := GetScriptsGamePath()
-    if (gamePath = "") {
-        ShowAppDialog("Скрипты", "⚠️ Укажите путь к корню игры.")
-        return
-    }
-    if !DirExist(gamePath) {
-        ShowAppDialog("Скрипты", "Указанная папка игры не найдена:`n" gamePath)
-        return
-    }
-
-    if IsGameProcessRunning() {
-        result := ShowAppDialog(
-            "Скрипты",
-            "Игра сейчас запущена.`n`nЗакройте GTA / Radmir полностью, затем нажмите OK, чтобы продолжить установку.`nИначе файлы могут быть заняты и установка не завершится.",
-            "OKCancel"
-        )
-        if (result != "OK")
-            return
-        if IsGameProcessRunning() {
-            ShowAppDialog("Скрипты", "Игра всё ещё запущена.`nЗакройте её и повторите установку.")
-            return
-        }
-    }
-
-    uiResourcesPath := gamePath "\uiresources"
-    scriptsPath := uiResourcesPath "\scripts"
-    try {
-        if !DirExist(uiResourcesPath)
-            DirCreate(uiResourcesPath)
-        if !DirExist(scriptsPath)
-            DirCreate(scriptsPath)
-    } catch as err {
-        LogError("InstallScriptPackage", "Не удалось создать папки для пакета " packageId, err.Message)
-        ShowAppDialog("Скрипты", "Не удалось создать папки uiresources и scripts.`nПроверьте доступ к папке игры.`n`n" err.Message)
-        return
-    }
-
-    downloadedFiles := []
-    downloadsPath := dataPath "\downloads"
-    DirCreate(downloadsPath)
-    try {
-        for index, file in package["files"] {
-            tempFile := downloadsPath "\ChesNova_" package["id"] "_" A_TickCount "_" index ".tmp"
-            Download(file["url"], tempFile)
-            downloadedFiles.Push(Map("temp", tempFile, "file", file))
-        }
-    } catch as err {
-        for _, downloaded in downloadedFiles {
-            try FileDelete(downloaded["temp"])
-        }
-        LogError("InstallScriptPackage", "Не удалось скачать файл " file["name"], err.Message)
-        ShowAppDialog("Скрипты", "Не удалось скачать файл " file["name"] ".`nПроверьте подключение к интернету и повторите попытку.`n`n" err.Message)
-        return
-    }
-
-    try {
-        for _, downloaded in downloadedFiles {
-            destination := gamePath "\" downloaded["file"]["relativePath"]
-            destinationDir := RegExReplace(destination, "\\[^\\]+$")
-            if !DirExist(destinationDir)
-                DirCreate(destinationDir)
-            if (package.Has("skipExisting") && package["skipExisting"] && FileExist(destination)) {
-                try FileDelete(downloaded["temp"])
-                continue
-            }
-            FileMove(downloaded["temp"], destination, 1)
-        }
-    } catch as err {
-        for _, downloaded in downloadedFiles {
-            if FileExist(downloaded["temp"])
-                try FileDelete(downloaded["temp"])
-        }
-        LogError("InstallScriptPackage", "Не удалось установить пакет " packageId " в " gamePath, err.Message)
-        ShowAppDialog("Скрипты", "Не удалось записать файлы в папку игры.`nПроверьте доступ к папке и закройте игру, если файлы заняты.`n`n" err.Message)
-        return
-    }
-
-    RefreshScriptsView()
-    if (package["activationCommands"] != "")
-        ShowScriptInstallComplete(package)
-    else
-        ShowToast("✓ Пакет установлен")
-}
-
-ShowScriptInstallComplete(package) {
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    dlg := Gui("+Border", "Скрипты — установка")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-    dlg.Add("Text", "x0 y0 w470 h262 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w434 h178 Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y34 w360 h26 Background" colorCard, "✅ Установка завершена.")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y72 w380 h40 Background" colorCard, "Для активации скрипта зайдите в игру и выполните команды:")
-    commandsCtrl := dlg.Add("Edit", "x38 y120 w380 h50 ReadOnly -Wrap Background" uiInputBg " cFFFFFF", package["activationCommands"])
-    copyButton := dlg.Add("Text", "x38 y212 w190 h30 +0x200 Center Background" colorAccent " c" colorText, "📋 Скопировать команды")
-    BindTextButton(copyButton, colorAccent, (*) => CopyScriptCommands(package["activationCommands"]))
-    closeButton := dlg.Add("Text", "x310 y212 w108 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Закрыть")
-    BindTextButton(closeButton, colorCardAlt, (*) => dlg.Destroy())
-    dlg.OnEvent("Close", (*) => dlg.Destroy())
-    dlg.Show("w470 h262")
-    try WinActivate(dlg.Hwnd)
-}
-
-CopyScriptCommands(commands, *) {
-    A_Clipboard := commands
-    ShowToast("✓ Команды скопированы")
-}
-
-DashboardView() {
-    global DashboardNickCtrl, DashboardSystemStatusCtrl, DashboardCloudStatusCtrl, DashboardNormCtrl, DashboardVersionCtrl
-    global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardNormPercentCtrl, DashboardProgressBgCtrl, DashboardProgressFillCtrl, DashboardLogFileCtrl, DashboardDaysOffMonthCtrl
-    global DashboardStatusChatlogCtrl, DashboardStatusGameCtrl, DashboardStatusHudCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorYellow
-
-    view := "Dashboard"
-
-    ; Заголовок
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Главная")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-
-    ; Профиль
-    AddViewControl(view, "Text", "x250 y94 w600 h88 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y108 w220 h20 Background" colorCard " c" colorMuted, "Администратор")
-    DashboardNickCtrl := AddViewControl(view, "Text", "x270 y130 w400 h28 Background" colorCard " c" colorAccent " +0x200", "")
-    AddViewControl(view, "Text", "x270 y160 w200 h18 Background" colorCard " c" colorGreen, "• Профиль активен")
-
-    ; Норма
-    AddViewControl(view, "Text", "x250 y198 w290 h108 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y214 w190 h20 Background" colorCard " c" colorMuted, "📨 Норма PM")
-    DashboardNormPmCtrl := AddViewControl(view, "Text", "x270 y238 w240 h28 Background" colorCard " c" colorAccent " +0x200", "")
-    DashboardNormRemainingCtrl := AddViewControl(view, "Text", "x270 y270 w240 h22 Background" colorCard " c" colorMuted, "")
-
-    ; Отгулы
-    AddViewControl(view, "Text", "x560 y198 w290 h108 Background" colorCard)
-    AddViewControl(view, "Text", "x580 y214 w200 h20 Background" colorCard " c" colorMuted, "🏖 Отгулы за месяц")
-    DashboardDaysOffMonthCtrl := AddViewControl(view, "Text", "x580 y238 w210 h28 Background" colorCard " c" colorGreen " +0x200", "")
-    AddViewControl(view, "Text", "x580 y270 w220 h22 Background" colorCard " c" colorMuted, "Текущий календарный месяц")
-
-    ; Статус системы — три пункта в столбик
-    AddViewControl(view, "Text", "x250 y322 w290 h168 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y336 w240 h20 Background" colorCard " c" colorMuted, "🛡 Статус системы")
-    DashboardStatusChatlogCtrl := AddViewControl(view, "Text", "x270 y366 w250 h24 Background" colorCard " c" colorMuted " +0x200", "●  chatlog")
-    DashboardStatusGameCtrl := AddViewControl(view, "Text", "x270 y398 w250 h24 Background" colorCard " c" colorMuted " +0x200", "●  корень игры")
-    DashboardStatusHudCtrl := AddViewControl(view, "Text", "x270 y430 w250 h24 Background" colorCard " c" colorMuted " +0x200", "●  счётчик в игре")
-    ; legacy aliases (не показываем, но Refresh не падает)
-    DashboardSystemStatusCtrl := DashboardStatusChatlogCtrl
-    DashboardLogFileCtrl := DashboardStatusGameCtrl
-
-    ; Cloud
-    AddViewControl(view, "Text", "x560 y322 w290 h168 Background" colorCard)
-    AddViewControl(view, "Text", "x580 y336 w220 h20 Background" colorCard " c" colorMuted, "☁ Cloud")
-    DashboardCloudStatusCtrl := AddViewControl(view, "Text", "x580 y380 w250 h28 Background" colorCard " c" colorAccent " +0x200", "")
-    AddViewControl(view, "Text", "x580 y420 w250 h40 Background" colorCard " c" colorMuted, "Проверка доступа по нику`nиз таблицы Cloud")
-
-    ; Кнопка
-    openSettingsBtn := AddViewControl(view, "Text", "x405 y508 w290 h34 +0x200 Center Background" colorAccent " c" colorText, "⚙  Открыть настройки")
-    BindTextButton(openSettingsBtn, colorAccent, (*) => ShowView("Settings"))
-}
-
-RefreshDashboardView() {
-    global SettingsGui
-    global nick, pmCount, norm, logFile, scriptsGamePath, appVersion
-    global colorAccent, colorGreen, colorRed, colorMuted
-    global DashboardNickCtrl, DashboardCloudStatusCtrl
-    global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardDaysOffMonthCtrl
-    global DashboardStatusChatlogCtrl, DashboardStatusGameCtrl, DashboardStatusHudCtrl
-
-    if !IsObject(SettingsGui)
+    newDate := NormalizeDayOffDate(newDate)
+    if (newDate = "")
         return
 
-    try {
-        if IsObject(DashboardNickCtrl)
-            DashboardNickCtrl.Text := nick
-
-        remainingPm := GetRemainingPm()
-        progressPercent := GetNormProgressPercent()
-
-        if IsObject(DashboardNormPmCtrl)
-            DashboardNormPmCtrl.Text := pmCount " / " norm " PM"
-        if IsObject(DashboardNormRemainingCtrl)
-            DashboardNormRemainingCtrl.Text := "Осталось: " remainingPm " PM  •  " progressPercent "%"
-
-        if IsObject(DashboardDaysOffMonthCtrl)
-            DashboardDaysOffMonthCtrl.Text := CountDaysOffCurrentMonth() " дн."
-
-        ; —— статус системы: chatlog / корень / счётчик ——
-        chatlogOk := (logFile != "" && FileExist(logFile))
-        gameOk := (scriptsGamePath != "" && IsValidGameRoot(scriptsGamePath))
-        hudOk := gameOk && IsChesNovaHudInstalled(scriptsGamePath)
-
-        SetDashboardStatusLine(DashboardStatusChatlogCtrl, "chatlog", chatlogOk)
-        SetDashboardStatusLine(DashboardStatusGameCtrl, "корень игры", gameOk)
-        SetDashboardStatusLine(DashboardStatusHudCtrl, "счётчик в игре", hudOk)
-
-        if IsObject(DashboardCloudStatusCtrl) {
-            DashboardCloudStatusCtrl.Text := GetCloudStatusText()
-            DashboardCloudStatusCtrl.SetFont("s10 Bold c" GetCloudStatusColor(), "Segoe UI")
-        }
-    } catch as err {
-        ResetDashboardControls()
-    }
-}
-
-SetDashboardStatusLine(ctrl, label, isOk) {
-    global colorGreen, colorRed
-    if !IsObject(ctrl)
+    newPm := Trim(newPmRaw)
+    newNorm := Trim(newNormRaw)
+    if (newPm = "" || newNorm = "")
         return
-    try {
-        ctrl.Text := (isOk ? "●  " : "●  ") label
-        ctrl.SetFont("s10 Bold c" (isOk ? colorGreen : colorRed), "Segoe UI")
-    }
-}
-
-PMLogsView() {
-    global PMLogsSearchCtrl, PmLogsTextCtrl
-    global colorBg, colorCard, colorCardAlt, colorText, colorMuted
-
-    view := "PMLogs"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "PM Логи")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y84 w300 h20 Background" colorBg " c" colorMuted, "Поиск по нику или тексту")
-    PMLogsSearchCtrl := AddViewControl(view, "Edit", "x250 y112 w470 h28 c" colorText " Background" uiInputBg, "")
-    PMLogsSearchCtrl.OnEvent("Change", PMLogsSearchChanged)
-    clearButton := AddViewControl(view, "Text", "x732 y112 w118 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
-    BindTextButton(clearButton, colorCardAlt, ClearPMLogs)
-    PmLogsTextCtrl := AddViewControl(view, "Edit", "vPmLogsText x250 y152 w600 h350 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildPmLogsText())
-}
-
-PMLogsSearchChanged(*) {
-    global PMLogsSearchCtrl, PmLogsTextCtrl
-
-    if (IsObject(PMLogsSearchCtrl) && IsObject(PmLogsTextCtrl))
-        PmLogsTextCtrl.Value := BuildPmLogsText(PMLogsSearchCtrl.Value)
-}
-
-PunishmentsView() {
-    global selectedPunishmentDays, selectedPunishmentType, punishmentSearch
-    global PunishmentTypeTitleCtrl, PunishmentSearchCtrl, PunishmentDetailsCtrl, PunishmentButtonCtrls
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    view := "Punishments"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Наказания")
-    AddViewControl(view, "Text", "x250 y84 w110 h20 Background" colorBg " c" colorMuted, "Тип")
-    AddViewControl(view, "Text", "x380 y84 w220 h20 Background" colorBg " c" colorMuted, "Период")
-    AddViewControl(view, "Text", "x610 y84 w240 h20 Background" colorBg " c" colorMuted, "Поиск")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-
-    global PunishmentPeriodButtonCtrls
-    PunishmentButtonCtrls := Map()
-    PunishmentPeriodButtonCtrls := Map()
-    typeY := 112
-    for typeName, handler in Map(
-        "kick", ShowPunishmentKick,
-        "jail", ShowPunishmentJail,
-        "warn", ShowPunishmentWarn,
-        "mute", ShowPunishmentMute,
-        "vmute", ShowPunishmentVmute,
-        "rmute", ShowPunishmentRmute,
-        "gunban", ShowPunishmentGunban,
-        "ban", ShowPunishmentBan,
-        "sban", ShowPunishmentSban,
-        "all", ShowPunishmentAll
-    ) {
-        label := (typeName = "all") ? "Все (0)" : (typeName " (0)")
-        btn := AddViewControl(view, "Text", "x250 y" typeY " w110 h28 +0x200 Center Background" colorCardAlt " c" colorText, label)
-        btn.OnEvent("Click", handler)
-        PunishmentButtonCtrls[typeName] := btn
-        typeY += 32
-    }
-
-    todayButton := AddViewControl(view, "Text", "x380 y112 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сегодня")
-    todayButton.OnEvent("Click", SetPunishmentToday)
-    threeDaysButton := AddViewControl(view, "Text", "x456 y112 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "3 дня")
-    threeDaysButton.OnEvent("Click", SetPunishment3Days)
-    tenDaysButton := AddViewControl(view, "Text", "x532 y112 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "10 дней")
-    tenDaysButton.OnEvent("Click", SetPunishment10Days)
-    allTimeButton := AddViewControl(view, "Text", "x380 y148 w146 h28 +0x200 Center Background" colorCardAlt " c" colorText, "За всё время")
-    allTimeButton.OnEvent("Click", SetPunishmentAllTime)
-    PunishmentPeriodButtonCtrls[1] := todayButton
-    PunishmentPeriodButtonCtrls[3] := threeDaysButton
-    PunishmentPeriodButtonCtrls[10] := tenDaysButton
-    PunishmentPeriodButtonCtrls[0] := allTimeButton
-    clearButton := AddViewControl(view, "Text", "x532 y148 w70 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
-    BindTextButton(clearButton, colorCardAlt, ClearPunishments)
-    PunishmentSearchCtrl := AddViewControl(view, "Edit", "vPunishmentSearch x610 y112 w240 h28 c" colorText " Background" uiInputBg, punishmentSearch)
-    PunishmentSearchCtrl.OnEvent("Change", RefreshPunishmentView)
-
-    PunishmentTypeTitleCtrl := AddViewControl(view, "Text", "vPunishmentTypeTitle x380 y188 w470 h22 Background" colorBg " c" colorText, "Выберите тип наказания")
-    PunishmentDetailsCtrl := AddViewControl(view, "Edit", "vPunishmentDetails x380 y218 w470 h288 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, "Выберите тип наказания слева")
-
-    UpdatePunishmentTypeButtons(selectedPunishmentDays, punishmentSearch)
-    ShowPunishmentType(selectedPunishmentType)
-}
-
-NormHistoryView() {
-    global NormHistoryListCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    view := "NormHistory"
-    AddViewControl(view, "Text", "x250 y34 w360 h28 Background" colorBg " c" colorText, "История нормы")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y80 w300 h18 Background" colorBg " c" colorMuted, "Новые записи сверху")
-    editButton := AddViewControl(view, "Text", "x580 y78 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Редактировать")
-    BindTextButton(editButton, colorCardAlt, OpenNormHistoryEdit)
-    clearButton := AddViewControl(view, "Text", "x720 y78 w130 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
-    BindTextButton(clearButton, colorCardAlt, ClearNormHistory)
-
-    NormHistoryListCtrl := AddViewControl(view, "ListView", "x250 y116 w600 h400 Background" colorCard " c" colorText, ["Дата", "PM", "Норма", "Статус"])
-    NormHistoryListCtrl.ModifyCol(1, 150)
-    NormHistoryListCtrl.ModifyCol(2, 90)
-    NormHistoryListCtrl.ModifyCol(3, 90)
-    NormHistoryListCtrl.ModifyCol(4, 190)
-}
-
-RefreshNormDaysOffInfo(*) {
-    global NormMonthComboCtrl, NormYearEditCtrl, NormDaysOffInfoCtrl
-
-    if !IsObject(NormDaysOffInfoCtrl)
-        return
-
-    monthText := IsObject(NormMonthComboCtrl) ? NormMonthComboCtrl.Text : FormatTime(A_Now, "MM")
-    yearText := IsObject(NormYearEditCtrl) ? Trim(NormYearEditCtrl.Value) : FormatTime(A_Now, "yyyy")
-
-    monthNum := ""
-    if RegExMatch(monthText, "^(\d{2})", &m)
-        monthNum := m[1]
-    else
-        monthNum := FormatTime(A_Now, "MM")
-
-    if !RegExMatch(yearText, "^\d{4}$")
-        yearText := FormatTime(A_Now, "yyyy")
-
-    count := CountDaysOffInMonth(yearText, monthNum)
-    monthLabel := monthText
-    if (InStr(monthText, "—"))
-        monthLabel := Trim(SubStr(monthText, InStr(monthText, "—") + 1))
-    else
-        monthLabel := monthNum
-
-    NormDaysOffInfoCtrl.Text := "Отгулов за " monthLabel " " yearText ":  " count
-}
-
-FillNormHistoryList() {
-    global historyFile, NormHistoryListCtrl
-
-    if !IsObject(NormHistoryListCtrl)
-        return
-
-    NormHistoryListCtrl.Delete()
-    lines := []
-
-    if FileExist(historyFile) {
-        for _, line in ReadFileLines(historyFile)
-        {
-            if (Trim(line) != "")
-                lines.Push(line)
-        }
-    }
-
-    lines := SortRecordsNewestFirst(lines, "history")
-    for _, line in lines {
-        part := StrSplit(line, ",")
-        if (part.Length >= 3) {
-            dayPM := part[2] + 0
-            dayNorm := part[3] + 0
-            status := IsDayOff(part[1]) ? "🟨 отгул" : ((dayPM >= dayNorm) ? "🟦 выполнена" : "🟥 не выполнена")
-            NormHistoryListCtrl.Add(, part[1], dayPM, dayNorm, status)
-        }
-    }
-}
-
-OpenNormHistoryEdit(*) {
-    global NormHistoryListCtrl, NormHistoryEditGui, NormHistoryEditOriginalDate
-    global NormHistoryEditDateCtrl, NormHistoryEditPmCtrl, NormHistoryEditNormCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    if !IsObject(NormHistoryListCtrl)
-        return
-
-    row := NormHistoryListCtrl.GetNext()
-    if (!row) {
-        ShowAppDialog("История нормы", "Выберите запись истории нормы для редактирования.")
-        return
-    }
-
-    recordDate := NormHistoryListCtrl.GetText(row, 1)
-    recordPm := NormHistoryListCtrl.GetText(row, 2)
-    recordNorm := NormHistoryListCtrl.GetText(row, 3)
-    NormHistoryEditOriginalDate := recordDate
-
-    SafeDestroyGui(&NormHistoryEditGui)
-    NormHistoryEditGui := Gui("+Border", "Редактирование истории нормы")
-    NormHistoryEditGui.OnEvent("Close", CancelNormHistoryEdit)
-    NormHistoryEditGui.BackColor := colorBg
-    NormHistoryEditGui.MarginX := 0
-    NormHistoryEditGui.MarginY := 0
-    NormHistoryEditGui.SetFont("s10 c" colorText, "Segoe UI")
-
-    NormHistoryEditGui.Add("Text", "x0 y0 w360 h244 Background" colorBg)
-    NormHistoryEditGui.Add("Text", "x18 y18 w324 h154 Background" colorCard)
-    NormHistoryEditGui.SetFont("s12 Bold c" colorText, "Segoe UI")
-    NormHistoryEditGui.Add("Text", "x34 y30 w270 h24 Background" colorCard, "Редактирование нормы")
-    NormHistoryEditGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    NormHistoryEditGui.Add("Text", "x34 y66 w80 h20 Background" colorCard, "Дата")
-    NormHistoryEditDateCtrl := NormHistoryEditGui.Add("Edit", "x130 y62 w178 h24 cFFFFFF Background" uiInputBg, recordDate)
-    NormHistoryEditGui.Add("Text", "x34 y100 w80 h20 Background" colorCard, "PM")
-    NormHistoryEditPmCtrl := NormHistoryEditGui.Add("Edit", "x130 y96 w178 h24 Number cFFFFFF Background" uiInputBg, recordPm)
-    NormHistoryEditGui.Add("Text", "x34 y134 w80 h20 Background" colorCard, "Норма")
-    NormHistoryEditNormCtrl := NormHistoryEditGui.Add("Edit", "x130 y130 w178 h24 Number cFFFFFF Background" uiInputBg, recordNorm)
-
-    AddMiniWindowButton(NormHistoryEditGui, 110, 190, 104, 30, "Отмена", colorCardAlt, CancelNormHistoryEdit)
-    AddMiniWindowButton(NormHistoryEditGui, 226, 190, 116, 30, "Сохранить", colorAccent, SaveNormHistoryEdit)
-    NormHistoryEditGui.Show("w360 h244")
-    try WinActivate(NormHistoryEditGui.Hwnd)
-}
-
-SaveNormHistoryEdit(*) {
-    global historyFile, NormHistoryEditGui, NormHistoryEditOriginalDate
-    global NormHistoryEditDateCtrl, NormHistoryEditPmCtrl, NormHistoryEditNormCtrl
-
-    if !IsObject(NormHistoryEditGui)
-        return
-
-    newDate := NormalizeDayOffDate(NormHistoryEditDateCtrl.Value)
-    if (newDate = "") {
-        ShowAppDialog("История нормы", "Введите дату в формате yyyy-MM-dd.")
-        return
-    }
-
-    newPm := Trim(NormHistoryEditPmCtrl.Value)
-    newNorm := Trim(NormHistoryEditNormCtrl.Value)
-    if (newPm = "" || newNorm = "") {
-        ShowAppDialog("История нормы", "PM и норма должны быть заполнены.")
-        return
-    }
 
     newPm += 0
     newNorm += 0
-    existingRecords := ReadNormHistoryRecords("SaveNormHistoryEdit")
+    existingRecords := ReadNormHistoryRecords("SaveNormHistoryFromPanel")
     dateExists := false
 
     for _, record in existingRecords {
-        if (record["date"] = newDate && record["date"] != NormHistoryEditOriginalDate) {
+        if (record["date"] = newDate && record["date"] != origDate) {
             dateExists := true
             break
         }
     }
 
-    if (dateExists) {
-        result := ShowAppDialog("Подтверждение замены", "Запись за " newDate " уже существует.`nЗаменить существующую запись?", "OKCancel")
-        if (result != "OK")
-            return
-    }
-
     newRecords := []
     for _, record in existingRecords {
-        if (record["date"] = NormHistoryEditOriginalDate)
+        if (record["date"] = origDate)
             continue
         if (dateExists && record["date"] = newDate)
             continue
@@ -5113,16 +5840,10 @@ SaveNormHistoryEdit(*) {
     }
 
     newRecords.Push(Map("date", newDate, "pm", newPm, "norm", newNorm))
-    if !WriteNormHistoryRecords(newRecords)
-        return
-    SafeDestroyGui(&NormHistoryEditGui)
-    FillNormHistoryList()
-    ShowToast("✓ Запись нормы сохранена")
-}
-
-CancelNormHistoryEdit(*) {
-    global NormHistoryEditGui
-    SafeDestroyGui(&NormHistoryEditGui)
+    if WriteNormHistoryRecords(newRecords) {
+        WriteNormHistoryState()
+        ShowToast("✓ Запись нормы сохранена", 1800)
+    }
 }
 
 ReadNormHistoryRecords(source := "ReadNormHistoryRecords") {
@@ -5180,834 +5901,98 @@ BuildNormHistoryLines(records) {
     return lines
 }
 
-DaysOffView() {
-    global DaysOffDateCtrl, DaysOffForumCtrl, DaysOffForumStatusCtrl, DaysOffListCtrl
-    global NormMonthComboCtrl, NormYearEditCtrl, NormDaysOffInfoCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
-
-    view := "DaysOff"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Отгулы")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y84 w220 h20 Background" colorBg " c" colorMuted, "Дата отгула")
-    DaysOffDateCtrl := AddViewControl(view, "Edit", "vDaysOffDate x250 y112 w160 h28 c" colorText " Background" uiInputBg, FormatTime(A_Now, "yyyy-MM-dd"))
-    DaysOffForumCtrl := AddViewControl(view, "Checkbox", "x426 y118 w18 h18 Background" colorBg)
-    DaysOffForumCtrl.OnEvent("Click", UpdateDayOffForumStatus)
-    DaysOffForumStatusCtrl := AddViewControl(view, "Text", "x452 y116 w120 h22 Background" colorBg " c" colorRed, "Не залито")
-    addButton := AddViewControl(view, "Text", "x580 y112 w110 h28 +0x200 Center Background" colorAccent " c" colorText, "Добавить")
-    BindTextButton(addButton, colorAccent, AddDayOff)
-    deleteButton := AddViewControl(view, "Text", "x700 y112 w150 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удалить")
-    BindTextButton(deleteButton, colorCardAlt, DeleteSelectedDayOff)
-    AddViewControl(view, "Text", "x250 y148 w300 h18 Background" colorBg " c" colorMuted, "Формат: yyyy-MM-dd")
-    AddViewControl(view, "Text", "x250 y176 w260 h20 Background" colorBg " c" colorMuted, "Все добавленные отгулы")
-    uploadedButton := AddViewControl(view, "Text", "x540 y172 w140 h28 +0x200 Center Background" colorGreen " c" colorText, "Залито")
-    BindTextButton(uploadedButton, colorGreen, SetSelectedDayOffForumStatus.Bind(1))
-    notUploadedButton := AddViewControl(view, "Text", "x690 y172 w160 h28 +0x200 Center Background" colorRed " c" colorText, "Не залито")
-    BindTextButton(notUploadedButton, colorRed, SetSelectedDayOffForumStatus.Bind(0))
-    DaysOffListCtrl := AddViewControl(view, "ListView", "x250 y210 w600 h200 Background" colorCard " c" colorText, ["Дата", "Форум"])
-    DaysOffListCtrl.ModifyCol(1, 180)
-    DaysOffListCtrl.ModifyCol(2, 130)
-    DaysOffListCtrl.OnEvent("DoubleClick", ToggleSelectedDayOffForumStatus)
-
-    ; Инфо-табло: отгулы за выбранный месяц/год
-    AddViewControl(view, "Text", "x250 y428 w600 h112 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y440 w360 h22 Background" colorCard " c" colorText, "Сколько отгулов за период")
-    AddViewControl(view, "Text", "x270 y470 w60 h20 Background" colorCard " c" colorMuted, "Месяц")
-    monthNames := ["01 — Январь", "02 — Февраль", "03 — Март", "04 — Апрель", "05 — Май", "06 — Июнь", "07 — Июль", "08 — Август", "09 — Сентябрь", "10 — Октябрь", "11 — Ноябрь", "12 — Декабрь"]
-    NormMonthComboCtrl := AddViewControl(view, "ComboBox", "x330 y466 w180 h200", monthNames)
-    currentMonthIdx := Integer(FormatTime(A_Now, "MM"))
-    if (currentMonthIdx >= 1 && currentMonthIdx <= 12)
-        NormMonthComboCtrl.Choose(currentMonthIdx)
-    AddViewControl(view, "Text", "x530 y470 w40 h20 Background" colorCard " c" colorMuted, "Год")
-    NormYearEditCtrl := AddViewControl(view, "Edit", "x575 y466 w70 h28 Number c" colorText " Background" uiInputBg, FormatTime(A_Now, "yyyy"))
-    showButton := AddViewControl(view, "Text", "x660 y466 w170 h28 +0x200 Center Background" colorAccent " c" colorText, "Показать")
-    BindTextButton(showButton, colorAccent, RefreshNormDaysOffInfo)
-    NormDaysOffInfoCtrl := AddViewControl(view, "Text", "x270 y508 w560 h24 Background" colorCard " c" colorAccent " +0x200", "")
-    UpdateDayOffForumStatus()
-    RefreshNormDaysOffInfo()
-}
-
-BindsView() {
-    global BindsSearchCtrl, BindsCategoryCtrl, BindsCategoryStatusCtrl, BindsListCtrl, BindsEnabledCtrl, bindsEnabled
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    view := "Binds"
-    AddViewControl(view, "Text", "x250 y34 w360 h28 Background" colorBg " c" colorText, "Бинды")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-
-    AddViewControl(view, "Text", "x250 y94 w600 h116 Background" colorCard)
-    BindsEnabledCtrl := AddViewControl(view, "Checkbox", "x270 y112 w160 h24 Checked" bindsEnabled " c" colorText " Background" colorCard, "Бинды включены")
-    BindsEnabledCtrl.OnEvent("Click", ToggleAllBindsEnabled)
-
-    AddViewControl(view, "Text", "x270 y146 w80 h20 Background" colorCard " c" colorMuted, "Поиск")
-    BindsSearchCtrl := AddViewControl(view, "Edit", "x270 y170 w230 h28 c" colorText " Background" uiInputBg, "")
-    BindsSearchCtrl.OnEvent("Change", RefreshBindsList)
-    AddViewControl(view, "Text", "x520 y146 w150 h20 Background" colorCard " c" colorMuted, "Фильтр категории")
-    BindsCategoryCtrl := AddViewControl(view, "ComboBox", "x520 y170 w180 h120", GetBindCategories(true))
-    BindsCategoryCtrl.Choose(1)
-    BindsCategoryCtrl.OnEvent("Change", RefreshBindsList)
-    BindsCategoryStatusCtrl := AddViewControl(view, "Text", "x710 y173 w120 h20 Background" colorCard " c" colorMuted, "Выберите фильтр")
-
-    ; Ряд 1 — категории + импорт/экспорт (сетка ~600)
-    addCategoryButton := AddViewControl(view, "Text", "x250 y222 w95 h28 +0x200 Center Background" colorAccent " c" colorText, "Доб. кат.")
-    BindTextButton(addCategoryButton, colorAccent, AddBindCategory)
-    deleteCategoryButton := AddViewControl(view, "Text", "x353 y222 w95 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удал. кат.")
-    BindTextButton(deleteCategoryButton, colorCardAlt, DeleteSelectedBindCategory)
-    toggleCategoryButton := AddViewControl(view, "Text", "x456 y222 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл")
-    BindTextButton(toggleCategoryButton, colorCardAlt, ToggleSelectedBindCategory)
-    importButton := AddViewControl(view, "Text", "x564 y222 w90 h28 +0x200 Center Background" colorAccent " c" colorText, "Импорт")
-    BindTextButton(importButton, colorAccent, ImportBindsFromFile)
-    exportButton := AddViewControl(view, "Text", "x662 y222 w90 h28 +0x200 Center Background" colorAccent " c" colorText, "Экспорт")
-    BindTextButton(exportButton, colorAccent, ExportBindsToFile)
-    testButton := AddViewControl(view, "Text", "x760 y222 w90 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Тест")
-    BindTextButton(testButton, colorCardAlt, TestSelectedBind)
-
-    ; Ряд 2 — бинды
-    addButton := AddViewControl(view, "Text", "x250 y270 w112 h28 +0x200 Center Background" colorAccent " c" colorText, "Добавить")
-    BindTextButton(addButton, colorAccent, AddBind)
-    editButton := AddViewControl(view, "Text", "x374 y270 w112 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Изменить")
-    BindTextButton(editButton, colorCardAlt, EditSelectedBind)
-    deleteButton := AddViewControl(view, "Text", "x498 y270 w112 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Удалить")
-    BindTextButton(deleteButton, colorCardAlt, DeleteSelectedBind)
-    toggleButton := AddViewControl(view, "Text", "x622 y270 w112 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Вкл/Выкл")
-    BindTextButton(toggleButton, colorCardAlt, ToggleSelectedBind)
-    dupButton := AddViewControl(view, "Text", "x746 y270 w104 h28 +0x200 Center Background" colorAccent " c" colorText, "Дубликаты")
-    BindTextButton(dupButton, colorAccent, ShowBindDuplicatesScan)
-
-    ; Список + превью справа
-    BindsListCtrl := AddViewControl(view, "ListView", "x250 y316 w360 h200 Background" colorCard " c" colorText, ["Тип", "Категория", "Название", "Триггер", "Статус", "Ключ"])
-    BindsListCtrl.ModifyCol(1, 70)
-    BindsListCtrl.ModifyCol(2, 70)
-    BindsListCtrl.ModifyCol(3, 90)
-    BindsListCtrl.ModifyCol(4, 70)
-    BindsListCtrl.ModifyCol(5, 50)
-    BindsListCtrl.ModifyCol(6, 0)
-    BindsListCtrl.OnEvent("ColClick", SortBindsByColumn)
-    BindsListCtrl.OnEvent("DoubleClick", EditSelectedBind)
-    BindsListCtrl.OnEvent("ItemSelect", OnBindListSelect)
-    BindsListCtrl.OnEvent("Click", OnBindListSelect)
-
-    AddViewControl(view, "Text", "x620 y316 w230 h18 Background" colorBg " c" colorMuted, "Превью содержимого")
-    global BindsPreviewCtrl
-    BindsPreviewCtrl := AddViewControl(view, "Edit", "x620 y336 w230 h180 ReadOnly +Multi +WantReturn +VScroll Background" colorCard " c" colorText, "Выберите бинд в списке")
-}
-
-SortBindsByColumn(ctrl, column) {
-    global BindsSortColumn, BindsSortAscending
-
-    if (column > 5)
-        return
-
-    if (BindsSortColumn = column)
-        BindsSortAscending := !BindsSortAscending
-    else {
-        BindsSortColumn := column
-        BindsSortAscending := true
-    }
-
-    RefreshBindsList()
-}
-
-AddBind(*) {
-    OpenBindEditor("")
-}
-
-AddBindCategory(*) {
-    result := ShowBindCategoryInputDialog()
-    if (result.Result != "OK")
-        return
-
-    category := Trim(result.Value)
-    if !AddBindCategoryByName(category)
-        return
-
-    RefreshBindCategoryFilter(category)
-    RefreshBindsList()
-}
-
-; Импорт биндов из CSV того же формата, что пишет ChesNova:
-; type|category|name|trigger|content|enabled
-; Категория берётся из имени файла; файл копируется в data\binds\imports\.
-ImportBindsFromFile(*) {
-    global bindsDir
-
-    selectedPath := FileSelect(1, bindsDir, "Импорт биндов", "Бинды CSV (*.csv)")
-    if (selectedPath = "")
-        return
-
-    SplitPath(selectedPath, &fileName, &sourceDir, &ext, &nameNoExt)
-    categoryName := Trim(nameNoExt)
-
-    if (categoryName = "") {
-        ShowAppDialog("Импорт биндов", "Не удалось определить имя категории из файла.")
-        return
-    }
-    if (categoryName = "Все") {
-        ShowAppDialog("Импорт биндов", "Нельзя импортировать в системную категорию " Chr(34) "Все" Chr(34) ". Переименуйте файл.")
-        return
-    }
-
-    importedBinds := ReadBindsFromFile(selectedPath, "ImportBindsFromFile")
-    if (importedBinds.Length = 0) {
-        ShowAppDialog("Импорт биндов", "В файле нет распознанных биндов.`n`nОжидается формат:`ntype|category|name|trigger|content|enabled")
-        return
-    }
-
-    categoryCreated := false
-    if !BindCategoryExists(categoryName) {
-        if !AddBindCategoryByName(categoryName)
-            return
-        categoryCreated := true
-    }
-
-    existingBinds := ReadBinds()
-    existingTriggers := Map()
-    for _, bind in existingBinds {
-        trigger := Trim(bind["trigger"])
-        if (trigger != "")
-            existingTriggers[trigger] := true
-    }
-
-    addedCount := 0
-    skippedCount := 0
-    for _, bind in importedBinds {
-        trigger := Trim(bind["trigger"])
-        if (trigger = "") {
-            skippedCount += 1
-            continue
-        }
-        if existingTriggers.Has(trigger) {
-            skippedCount += 1
-            continue
-        }
-
-        bind["category"] := categoryName
-        bind["type"] := NormalizeBindType(bind["type"])
-        bind["name"] := Trim(bind["name"])
-        bind["trigger"] := trigger
-        bind["content"] := bind["content"]
-        bind["enabled"] := (bind["enabled"] + 0) ? 1 : 0
-        if (bind["name"] = "")
-            bind["name"] := trigger
-
-        existingBinds.Push(bind)
-        existingTriggers[trigger] := true
-        addedCount += 1
-    }
-
-    if (addedCount = 0) {
-        ShowAppDialog("Импорт биндов", "Новых биндов нет.`nВсе триггеры из файла уже существуют или строки пустые.`nПропущено: " skippedCount)
-        return
-    }
-
-    if !WriteBinds(existingBinds) {
-        ShowAppDialog("Импорт биндов", "Не удалось сохранить импортированные бинды.")
-        return
-    }
-
-    ; Копия исходника в папку imports (не move — оригинал у автора сохраняется)
-    try {
-        importsDir := bindsDir "\imports"
-        DirCreate(importsDir)
-        destPath := importsDir "\" fileName
-        if (StrLower(selectedPath) != StrLower(destPath))
-            FileCopy(selectedPath, destPath, 1)
-    } catch as err {
-        LogError("ImportBindsFromFile", "Не удалось скопировать файл в imports", err.Message)
-    }
-
-    RegisterCustomBinds()
-    RefreshBindCategoryFilter(categoryName)
-
-    message := "Категория: " categoryName
-    if categoryCreated
-        message .= " (создана)"
-    message .= "`nДобавлено биндов: " addedCount
-    if (skippedCount > 0)
-        message .= "`nПропущено (дубли/пустые): " skippedCount
-    message .= "`nКопия файла: data\binds\imports\"
-
-    ShowAppDialog("Импорт биндов", message)
-    ShowToast("✓ Импорт: +" addedCount " в «" categoryName "»")
-}
-
-GetSelectedBindCategory() {
-    global BindsCategoryCtrl
-
-    if !IsObject(BindsCategoryCtrl)
-        return ""
-
-    category := Trim(BindsCategoryCtrl.Text)
-    if (category = "Все")
-        category := ""
-
-    return category
-}
-
-DeleteSelectedBindCategory(*) {
-    category := GetSelectedBindCategory()
-    if (category = "") {
-        ShowAppDialog("Категории биндов", "Выберите категорию в фильтре.")
-        return
-    }
-
-    if !DeleteBindCategoryByName(category)
-        return
-
-    RefreshBindCategoryFilter("Все")
-    RegisterCustomBinds()
-    RefreshBindsList()
-}
-
-ToggleSelectedBindCategory(*) {
-    category := GetSelectedBindCategory()
-    if (category = "") {
-        ShowAppDialog("Категории биндов", "Выберите категорию в фильтре.")
-        return
-    }
-
-    SetBindCategoryEnabled(category, IsBindCategoryEnabled(category) ? 0 : 1)
-    RegisterCustomBinds()
-    RefreshBindsList()
-}
-
-EditSelectedBind(*) {
-    trigger := GetSelectedBindTrigger()
-    if (trigger = "") {
-        ShowAppDialog("Бинды", "Выберите бинд для редактирования.")
-        return
-    }
-
-    OpenBindEditor(trigger)
-}
-
-DeleteSelectedBind(*) {
-    triggers := GetSelectedBindTriggers()
-    if (triggers.Length = 0) {
-        ShowAppDialog("Бинды", "Выберите один или несколько биндов для удаления.")
-        return
-    }
-
-    message := (triggers.Length = 1)
-        ? "Удалить выбранный бинд?"
-        : "Удалить выбранные бинды: " triggers.Length " шт.?"
-
-    result := ShowAppDialog("Удаление бинда", message, "YesNo")
-    if (result != "Yes")
-        return
-
-    newBinds := []
-    for _, bind in ReadBinds() {
-        if !ArrayHasValue(triggers, bind["trigger"])
-            newBinds.Push(bind)
-    }
-
-    if !WriteBinds(newBinds)
-        return
-    RegisterCustomBinds()
-    RefreshBindsList()
-}
-
-ToggleSelectedBind(*) {
-    triggers := GetSelectedBindTriggers()
-    if (triggers.Length = 0) {
-        ShowAppDialog("Бинды", "Выберите один или несколько биндов для включения или выключения.")
-        return
-    }
-
-    binds := ReadBinds()
-    for _, bind in binds {
-        if ArrayHasValue(triggers, bind["trigger"])
-            bind["enabled"] := bind["enabled"] ? 0 : 1
-    }
-
-    if !WriteBinds(binds)
-        return
-    RegisterCustomBinds()
-    RefreshBindsList()
-}
-
-OpenBindEditor(originalTrigger := "") {
-    global BindEditGui, BindEditId, BindEditTypeCtrl, BindEditCategoryCtrl, BindEditNameCtrl, BindEditTriggerCtrl, BindEditContentCtrl, BindEditEnabledCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    originalTrigger := Trim(originalTrigger)
-
-    ; Если окно добавления/редактирования уже открыто или скрыто — не пересоздаём его,
-    ; чтобы случайное переключение окон не сбрасывало введённые данные.
-    if IsObject(BindEditGui) {
-        if (BindEditId = originalTrigger) {
-            try BindEditGui.Show()
-            try WinActivate(BindEditGui.Hwnd)
-            return
-        }
-
-        ; Если пользователь выбрал другой бинд для редактирования, создаём окно заново под выбранный trigger.
-        SafeDestroyGui(&BindEditGui)
-    }
-
-    BindEditId := originalTrigger
-    bind := (originalTrigger != "") ? GetBindByTrigger(originalTrigger) : ""
-    typeText := IsObject(bind) ? GetBindTypeText(bind["type"]) : GetBindTypeText("hotkey")
-    category := IsObject(bind) ? bind["category"] : "Все"
-    bindName := IsObject(bind) ? bind["name"] : ""
-    trigger := IsObject(bind) ? bind["trigger"] : ""
-    content := IsObject(bind) ? bind["content"] : GetBindTemplateByType(typeText)
-    enabled := IsObject(bind) ? (bind["enabled"] + 0) : 1
-
-    BindEditGui := Gui("+Resize +MinSize640x500 +Border", originalTrigger != "" ? "Редактирование бинда" : "Добавление бинда")
-    BindEditGui.OnEvent("Close", HideBindEdit)
-    BindEditGui.OnEvent("Escape", HideBindEdit)
-    BindEditGui.BackColor := colorBg
-    BindEditGui.MarginX := 0
-    BindEditGui.MarginY := 0
-    BindEditGui.SetFont("s10 c" colorText, "Segoe UI")
-
-    BindEditGui.Add("Text", "x0 y0 w640 h500 Background" colorBg)
-    BindEditGui.Add("Text", "x18 y18 w604 h394 Background" colorCard)
-    BindEditGui.SetFont("s12 Bold c" colorText, "Segoe UI")
-    BindEditGui.Add("Text", "x34 y30 w260 h26 Background" colorCard, originalTrigger != "" ? "Редактирование бинда" : "Добавление бинда")
-    BindEditGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-
-    BindEditGui.Add("Text", "x34 y76 w90 h20 Background" colorCard, "Тип")
-    BindEditTypeCtrl := BindEditGui.Add("ComboBox", "x34 y100 w170 h120", GetBindTypes())
-    ChooseComboText(BindEditTypeCtrl, typeText, GetBindTypes())
-    BindEditTypeCtrl.OnEvent("Change", BindTypeChanged)
-    BindEditGui.Add("Text", "x224 y76 w120 h20 Background" colorCard, "Категория")
-    BindEditCategoryCtrl := BindEditGui.Add("ComboBox", "x224 y100 w180 h120", GetBindCategories(false))
-    ChooseComboText(BindEditCategoryCtrl, category, GetBindCategories(false))
-    BindEditEnabledCtrl := BindEditGui.Add("Checkbox", "x424 y100 w140 Checked" enabled " c" colorText " Background" colorCard, "Включён")
-
-    BindEditGui.Add("Text", "x34 y142 w120 h20 Background" colorCard, "Название")
-    BindEditNameCtrl := BindEditGui.Add("Edit", "x34 y166 w270 h26 c" colorText " Background" uiInputBg, bindName)
-    BindEditGui.Add("Text", "x324 y142 w120 h20 Background" colorCard, "Триггер")
-    BindEditTriggerCtrl := BindEditGui.Add("Edit", "x324 y166 w262 h26 c" colorText " Background" uiInputBg, trigger)
-
-    BindEditGui.Add("Text", "x34 y212 w180 h20 Background" colorCard, "Содержимое бинда")
-    BindEditContentCtrl := BindEditGui.Add("Edit", "x34 y238 w552 h150 c" colorText " Background" uiInputBg " +WantReturn +VScroll", content)
-
-    AddMiniWindowButton(BindEditGui, 390, 440, 104, 30, "Отмена", colorCardAlt, CancelBindEdit)
-    AddMiniWindowButton(BindEditGui, 506, 440, 116, 30, "Сохранить", colorAccent, SaveBindEdit)
-    BindEditGui.Show("w640 h500")
-}
-
-
-GetBindTemplateByType(type) {
-    type := NormalizeBindType(type)
-
-    switch type {
-        case "hotkey":
-            return "Send `"{F6}`"`nSleep 100`nSendText `"/fly`"`nSend `"{Enter}`"`n`nSendMessage, 0x50,, 0x4190419,, A`nSleep 100`nSend `"{F6}`"`nSleep 100`nSendText `"/pm  Чесик начал следить за игроком.`"`nSend `"{left 32}`""
-
-        case "macro":
-            return "SendText `"Здравствуйте игроки`"`nSend `"{Enter}`"`n`nSleep 1000`n`nSend `"{F6}`"`nSleep 100`nSendText `"С вами администратор Chesik`"`nSend `"{Enter}`"`n`nSleep 1000`n`nSend `"{F6}`"`nSleep 100`nSendText `"Сейчас начнем проверку, просьба не мешать.`"`nSend `"{Enter}`""
-
-        case "hotstring":
-            return "игрок получит конфетки"
-    }
-
-    return ""
-}
-
-IsDefaultBindTemplate(content) {
-    content := Trim(content)
-
-    if (content = "")
-        return true
-
-    for _, type in GetBindTypes() {
-        if (content = Trim(GetBindTemplateByType(type)))
-            return true
-    }
-
-    ; Поддержка старых английских названий, если шаблон уже был создан раньше.
-    for _, type in ["Hotkey", "Hotstring", "Macro"] {
-        if (content = Trim(GetBindTemplateByType(type)))
-            return true
-    }
-
-    return false
-}
-
-BindTypeChanged(ctrl, *) {
-    global BindEditContentCtrl
-
-    if !IsObject(BindEditContentCtrl)
-        return
-
-    if !IsDefaultBindTemplate(BindEditContentCtrl.Value)
-        return
-
-    BindEditContentCtrl.Value := GetBindTemplateByType(ctrl.Text)
-}
-
-ChooseComboText(ctrl, value, options) {
-    index := 1
-    for i, option in options {
-        if (option = value) {
-            index := i
-            break
+ToggleTesterModeFromPanel(enabledRaw) {
+    global settingsFile, testerMode
+
+    newValue := Trim(enabledRaw)
+    if (newValue = "0" || newValue = "1") {
+        newValue := Integer(newValue)
+        if (newValue != testerMode) {
+            testerMode := newValue
+            TryIniWrite(testerMode, settingsFile, "Updates", "testerMode", "ToggleTesterModeFromPanel")
+            WriteTesterState()
+            ShowToast(testerMode ? "✓ Режим тестировщика включён" : "Режим тестировщика выключен", 1800)
         }
     }
-    ctrl.Choose(index)
 }
 
-SaveBindEdit(*) {
-    global BindEditGui, BindEditId, BindEditTypeCtrl, BindEditCategoryCtrl, BindEditNameCtrl, BindEditTriggerCtrl, BindEditContentCtrl, BindEditEnabledCtrl
+; Проверка test-канала из панели (GET /tester/check → hud_commands.ini)
+CheckTestUpdatesFromPanel() {
+    global testerMode, testerLastCheck, CURRENT_VERSION
 
-    if !IsObject(BindEditGui)
-        return
-
-    bindType := NormalizeBindType(BindEditTypeCtrl.Text)
-    category := Trim(BindEditCategoryCtrl.Text)
-    bindName := Trim(BindEditNameCtrl.Value)
-    trigger := Trim(BindEditTriggerCtrl.Value)
-    content := BindEditContentCtrl.Value
-    enabled := BindEditEnabledCtrl.Value ? 1 : 0
-    originalTrigger := Trim(BindEditId)
-
-    if (category = "" || bindName = "" || trigger = "" || Trim(content) = "") {
-        ShowAppDialog("Бинды", "Заполните категорию, название, триггер и содержимое.")
+    if !testerMode {
+        testerLastCheck := "Сначала включи «Я тестировщик»."
+        WriteTesterState()
+        ShowToast("⚠ Включи режим тестировщика", 2200)
         return
     }
 
-    if !BindCategoryExists(category) {
-        ShowAppDialog("Бинды", "Такой категории нет: " category)
-        return
-    }
-
-    if (bindType = "hotstring" || bindType = "macro")
-        trigger := RegExReplace(trigger, "^:\*?\??:|::$")
-
-    if BindTriggerExists(trigger, originalTrigger) {
-        ShowAppDialog("Бинды", "Бинд с таким триггером уже существует: " trigger)
-        return
-    }
-
-    conflicts := FindSimilarBindTriggers(trigger, bindType, originalTrigger)
-    suffixConflicts := []
-    for _, c in conflicts {
-        if (c["kind"] = "suffix")
-            suffixConflicts.Push(c)
-    }
-    if (suffixConflicts.Length > 0) {
-        result := ShowAppDialog("Поиск дубликатов", FormatBindConflictMessage(suffixConflicts), "YesNo")
-        if (result != "Yes")
-            return
-    }
-
-    binds := ReadBinds()
-    updated := false
-    newBind := Map("type", bindType, "category", category, "name", bindName, "trigger", trigger, "content", content, "enabled", enabled)
-
-    for i, bind in binds {
-        if (bind["trigger"] = originalTrigger) {
-            binds[i] := newBind
-            updated := true
-            break
-        }
-    }
-
-    if (!updated)
-        binds.Push(newBind)
-
-    if !WriteBinds(binds)
-        return
-    RegisterCustomBinds()
-    RefreshBindsList()
-    SafeDestroyGui(&BindEditGui)
-    ShowToast("✓ Бинд сохранён")
-}
-
-HideBindEdit(*) {
-    global BindEditGui
-
-    if IsObject(BindEditGui)
-        BindEditGui.Hide()
-}
-
-CancelBindEdit(*) {
-    HideBindEdit()
-}
-
-SettingsView() {
-    global nick, norm, autoResetEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute, menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiEnabled, aiProvider, uiTheme, logFile
-    global SetNickCtrl, SetNormCtrl, SetMenuKeyCtrl, SetResetKeyCtrl, SetAiKeyCtrl, SetMenuKeyEnabledCtrl, SetResetKeyEnabledCtrl, SetAiKeyEnabledCtrl, SetAiEnabledCtrl, SetAiProviderCtrl
-    global SetAutoResetCtrl, SetCheckUpdatesCtrl, SetStartupCtrl, SetResetHourCtrl, SetResetMinuteCtrl, LogFileTextCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorYellow
-
-    view := "Settings"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Настройки")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-
-    ; —— Левая колонка ——
-    ; Профиль
-    AddViewControl(view, "Text", "x250 y88 w280 h102 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y104 w220 h22 Background" colorCard " c" colorText, "Пользователь")
-    AddViewControl(view, "Text", "x270 y136 w110 h22 Background" colorCard " c" colorMuted, "Ник")
-    SetNickCtrl := AddViewControl(view, "Edit", "vSetNick x390 y132 w120 h26 c" colorText " Background" uiInputBg, nick)
-    AddViewControl(view, "Text", "x270 y166 w110 h22 Background" colorCard " c" colorMuted, "Норма PM")
-    SetNormCtrl := AddViewControl(view, "Edit", "vSetNorm x390 y162 w120 h26 Number c" colorText " Background" uiInputBg, norm)
-
-    ; Горячие клавиши
-    AddViewControl(view, "Text", "x250 y206 w280 h196 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y222 w200 h22 Background" colorCard " c" colorText, "Горячие клавиши")
-    AddViewControl(view, "Text", "x494 y230 w28 h18 Background" colorCard " c" colorMuted, "Вкл.")
-    AddViewControl(view, "Text", "x270 y256 w110 h22 Background" colorCard " c" colorMuted, "Открыть меню")
-    SetMenuKeyCtrl := AddViewControl(view, "Edit", "vSetMenuKey x390 y252 w98 h26 c" colorText " Background" uiInputBg, menuKey)
-    SetMenuKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetMenuKeyEnabled x496 y256 w20 h20 Checked" menuKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y292 w110 h22 Background" colorCard " c" colorMuted, "Сброс PM")
-    SetResetKeyCtrl := AddViewControl(view, "Edit", "vSetResetKey x390 y288 w98 h26 c" colorText " Background" uiInputBg, resetKey)
-    SetResetKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetResetKeyEnabled x496 y292 w20 h20 Checked" resetKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y328 w110 h22 Background" colorCard " c" colorMuted, "AI-ассистент")
-    SetAiKeyCtrl := AddViewControl(view, "Edit", "vSetAiKey x390 y324 w98 h26 c" colorText " Background" uiInputBg, aiKey)
-    SetAiKeyEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiKeyEnabled x496 y328 w20 h20 Checked" aiKeyEnabled " Background" colorCard)
-    AddViewControl(view, "Text", "x270 y364 w240 h22 Background" colorCard " c" colorMuted, "В игре: /ai вопрос + Enter")
-
-    ; ИИ — отдельная карточка (по умолчанию выкл.: без запросов к API)
-    AddViewControl(view, "Text", "x250 y418 w280 h168 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y434 w240 h22 Background" colorCard " c" colorText, "ИИ-ассистент")
-    SetAiEnabledCtrl := AddViewControl(view, "Checkbox", "vSetAiEnabled x270 y460 Checked" aiEnabled " c" colorText " Background" colorCard, "Включить AI")
-    AddViewControl(view, "Text", "x270 y486 w240 h18 Background" colorCard " c" colorMuted, "Выкл. = без сетевых запросов AI")
-    providerChoices := ["Gemini", "DeepSeek · платная", "Groq"]
-    if (aiProvider = "deepseek")
-        providerIndex := 2
-    else if (aiProvider = "groq")
-        providerIndex := 3
-    else
-        providerIndex := 1
-    SetAiProviderCtrl := AddViewControl(view, "DropDownList", "vSetAiProvider x270 y508 w240 h120 Choose" providerIndex " c" colorText " Background" uiInputBg, providerChoices)
-    AddViewControl(view, "Text", "x270 y540 w240 h18 Background" colorCard " c" colorMuted, "Gemini/Groq бесплатно · DeepSeek платно")
-
-    ; —— Правая колонка ——
-    AddViewControl(view, "Text", "x550 y88 w300 h142 Background" colorCard)
-    AddViewControl(view, "Text", "x570 y104 w220 h22 Background" colorCard " c" colorText, "Автосброс нормы")
-    SetAutoResetCtrl := AddViewControl(view, "Checkbox", "vSetAutoReset x570 y136 Checked" autoResetEnabled " c" colorText " Background" colorCard, "Включить автосброс")
-    AddViewControl(view, "Text", "x570 y172 w60 h22 Background" colorCard " c" colorMuted, "Часы")
-    SetResetHourCtrl := AddViewControl(view, "Edit", "vSetResetHour x635 y168 w58 h26 Number c" colorText " Background" uiInputBg, resetHour)
-    AddViewControl(view, "Text", "x708 y172 w64 h22 Background" colorCard " c" colorMuted, "Минуты")
-    SetResetMinuteCtrl := AddViewControl(view, "Edit", "vSetResetMinute x782 y168 w48 h26 Number c" colorText " Background" uiInputBg, resetMinute)
-
-    AddViewControl(view, "Text", "x550 y246 w300 h180 Background" colorCard)
-    AddViewControl(view, "Text", "x570 y262 w220 h22 Background" colorCard " c" colorText, "Файл логов")
-    logText := logFile
-    if (logText = "")
-        logText := "Файл не выбран"
-    LogFileTextCtrl := AddViewControl(view, "Edit", "vLogFileText x570 y292 w260 h58 ReadOnly -Wrap c" colorText " Background" uiInputBg, logText)
-    selectLogButton := AddViewControl(view, "Text", "x570 y366 w260 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Выбрать chatlog.txt")
-    BindTextButton(selectLogButton, colorCardAlt, SelectLogFile)
-
-    AddViewControl(view, "Text", "x550 y442 w300 h86 Background" colorCard)
-    AddViewControl(view, "Text", "x570 y456 w260 h20 Background" colorCard " c" colorText, "Запуск и автоматизация")
-    SetStartupCtrl := AddViewControl(view, "Checkbox", "vSetStartup x570 y482 Checked" startWithWindows " c" colorText " Background" colorCard, "Запускать вместе с Windows")
-
-    saveButton := AddViewControl(view, "Text", "x550 y540 w300 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Сохранить настройки")
-    BindTextButton(saveButton, colorAccent, SaveSettings)
-}
-
-UpdatesView() {
-    global appVersion, checkUpdatesOnStartup, SetCheckUpdatesCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    view := "Updates"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Обновления")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y94 w600 h116 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y116 w250 h24 Background" colorCard " c" colorText, "ChesNova " appVersion)
-    AddViewControl(view, "Text", "x274 y148 w430 h24 Background" colorCard " c" colorMuted, "Проверяйте новые версии и управляйте обновлением приложения.")
-    SetCheckUpdatesCtrl := AddViewControl(view, "Checkbox", "vSetCheckUpdates x274 y176 Checked" checkUpdatesOnStartup " c" colorText " Background" colorCard, "Проверять обновления при запуске")
-    AddViewControl(view, "Text", "x250 y226 w600 h100 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y242 w260 h20 Background" colorCard " c" colorText, "Действия с обновлением")
-    checkButton := AddViewControl(view, "Text", "x274 y270 w268 h34 +0x200 Center Background" colorCardAlt " c" colorText, "Проверить обновления")
-    BindTextButton(checkButton, colorCardAlt, CheckForUpdatesManual)
-    updateButton := AddViewControl(view, "Text", "x558 y270 w268 h34 +0x200 Center Background" colorAccent " cFFFFFF", "Обновить ChesNova")
-    BindTextButton(updateButton, colorAccent, ManualUpdateChesNova)
-    AddViewControl(view, "Text", "x250 y342 w600 h86 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y358 w530 h20 Background" colorCard " c" colorMuted, "Настройка проверки при запуске сохраняется отдельно.")
-    saveButton := AddViewControl(view, "Text", "x274 y388 w552 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Сохранить настройки")
-    BindTextButton(saveButton, colorCardAlt, SaveSettings)
-    AddViewControl(view, "Text", "x250 y444 w600 h72 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y458 w530 h18 Background" colorCard " c" colorMuted, "Если автоматическое обновление недоступно:")
-    downloadButton := AddViewControl(view, "Text", "x274 y484 w552 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать последнюю версию")
-    BindTextButton(downloadButton, colorCardAlt, DownloadLatestUpdate)
-}
-
-RefreshUpdatesView(*) {
-    global checkUpdatesOnStartup, SetCheckUpdatesCtrl
-
-    if IsObject(SetCheckUpdatesCtrl)
-        SetCheckUpdatesCtrl.Value := checkUpdatesOnStartup
-}
-
-TesterView() {
-    global TesterModeCtrl, TesterStatusCtrl, TesterInfoCtrl, testerMode
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen, colorRed
-
-    view := "Tester"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Тестировщик")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y88 w600 h40 Background" colorBg " c" colorMuted, "Тестовые сборки с GitHub. Включи режим, чтобы проверять и скачивать beta-версии.")
-
-    AddViewControl(view, "Text", "x250 y140 w600 h100 Background" colorCard)
-    TesterModeCtrl := AddViewControl(view, "Checkbox", "x274 y158 w400 h24 Checked" testerMode " c" colorText " Background" colorCard, "Я тестировщик — показывать тестовый канал")
-    TesterModeCtrl.OnEvent("Click", ToggleTesterMode)
-    TesterStatusCtrl := AddViewControl(view, "Text", "x274 y196 w552 h28 Background" colorCard " c" colorAccent " +0x200", "")
-
-    AddViewControl(view, "Text", "x250 y256 w600 h170 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y268 w500 h20 Background" colorCard " c" colorText, "Тестовый канал")
-    TesterInfoCtrl := AddViewControl(view, "Edit", "x274 y292 w552 h78 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, "")
-    checkButton := AddViewControl(view, "Text", "x274 y380 w170 h28 +0x200 Center Background" colorAccent " c" colorText, "Проверить")
-    BindTextButton(checkButton, colorAccent, CheckTestUpdates)
-    downloadButton := AddViewControl(view, "Text", "x456 y380 w170 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Скачать")
-    BindTextButton(downloadButton, colorCardAlt, DownloadTestUpdate)
-    installButton := AddViewControl(view, "Text", "x638 y380 w188 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Установить test")
-    BindTextButton(installButton, colorCardAlt, InstallTestUpdate)
-
-    AddViewControl(view, "Text", "x250 y424 w600 h100 Background" colorCard)
-    AddViewControl(view, "Text", "x274 y436 w500 h20 Background" colorCard " c" colorText, "Стабильный релиз")
-    AddViewControl(view, "Text", "x274 y460 w360 h36 Background" colorCard " c" colorMuted, "Вернуть официальную сборку из versions/version.json")
-    rollbackButton := AddViewControl(view, "Text", "x640 y458 w186 h32 +0x200 Center Background" colorAccent " c" colorText, "Откат на релиз")
-    BindTextButton(rollbackButton, colorAccent, RollbackToStableRelease)
-
-    AddViewControl(view, "Text", "x250 y540 w600 h28 Background" colorBg " c" colorMuted, "GitHub test: Test/Test.json  •  релиз: versions/version.json")
-
-    RefreshTesterView()
-}
-
-RefreshTesterView(*) {
-    global TesterModeCtrl, TesterStatusCtrl, TesterInfoCtrl, testerMode, colorGreen, colorMuted
-
-    if IsObject(TesterModeCtrl)
-        TesterModeCtrl.Value := testerMode ? 1 : 0
-
-    if IsObject(TesterStatusCtrl) {
-        if testerMode {
-            TesterStatusCtrl.Text := "Режим тестировщика включён"
-            TesterStatusCtrl.SetFont("c" colorGreen)
-        } else {
-            TesterStatusCtrl.Text := "Режим выключен — тестовые сборки недоступны"
-            TesterStatusCtrl.SetFont("c" colorMuted)
-        }
-    }
-
-    if IsObject(TesterInfoCtrl) && (TesterInfoCtrl.Value = "") {
-        if testerMode
-            TesterInfoCtrl.Value := "Нажми «Проверить», чтобы загрузить информацию о тестовой версии."
-        else
-            TesterInfoCtrl.Value := "Включи «Я тестировщик», затем нажми «Проверить»."
-    }
-}
-
-ToggleTesterMode(*) {
-    global TesterModeCtrl, testerMode, settingsFile
-
-    testerMode := (IsObject(TesterModeCtrl) && TesterModeCtrl.Value) ? 1 : 0
-    TryIniWrite(testerMode, settingsFile, "Updates", "testerMode", "ToggleTesterMode")
-    RefreshTesterView()
-    if testerMode
-        ShowToast("✓ Режим тестировщика включён")
-    else
-        ShowToast("Режим тестировщика выключен")
-}
-
-EnsureTesterModeEnabled() {
-    global testerMode
-    if testerMode
-        return true
-    ShowAppDialog("Тестировщик", "Сначала включи «Я тестировщик».`nБез этого тестовые сборки недоступны.")
-    return false
-}
-
-DownloadTestVersionManifest() {
-    global testVersionInfoUrl
-    requestUrl := testVersionInfoUrl "?nocache=" A_Now "_" A_TickCount
-    result := HttpGetText(requestUrl)
-    if (result["status"] != 200)
-        throw Error("GitHub вернул HTTP " result["status"] " для Test/Test.json.")
-    return result["text"]
-}
-
-CheckTestUpdates(*) {
-    global CURRENT_VERSION, TesterInfoCtrl
-
-    if !EnsureTesterModeEnabled()
-        return
-
-    progressDlg := ShowCloudCheckProgressDialog()
-    try progressDlg.Title := "Тестировщик"
-    Sleep(40)
+    testerLastCheck := "Проверка…"
+    WriteTesterState()
 
     try {
         versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
-        try progressDlg.Destroy()
-
         if (versionInfo["latest"] = "")
             throw Error("В Test/Test.json нет поля latest.")
 
-        lineBreak := Chr(10)
-        text := "Текущая версия: v" CURRENT_VERSION lineBreak
-        text .= "Тестовая latest: v" versionInfo["latest"] lineBreak
         cmp := CompareVersions(versionInfo["latest"], CURRENT_VERSION)
-        if (cmp > 0)
-            text .= "Статус: есть более новая test-сборка" lineBreak
-        else if (cmp = 0)
-            text .= "Статус: test совпадает с текущей" lineBreak
-        else
-            text .= "Статус: test старше текущей (или другой номер)" lineBreak
-        text .= lineBreak "Что нового:" lineBreak
+        status := (cmp > 0) ? "есть более новая test-сборка"
+            : (cmp = 0) ? "test совпадает с текущей"
+            : "test старше текущей"
+
+        text := "Текущая версия: v" CURRENT_VERSION
+            . "`nТестовая latest: v" versionInfo["latest"]
+            . "`nСтатус: " status
+            . "`n`nЧто нового:`n"
         if (versionInfo["changelog"].Length = 0)
             text .= "• список изменений не указан"
-        else {
+        else
             for _, entry in versionInfo["changelog"]
-                text .= "• " entry lineBreak
-        }
+                text .= "• " entry "`n"
         if (versionInfo["download"] != "")
-            text .= lineBreak "Ссылка: " versionInfo["download"]
+            text .= "`nСсылка: " versionInfo["download"]
 
-        if IsObject(TesterInfoCtrl)
-            TesterInfoCtrl.Value := text
-
-        ShowAppDialog("Тестировщик", "Проверка test-канала завершена.`n`nТестовая версия: v" versionInfo["latest"])
-        ShowToast("✓ Test-канал проверен")
+        testerLastCheck := text
+        ShowToast("✓ Test-канал проверен", 1800)
     } catch as err {
-        try progressDlg.Destroy()
-        LogError("CheckTestUpdates", "Ошибка test-канала", err.Message)
-        if IsObject(TesterInfoCtrl)
-            TesterInfoCtrl.Value := "Ошибка: " err.Message
-        ShowAppDialog("Тестировщик", "Не удалось проверить test-канал.`n`nУбедись, что на GitHub есть файл:`nTest/Test.json`n`n" err.Message)
+        testerLastCheck := "Ошибка: " err.Message
+        LogError("CheckTestUpdatesFromPanel", "Ошибка test-канала", err.Message)
+        ShowToast("⚠ Не удалось проверить test-канал", 2200)
     }
+    WriteTesterState()
 }
 
-DownloadTestUpdate(*) {
-    if !EnsureTesterModeEnabled()
+; Скачать test-сборку из панели (GET /tester/download → hud_commands.ini)
+DownloadTestUpdateFromPanel() {
+    global testerMode
+
+    if !testerMode {
+        ShowToast("⚠ Включи режим тестировщика", 2200)
         return
+    }
 
     try {
         versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
         if (versionInfo["download"] = "") {
-            ShowAppDialog("Тестировщик", "В Test/Test.json нет ссылки download.")
+            ShowToast("⚠ В Test/Test.json нет ссылки download", 2200)
             return
         }
         Run(versionInfo["download"])
-        ShowToast("✓ Открыта ссылка на test-сборку")
+        ShowToast("✓ Открыта ссылка на test-сборку", 1800)
     } catch as err {
-        LogError("DownloadTestUpdate", "Ошибка скачивания test", err.Message)
-        ShowAppDialog("Тестировщик", "Не удалось скачать test-сборку.`n`n" err.Message)
+        LogError("DownloadTestUpdateFromPanel", "Ошибка скачивания test", err.Message)
+        ShowToast("⚠ Не удалось скачать test-сборку", 2200)
     }
 }
 
-InstallTestUpdate(*) {
-    global basePath, backupPath, CURRENT_VERSION
+; Установить test-сборку из панели (GET /tester/install → hud_commands.ini)
+InstallTestUpdateFromPanel() {
+    global testerMode, basePath, backupPath
 
-    if !EnsureTesterModeEnabled()
+    if !testerMode {
+        ShowToast("⚠ Включи режим тестировщика", 2200)
         return
-
-    result := ShowAppDialog(
-        "Тестировщик",
-        "Установить тестовую сборку поверх текущей?`nБудет создан backup, затем файл заменят.`n`nСтабильный канал при этом не меняется — только локальный ChesNova.ahk.",
-        "YesNo"
-    )
-    if (result != "Yes")
-        return
+    }
 
     mainScript := basePath "\ChesNova.ahk"
     newScript := basePath "\ChesNova_test_new.ahk"
@@ -6018,10 +6003,9 @@ InstallTestUpdate(*) {
         if (downloadUrl = "")
             throw Error("Нет поля download в Test/Test.json.")
 
-        ; Если в манифесте zip — только открываем ссылку (установка zip вручную).
         if InStr(StrLower(downloadUrl), ".zip") {
             Run(downloadUrl)
-            ShowAppDialog("Тестировщик", "Это ZIP-сборка.`nСсылка открыта в браузере — распакуй и замени файлы вручную.")
+            ShowToast("ZIP-сборка — ссылка открыта", 2200)
             return
         }
 
@@ -6048,37 +6032,28 @@ InstallTestUpdate(*) {
             throw installErr
         }
 
-        ShowToast("✓ Test-сборка установлена")
-        PromptRestartAfterUpdate("Тестировщик", "Тестовая сборка установлена.`nBackup: " backupFile)
+        ShowToast("✓ Test-сборка установлена", 2200)
+        WriteTesterState()
     } catch as err {
         if FileExist(newScript)
             try FileDelete(newScript)
-        LogError("InstallTestUpdate", "Ошибка установки test", err.Message)
-        ShowAppDialog("Тестировщик", "Не удалось установить test-сборку.`n`n" err.Message)
+        LogError("InstallTestUpdateFromPanel", "Ошибка установки test", err.Message)
+        ShowToast("⚠ Не удалось установить test-сборку", 2200)
     }
 }
 
-; Откат с test-сборки на стабильный релиз (versions/version.json + versions/ChesNova.ahk).
-RollbackToStableRelease(*) {
-    global basePath, backupPath, CURRENT_VERSION
+; Откат на стабильный релиз из панели (GET /tester/rollback → hud_commands.ini)
+RollbackToStableReleaseFromPanel() {
+    global testerMode, basePath, backupPath
 
-    if !EnsureTesterModeEnabled()
+    if !testerMode {
+        ShowToast("⚠ Включи режим тестировщика", 2200)
         return
-
-    result := ShowAppDialog(
-        "Откат на релиз",
-        "Установить стабильную версию с GitHub?`nТекущий файл будет сохранён в backup, затем заменён релизом.`n`nСейчас у вас: v" CURRENT_VERSION,
-        "YesNo"
-    )
-    if (result != "Yes")
-        return
+    }
 
     mainScript := basePath "\ChesNova.ahk"
     newScript := basePath "\ChesNova_release_new.ahk"
     stableAhkUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/ChesNova.ahk"
-
-    progressDlg := ShowCloudCheckProgressDialog()
-    Sleep(40)
 
     try {
         if !FileExist(mainScript)
@@ -6088,7 +6063,6 @@ RollbackToStableRelease(*) {
         latest := versionInfo["latest"]
         downloadUrl := versionInfo["download"]
 
-        ; Для авто-установки нужен .ahk. В манифесте часто zip — тогда берём versions/ChesNova.ahk.
         installUrl := stableAhkUrl
         if (downloadUrl != "" && InStr(StrLower(downloadUrl), ".ahk") && !InStr(StrLower(downloadUrl), ".zip"))
             installUrl := downloadUrl
@@ -6113,150 +6087,14 @@ RollbackToStableRelease(*) {
             throw installErr
         }
 
-        try progressDlg.Destroy()
-
-        msg := "Стабильный релиз установлен."
-        if (latest != "")
-            msg .= "`nВерсия на GitHub: v" latest
-        msg .= "`nBackup: " backupFile
-        ShowToast("✓ Откат на релиз выполнен")
-        PromptRestartAfterUpdate("Откат на релиз", msg)
+        ShowToast("✓ Откат на релиз выполнен", 2200)
+        WriteTesterState()
     } catch as err {
-        try progressDlg.Destroy()
         if FileExist(newScript)
             try FileDelete(newScript)
-        LogError("RollbackToStableRelease", "Ошибка отката на релиз", err.Message)
-        ShowAppDialog("Откат на релиз", "Не удалось установить стабильную версию.`n`n" err.Message)
+        LogError("RollbackToStableReleaseFromPanel", "Ошибка отката на релиз", err.Message)
+        ShowToast("⚠ Не удалось выполнить откат", 2200)
     }
-}
-
-RefreshSettingsView() {
-    global logFile, LogFileTextCtrl
-
-    if IsObject(LogFileTextCtrl)
-        LogFileTextCtrl.Value := (logFile = "") ? "Файл не выбран" : logFile
-}
-
-HelpView() {
-    global HelpEditCtrl, ErrorsLogTextCtrl
-    global colorBg, colorCard, colorCardAlt, colorText, colorMuted
-
-    view := "Help"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Помощь")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    helpText := "
-(
-СТАРТ
-
-1. Откройте меню (по умолчанию F10).
-2. Укажите игровой ник и норму PM.
-3. chatlog.txt и корень игры подхватываются автоматически
-   (при необходимости — вручную в «Настройках» / «Скриптах»).
-4. Счётчик в игре ставится сам: loader-js.asi + ches.js
-   (вкладка «Скрипты», путь к RADMIR CRMP).
-5. Дождитесь зелёного статуса Cloud (вкладка Cloud).
-
-Без подтверждённого Cloud счётчик PM не считает.
-
-————————————————
-ГОРЯЧИЕ КЛАВИШИ (по умолчанию)
-
-F10 — меню ChesNova
-F9  — сброс PM (с сохранением в историю)
-F7  — AI-ассистент (окно в Windows)
-
-В чате игры: /ai ваш вопрос + Enter
-  → ответ показывается в игре (левый нижний угол, ~10 сек)
-
-Клавиши можно сменить или отключить во вкладке «Настройки».
-
-————————————————
-СЧЁТЧИК В ИГРЕ (ches.js)
-
-Правый нижний угол: ник, точка здоровья (ok / warn / critical), PM.
-Левый нижний угол: ответ AI или «AI думает…».
-
-Данные идут из ChesNova по локальному HTTP-мосту
-(127.0.0.1:17890). Окно AHK-оверлея больше не используется.
-
-————————————————
-НОРМА И ОТГУЛЫ
-
-Сброс: F9 или автосброс по времени в настройках.
-История нормы и отгулы — во вкладках «Норма» и «Отгулы».
-
-————————————————
-НАКАЗАНИЯ И PM-ЛОГИ
-
-Считаются только ваши действия из chatlog.
-Фильтр по типу, периоду и поиску. Совпадения помечаются «».
-
-————————————————
-БИНДЫ
-
-Включите «Бинды включены».
-Типы: клавиша, текстовая замена, макрос.
-
-Примеры триггеров:
-  F1     — клавиша
-  +1     — Shift+1
-  ^F5    — Ctrl+F5
-  !F2    — Alt+F2
-
-Превью — справа от списка.
-«Тест» — что уйдёт в чат, без отправки в игру.
-Импорт / экспорт — CSV.
-
-————————————————
-AI
-
-По умолчанию AI выключен (без сетевых запросов к API).
-Включите в «Настройках» → «Включить AI», если нужен.
-Ключ и дневной лимит — из Cloud по нику.
-Модель: Gemini, DeepSeek или Groq.
-  Gemini — A1000, DeepSeek — A999, Groq — A998.
-F7 — полное окно ассистента (история, лимит).
-/ai в игре — быстрый ответ прямо в HUD.
-
-————————————————
-ОБНОВЛЕНИЯ И СКРИПТЫ
-
-«Обновления» — проверить / установить релиз.
-«Скрипты» — путь к игре, установка loader + ches.js и пакетов.
-«Тестировщик» — только если вы тестер.
-
-————————————————
-ПОДДЕРЖКА
-
-Автор: Misha_Ches
-VK: vk.com/m.ches
-)"
-    HelpEditCtrl := AddViewControl(view, "Edit", "vHelpEdit x250 y84 w600 h240 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, helpText)
-
-    AddViewControl(view, "Text", "x250 y342 w220 Background" colorBg " c" colorMuted, "Последние ошибки")
-    refreshErrorsButton := AddViewControl(view, "Text", "x500 y338 w100 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
-    BindTextButton(refreshErrorsButton, colorCardAlt, RefreshErrorsLogView)
-    openErrorsButton := AddViewControl(view, "Text", "x610 y338 w110 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Открыть файл")
-    BindTextButton(openErrorsButton, colorCardAlt, OpenErrorsLogFile)
-    clearErrorsButton := AddViewControl(view, "Text", "x730 y338 w120 h28 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить лог")
-    BindTextButton(clearErrorsButton, colorCardAlt, ClearErrorsLog)
-    ErrorsLogTextCtrl := AddViewControl(view, "Edit", "vErrorsLogText x250 y376 w600 h108 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, GetLastErrorLogLines())
-}
-
-DiagnosticsView() {
-    global DiagnosticTextCtrl, DiagnosticHealthCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    view := "Diagnostics"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Диагностика")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-    AddViewControl(view, "Text", "x250 y94 w600 h380 Background" colorCard)
-    DiagnosticHealthCtrl := AddViewControl(view, "Text", "x274 y112 w530 h24 Background" colorCard " c" colorAccent " +0x200", GetHealthStatusLine())
-    AddViewControl(view, "Text", "x274 y140 w400 h18 Background" colorCard " c" colorMuted, "Проверка раз в 1 мин • автообновление на этой вкладке")
-    refreshButton := AddViewControl(view, "Text", "x660 y500 w190 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Обновить")
-    BindTextButton(refreshButton, colorCardAlt, RefreshDiagnosticsView)
-    DiagnosticTextCtrl := AddViewControl(view, "Edit", "x274 y168 w530 h310 ReadOnly -Wrap +WantReturn +VScroll Background" colorCard " c" colorText, BuildDiagnosticsText())
-    RunHealthCheck()
 }
 
 BuildDiagnosticsText() {
@@ -6306,17 +6144,6 @@ GetHealthStatusLine() {
     else if (healthState = "critical")
         label := "КРИТИЧНО"
     return label " — " healthMessage
-}
-
-GetHealthStatusColor() {
-    global healthState, colorGreen, colorRed, colorYellow, colorAccent
-    if (healthState = "ok")
-        return colorGreen
-    if (healthState = "warn")
-        return colorYellow
-    if (healthState = "critical")
-        return colorRed
-    return colorAccent
 }
 
 PushHealthIncident(message) {
@@ -6389,10 +6216,6 @@ RunHealthCheck(*) {
     }
 
     WriteHudBridgeState()
-
-    if (settingsMenuBuilding || !IsObject(SettingsGui) || CurrentView != "Diagnostics")
-        return
-    RefreshDiagnosticsView()
 }
 GetHighResolutionMilliseconds() {
     static frequency := 0
@@ -6418,141 +6241,10 @@ FormatDiagnosticBytes(bytes) {
         return Round(bytes / 1024, 1) " KB"
     return Round(bytes / 1024 / 1024, 2) " MB"
 }
-
-RefreshDiagnosticsView(*) {
-    global DiagnosticTextCtrl, DiagnosticHealthCtrl, SettingsGui, settingsMenuBuilding
-    if (settingsMenuBuilding || !IsObject(SettingsGui))
-        return
-    try {
-        if IsObject(DiagnosticTextCtrl)
-            DiagnosticTextCtrl.Value := BuildDiagnosticsText()
-        if IsObject(DiagnosticHealthCtrl) {
-            DiagnosticHealthCtrl.Text := GetHealthStatusLine()
-            DiagnosticHealthCtrl.SetFont("c" GetHealthStatusColor())
-        }
-    } catch as err {
-        ResetDiagnosticsControls()
-    }
-}
-
-CloudView() {
-    global CloudNickCtrl, CloudStatusCtrl, CloudAccessTextCtrl, CloudLastCheckCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorGreen
-
-    view := "Cloud"
-    AddViewControl(view, "Text", "x250 y34 w560 h28 Background" colorBg " c" colorText, "Cloud")
-    AddViewControl(view, "Text", "x250 y68 w600 h1 Background" uiDivider)
-
-    AddViewControl(view, "Text", "x250 y94 w600 h120 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y112 w220 h22 Background" colorCard " c" colorMuted, "Аккаунт администратора")
-    CloudNickCtrl := AddViewControl(view, "Text", "x270 y140 w260 h30 Background" colorCard " c" colorAccent " +0x200", "")
-    CloudStatusCtrl := AddViewControl(view, "Text", "x270 y174 w260 h24 Background" colorCard " c" colorGreen " +0x200", "")
-    checkButton := AddViewControl(view, "Text", "x610 y128 w110 h30 +0x200 Center Background" colorAccent " c" colorText, "Проверить")
-    BindTextButton(checkButton, colorAccent, CloudCheckAccess)
-    changeNickButton := AddViewControl(view, "Text", "x732 y128 w98 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Сменить ник")
-    BindTextButton(changeNickButton, colorCardAlt, CloudChangeNick)
-
-    AddViewControl(view, "Text", "x250 y236 w290 h116 Background" colorCard)
-    AddViewControl(view, "Text", "x270 y258 w220 h22 Background" colorCard " c" colorMuted, "Статус доступа")
-    CloudAccessTextCtrl := AddViewControl(view, "Text", "x270 y286 w230 h26 Background" colorCard " c" colorAccent " +0x200", "")
-    CloudLastCheckCtrl := AddViewControl(view, "Text", "x270 y318 w230 h22 Background" colorCard " c" colorMuted, "")
-}
-
-RefreshCloudView(*) {
-    global SettingsGui
-    global nick, cloudAccessMessage, cloudLastCheck
-    global CloudNickCtrl, CloudStatusCtrl, CloudAccessTextCtrl, CloudLastCheckCtrl
-    global pmCount, norm, colorMuted
-
-    UpdateCloudHudDot()
-    if !IsObject(SettingsGui)
-        return
-
-    try {
-        if IsObject(CloudNickCtrl)
-            CloudNickCtrl.Text := nick
-        if IsObject(CloudStatusCtrl) {
-            CloudStatusCtrl.Text := GetCloudStatusText()
-            CloudStatusCtrl.SetFont("c" GetCloudStatusColor())
-        }
-        if IsObject(CloudAccessTextCtrl) {
-            CloudAccessTextCtrl.Text := cloudAccessMessage
-            CloudAccessTextCtrl.SetFont("c" GetCloudStatusColor())
-        }
-        if IsObject(CloudLastCheckCtrl)
-            CloudLastCheckCtrl.Text := (cloudLastCheck = "") ? "Проверка ещё не выполнялась" : "Последняя проверка: " cloudLastCheck
-    } catch as err {
-        ResetCloudControls()
-    }
-}
-
-CloudCheckAccess(*) {
-    global nick, cloudAccessState, cloudAccessMessage, colorGreen, colorRed
-
-    progressDlg := ShowCloudCheckProgressDialog()
-    ; Даем окну отрисоваться до синхронного HTTP-запроса.
-    Sleep(50)
-    CheckCloudAccess(false, false)
-    try progressDlg.Destroy()
-
-    RefreshDashboardView()
-    RefreshCloudView()
-
-    if (cloudAccessState = "ok") {
-        ShowAppDialog(
-            "Cloud",
-            "Проверка завершена успешно.`n`nНик: " nick "`nСтатус: доступ подтверждён.",
-            "OK",
-            colorGreen
-        )
-        ShowToast("✓ Cloud: доступ подтверждён")
-        return
-    }
-
-    detail := cloudAccessMessage
-    if (detail = "")
-        detail := GetCloudStatusText()
-
-    ShowAppDialog(
-        "Cloud",
-        "Проверка завершена неудачно.`n`nНик: " nick "`nПричина: " detail,
-        "OK",
-        colorRed
-    )
-}
-
-ShowCloudCheckProgressDialog() {
-    global colorBg, colorCard, colorAccent, colorText, colorMuted
-
-    dlg := Gui("+Border -SysMenu", "Cloud")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-    dlg.Add("Text", "x0 y0 w380 h140 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w344 h104 Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y40 w300 h24 Background" colorCard, "Проверка доступа…")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y72 w300 h36 Background" colorCard, "Сверяем ник с таблицей Cloud.`nПодождите несколько секунд.")
-    dlg.Show("w380 h140")
-    try WinActivate(dlg.Hwnd)
-    return dlg
-}
-
-CloudChangeNick(*) {
-    EnsureNickBeforeCloudAccess(true, "Введите ник для Cloud-доступа.")
-    CheckCloudAccess(false, false)
-    RefreshDashboardView()
-    RefreshCloudView()
-}
-
 SendCloudPing(*) {
     CheckCloudAccess(false, false)
-    RefreshDashboardView()
-    RefreshCloudView()
+    WriteHudBridgeState()
 }
-
 StartupNetworkInit(*) {
     global checkUpdatesOnStartup, aiEnabled
     CheckCloudAccess(true, true)
@@ -6562,7 +6254,6 @@ StartupNetworkInit(*) {
         CheckForUpdates()
     CheckNotifications()
 }
-
 GetCloudStatusText() {
     global cloudAccessState
 
@@ -6579,20 +6270,6 @@ GetCloudStatusText() {
 
     return "не проверено"
 }
-
-GetCloudStatusColor() {
-    global cloudAccessState, colorGreen, colorRed, colorYellow, colorAccent
-
-    switch cloudAccessState {
-        case "ok":
-            return colorGreen
-        case "blocked", "denied", "offline":
-            return colorRed
-    }
-
-    return colorAccent
-}
-
 GetCloudLocalDataSummary() {
     global pmLogsFile, historyFile
 
@@ -6617,346 +6294,6 @@ CountFileRecords(filePath) {
 
     return count
 }
-
-OpenMenuLegacy(*) {
-    BuildMainWindow("Settings")
-}
-
-
-ResetDashboardControls() {
-    global DashboardNickCtrl, DashboardSystemStatusCtrl, DashboardCloudStatusCtrl
-    global DashboardNormCtrl, DashboardVersionCtrl, DashboardNormTitleCtrl
-    global DashboardNormPmCtrl, DashboardNormRemainingCtrl, DashboardNormPercentCtrl
-    global DashboardProgressBgCtrl, DashboardProgressFillCtrl, DashboardLogFileCtrl
-    global DashboardDaysOffMonthCtrl
-    global DashboardStatusChatlogCtrl, DashboardStatusGameCtrl, DashboardStatusHudCtrl
-
-    DashboardNickCtrl := ""
-    DashboardSystemStatusCtrl := ""
-    DashboardCloudStatusCtrl := ""
-    DashboardNormCtrl := ""
-    DashboardVersionCtrl := ""
-    DashboardNormTitleCtrl := ""
-    DashboardNormPmCtrl := ""
-    DashboardNormRemainingCtrl := ""
-    DashboardNormPercentCtrl := ""
-    DashboardProgressBgCtrl := ""
-    DashboardProgressFillCtrl := ""
-    DashboardLogFileCtrl := ""
-    DashboardDaysOffMonthCtrl := ""
-    DashboardStatusChatlogCtrl := ""
-    DashboardStatusGameCtrl := ""
-    DashboardStatusHudCtrl := ""
-}
-
-ResetDiagnosticsControls() {
-    global DiagnosticTextCtrl, DiagnosticHealthCtrl
-    DiagnosticTextCtrl := ""
-    DiagnosticHealthCtrl := ""
-}
-
-ResetCloudControls() {
-    global CloudNickCtrl, CloudStatusCtrl, CloudAccessTextCtrl, CloudLastCheckCtrl
-
-    CloudNickCtrl := ""
-    CloudStatusCtrl := ""
-    CloudAccessTextCtrl := ""
-    CloudLastCheckCtrl := ""
-}
-
-ResetNotificationControls() {
-    global NotificationButtonCtrl, NotificationIndicatorCtrl
-
-    NotificationButtonCtrl := ""
-    NotificationIndicatorCtrl := ""
-}
-
-CloseSettings(*) {
-    global SettingsGui, settingsMenuHidden, CurrentView
-    SaveMenuPosition()
-    SafeDestroyGui(&SettingsGui)
-    settingsMenuHidden := false
-    CurrentView := ""
-    ResetDashboardControls()
-    ResetDiagnosticsControls()
-    ResetCloudControls()
-    ResetNotificationControls()
-}
-
-HideSettingsMenu(*) {
-    global SettingsGui, settingsMenuHidden
-
-    if !IsObject(SettingsGui)
-        return
-
-    SaveMenuPosition()
-    SettingsGui.Hide()
-    settingsMenuHidden := true
-}
-
-SaveMenuPosition() {
-    global SettingsGui, menuX, menuY, settingsFile
-
-    if !IsObject(SettingsGui)
-        return
-
-    try {
-        SettingsGui.GetPos(&menuX, &menuY)
-        TryIniWrite(menuX, settingsFile, "GUI", "menuX", "SaveMenuPosition")
-        TryIniWrite(menuY, settingsFile, "GUI", "menuY", "SaveMenuPosition")
-    } catch as err {
-        LogError("SaveMenuPosition", "Ошибка сохранения позиции меню", err.Message)
-    }
-}
-
-SelectLogFile(*) {
-    global logFile, lastSize, LogFileTextCtrl, settingsFile
-
-    startDir := GetDefaultChatlogPath()
-    if !FileExist(startDir)
-        startDir := A_MyDocuments "\RADMIR CRMP User Files\SAMP"
-    selectedFile := FileSelect(3, startDir, "Выберите chatlog.txt", "*.txt")
-    if (selectedFile != "") {
-        logFile := selectedFile
-        try lastSize := FileGetSize(logFile)
-        catch
-            lastSize := 0
-        if IsObject(LogFileTextCtrl)
-            LogFileTextCtrl.Value := logFile
-        TryIniWrite(logFile, settingsFile, "Main", "logFile", "SelectLogFile")
-        AppendPmLog("Действие", "Выбран файл логов: " logFile)
-        ShowToast("✓ chatlog выбран", 1800)
-    }
-}
-
-; ------------------------------------------------------------
-; 06. History window
-; ------------------------------------------------------------
-
-; =========================
-; 📊 HISTORY — ТОЛЬКО ПОСЛЕДНИЕ 7 ДНЕЙ
-; =========================
-OpenHistory(*) {
-    BuildMainWindow("NormHistory")
-}
-
-OpenHistoryLegacy(*) {
-    BuildMainWindow("NormHistory")
-}
-CloseHistory(*) {
-    global HistoryGui
-    SafeDestroyGui(&HistoryGui)
-}
-
-
-; ------------------------------------------------------------
-; 07. Punishments window
-; ------------------------------------------------------------
-
-; =========================
-; ⚖️ PUNISHMENTS — ИСТОРИЯ ПО ДНЯМ
-; =========================
-OpenPunishments(*) {
-    BuildMainWindow("Punishments")
-}
-
-OpenPunishmentsLegacy(*) {
-    BuildMainWindow("Punishments")
-}
-
-RefreshPunishmentView(*) {
-    RenderPunishmentView()
-}
-
-SetPunishmentToday(*) {
-    SetPunishmentPeriod(1)
-}
-
-SetPunishment3Days(*) {
-    SetPunishmentPeriod(3)
-}
-
-SetPunishment10Days(*) {
-    SetPunishmentPeriod(10)
-}
-
-SetPunishmentAllTime(*) {
-    SetPunishmentPeriod(0)
-}
-
-ShowPunishmentKick(*) {
-    ShowPunishmentType("kick")
-}
-
-ShowPunishmentJail(*) {
-    ShowPunishmentType("jail")
-}
-
-ShowPunishmentWarn(*) {
-    ShowPunishmentType("warn")
-}
-
-ShowPunishmentMute(*) {
-    ShowPunishmentType("mute")
-}
-
-ShowPunishmentVmute(*) {
-    ShowPunishmentType("vmute")
-}
-
-ShowPunishmentRmute(*) {
-    ShowPunishmentType("rmute")
-}
-
-ShowPunishmentGunban(*) {
-    ShowPunishmentType("gunban")
-}
-
-ShowPunishmentBan(*) {
-    ShowPunishmentType("ban")
-}
-
-ShowPunishmentSban(*) {
-    ShowPunishmentType("sban")
-}
-
-ShowPunishmentAll(*) {
-    ShowPunishmentType("all")
-}
-
-ClosePunishments(*) {
-    global PunishmentsGui
-    SafeDestroyGui(&PunishmentsGui)
-}
-; ------------------------------------------------------------
-; 08. Help window
-; ------------------------------------------------------------
-
-; =========================
-; ❓ HELP MENU (FIX FOCUS + VK)
-; =========================
-OpenHelp(*) {
-    BuildMainWindow("Help")
-}
-
-OpenHelpLegacy(*) {
-    BuildMainWindow("Help")
-}
-
-CloseHelp(*) {
-    global HelpGui
-    SafeDestroyGui(&HelpGui)
-}
-
-; ------------------------------------------------------------
-; 09. Save settings and manual commands
-; ------------------------------------------------------------
-
-; =========================
-; 💾 SAVE SETTINGS
-; =========================
-SaveSettings(*) {
-    global SettingsGui
-    global nick, userNick, norm, autoResetEnabled, bindsEnabled, checkUpdatesOnStartup, startWithWindows, resetHour, resetMinute
-    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiEnabled, aiProvider
-    global geminiApiKey, geminiModel, deepseekApiKey, deepseekModel, groqApiKey, groqModel
-    global uiTheme, settingsFile, logFile, lastResetDate, guiX, guiY, menuX, menuY, aiGuiX, aiGuiY
-
-    SaveMenuPosition()
-    values := SettingsGui.Submit()
-    wasAutoResetEnabled := autoResetEnabled
-    nick := Trim(values.SetNick)
-    userNick := nick
-    norm := values.SetNorm + 0
-    autoResetEnabled := values.SetAutoReset
-    checkUpdatesOnStartup := values.SetCheckUpdates
-    startWithWindows := values.SetStartup
-    resetHour := values.SetResetHour
-    resetMinute := values.SetResetMinute
-
-    if (autoResetEnabled && !wasAutoResetEnabled) {
-        nowDate := FormatTime(A_Now, "yyyyMMdd")
-        nowKey := FormatTime(A_Now, "yyyyMMddHHmm")
-        targetKey := nowDate . Format("{:02}{:02}", resetHour, resetMinute)
-        if (nowKey >= targetKey)
-            lastResetDate := nowDate
-    }
-
-    menuKey := values.SetMenuKey
-    resetKey := values.SetResetKey
-    aiKey := values.SetAiKey
-    menuKeyEnabled := values.SetMenuKeyEnabled
-    resetKeyEnabled := values.SetResetKeyEnabled
-    aiKeyEnabled := values.SetAiKeyEnabled
-    if values.HasOwnProp("SetAiEnabled")
-        aiEnabled := values.SetAiEnabled ? 1 : 0
-    else
-        aiEnabled := aiEnabled ? 1 : 0
-    if values.HasOwnProp("SetAiProvider") {
-        providerText := StrLower(Trim(values.SetAiProvider))
-        if InStr(providerText, "deepseek")
-            aiProvider := "deepseek"
-        else if InStr(providerText, "groq")
-            aiProvider := "groq"
-        else
-            aiProvider := "gemini"
-    }
-
-    try {
-        IniWrite(nick, settingsFile, "Main", "nick")
-        IniWrite(norm, settingsFile, "Main", "norm")
-        IniWrite(logFile, settingsFile, "Main", "logFile")
-        IniWrite(autoResetEnabled, settingsFile, "Main", "autoResetEnabled")
-        IniWrite(bindsEnabled, settingsFile, "Main", "bindsEnabled")
-        IniWrite(checkUpdatesOnStartup, settingsFile, "Updates", "checkOnStartup")
-        IniWrite(testerMode, settingsFile, "Updates", "testerMode")
-        IniWrite(startWithWindows, settingsFile, "Launcher", "startWithWindows")
-        IniWrite(resetHour, settingsFile, "Main", "resetHour")
-        IniWrite(resetMinute, settingsFile, "Main", "resetMinute")
-        IniWrite(lastResetDate, settingsFile, "Main", "lastResetDate")
-        IniWrite(menuKey, settingsFile, "Keys", "menuKey")
-        IniWrite(resetKey, settingsFile, "Keys", "resetKey")
-        IniWrite(aiKey, settingsFile, "Keys", "aiKey")
-        IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
-        IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
-        IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
-        IniWrite(aiEnabled, settingsFile, "AI", "aiEnabled")
-        IniWrite(geminiApiKey, settingsFile, "AI", "geminiApiKey")
-        IniWrite(geminiModel, settingsFile, "AI", "geminiModel")
-        IniWrite(deepseekApiKey, settingsFile, "AI", "deepseekApiKey")
-        IniWrite(deepseekModel, settingsFile, "AI", "deepseekModel")
-        IniWrite(groqApiKey, settingsFile, "AI", "groqApiKey")
-        IniWrite(groqModel, settingsFile, "AI", "groqModel")
-        IniWrite(aiProvider, settingsFile, "AI", "aiProvider")
-        IniWrite(guiX, settingsFile, "GUI", "guiX")
-        IniWrite(guiY, settingsFile, "GUI", "guiY")
-        IniWrite(menuX, settingsFile, "GUI", "menuX")
-        IniWrite(menuY, settingsFile, "GUI", "menuY")
-        IniWrite(aiGuiX, settingsFile, "GUI", "aiGuiX")
-        IniWrite(aiGuiY, settingsFile, "GUI", "aiGuiY")
-        IniWrite(uiTheme, settingsFile, "GUI", "uiTheme")
-        SetWindowsStartup(startWithWindows)
-    } catch as err {
-        LogError("SaveSettings", "Ошибка записи settings.ini", err.Message)
-        MsgBox("Не удалось сохранить настройки.`n`n" err.Message, "Ошибка", "Iconx")
-        return
-    }
-    AppendPmLog("Действие", "Сохранены настройки ChesNova")
-    ShowToast("✓ Настройки сохранены")
-
-    SafeDestroyGui(&SettingsGui)
-    ResetDashboardControls()
-    ResetDiagnosticsControls()
-    ResetCloudControls()
-    ResetNotificationControls()
-
-    RegisterHotkeys()
-
-    if aiEnabled
-        SetTimer(FetchAiConfigFromCloud, -200)
-    UpdatePMDisplay()
-}
-
 SetWindowsStartup(enabled) {
     launcherPath := A_MyDocuments "\ChesNova\ChesNovaLauncher.ahk"
     runKey := "HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
@@ -6970,58 +6307,6 @@ SetWindowsStartup(enabled) {
 
 ; =========================
 ; RESET
-; =========================
-ResetPM(*) {
-    global ResetConfirmGui
-
-    SafeDestroyGui(&ResetConfirmGui)
-    ResetConfirmGui := Gui("+Border", "Сброс PM")
-    ResetConfirmGui.BackColor := "121214"
-    ResetConfirmGui.MarginX := 14
-    ResetConfirmGui.MarginY := 14
-    ResetConfirmGui.SetFont("s10 cFFFFFF", "Segoe UI")
-    ResetConfirmGui.SetFont("s12 Bold")
-    ResetConfirmGui.Add("Text", "x14 y10 w220", "Сброс PM")
-    ResetConfirmGui.SetFont("s12 Bold cFF4D4D")
-    closeCtrl := ResetConfirmGui.Add("Text", "x260 y8 w20 Center", "✕")
-    closeCtrl.OnEvent("Click", CancelResetPM)
-    ResetConfirmGui.Add("Text", "x10 y38 w275 h1 0x10 Background2a2a2a")
-    ResetConfirmGui.SetFont("s9 Norm cFFFFFF")
-    ResetConfirmGui.Add("Text", "x14 y55 w260", "Сбросить текущий счетчик PM?")
-    ResetConfirmGui.Add("Text", "x14 y80 w260 cA8A8A8", "Текущий результат будет сохранен в историю.")
-    global colorAccent, colorCardAlt, colorText
-    resetButton := ResetConfirmGui.Add("Text", "x14 y120 w125 h30 +0x200 Center Background" colorAccent " c" colorText, "Сбросить")
-    BindTextButton(resetButton, colorAccent, ConfirmResetPM)
-    cancelButton := ResetConfirmGui.Add("Text", "x149 y120 w125 h30 +0x200 Center Background" colorCardAlt " c" colorText, "Отмена")
-    BindTextButton(cancelButton, colorCardAlt, CancelResetPM)
-    ResetConfirmGui.Show("w290 h165")
-    try WinActivate(ResetConfirmGui.Hwnd)
-}
-
-ConfirmResetPM(*) {
-    global ResetConfirmGui, pmCount, saveFile, dotRed, beepPlayed, PMCountTextCtrl, StatusDotCtrl
-
-    SafeDestroyGui(&ResetConfirmGui)
-    SaveDayStats()
-    pmCount := 0
-    TryFileDelete(saveFile, "ConfirmResetPM", "Ошибка удаления pm_count.txt")
-    if IsObject(PMCountTextCtrl)
-        PMCountTextCtrl.Text := "PM:0"
-    UpdatePMDisplay()
-    if IsObject(StatusDotCtrl) {
-        StatusDotCtrl.Text := "●"
-        StatusDotCtrl.SetFont("c" dotRed)
-    }
-    beepPlayed := false
-    ShowToast("✓ Счётчик PM сброшен")
-}
-
-CancelResetPM(*) {
-    global ResetConfirmGui
-    SafeDestroyGui(&ResetConfirmGui)
-}
-; =========================
-; CENTER GUI
 ; =========================
 SaveAiQuotaLocal() {
     global settingsFile, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate
@@ -7274,281 +6559,59 @@ GetAiLimitStatusText() {
     return GetAiProviderLabel() " · лимит сегодня: " aiDailyUsed "/" aiDailyLimit " (осталось " aiDailyRemaining ")"
 }
 
-SetAiAskButtonLoading(isLoading) {
-    global AiAskBtnCtrl, colorAccent, colorCardAlt, colorText
-    if !IsObject(AiAskBtnCtrl)
-        return
-    try {
-        if (isLoading) {
-            AiAskBtnCtrl.Text := "Загрузка…"
-            AiAskBtnCtrl.Opt("Background" colorCardAlt)
-        } else {
-            AiAskBtnCtrl.Text := "Спросить"
-            AiAskBtnCtrl.Opt("Background" colorAccent)
-        }
-    }
+ToggleGamePanel(*) {
+    global panelToggleSeq
+    panelToggleSeq += 1
+    WriteHudBridgeState()
 }
 
-SaveAiGuiPosition() {
-    global AiGui, aiGuiX, aiGuiY, settingsFile
-    if !IsObject(AiGui)
-        return
-    try {
-        AiGui.GetPos(&aiGuiX, &aiGuiY)
-        TryIniWrite(aiGuiX, settingsFile, "GUI", "aiGuiX", "SaveAiGuiPosition")
-        TryIniWrite(aiGuiY, settingsFile, "GUI", "aiGuiY", "SaveAiGuiPosition")
-    }
-}
-
-OpenAiAssistant(*) {
-    global AiGui, AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, AiAskBtnCtrl, lastAiOpenTick
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, uiInputBg, uiDivider
-    global aiGuiX, aiGuiY, aiConfigLoaded, aiEnabled
-
-    if !aiEnabled {
-        ShowToast("AI отключён — включите в Настройках", 2800)
-        return
-    }
-    if (A_TickCount - lastAiOpenTick < 350)
-        return
-    lastAiOpenTick := A_TickCount
-
-    if IsObject(AiGui) {
-        try {
-            if WinExist("ahk_id " AiGui.Hwnd) {
-                CloseAiAssistant()
-                return
-            }
-        }
-        SafeDestroyGui(&AiGui)
-        AiQuestionCtrl := ""
-        AiAnswerCtrl := ""
-        AiStatusCtrl := ""
-        AiLimitCtrl := ""
-        AiAskBtnCtrl := ""
-    }
-
-    ; Окно сразу — без ожидания сети (не блокирует бинды)
-    AiGui := Gui("+AlwaysOnTop +Border -MinimizeBox", "ChesNova AI")
-    AiGui.BackColor := colorBg
-    AiGui.MarginX := 0
-    AiGui.MarginY := 0
-    AiGui.OnEvent("Close", CloseAiAssistant)
-    AiGui.OnEvent("Escape", CloseAiAssistant)
-
-    AiGui.Add("Text", "x0 y0 w460 h520 Background" colorBg)
-    AiGui.SetFont("s12 Bold c" colorText, "Segoe UI")
-    AiGui.Add("Text", "x18 y14 w424 h26 Background" colorBg, "AI-ассистент")
-    AiGui.Add("Text", "x18 y46 w424 h1 Background" uiDivider)
-
-    AiGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    AiLimitCtrl := AiGui.Add("Text", "x18 y56 w424 h20 Background" colorBg " c" colorMuted, GetAiLimitStatusText())
-
-    AiGui.SetFont("s9 Bold c" colorText, "Segoe UI")
-    AiGui.Add("Text", "x18 y84 w424 h20 Background" colorBg, "Ваш вопрос")
-    AiGui.SetFont("s10 Norm c" colorText, "Segoe UI")
-    AiQuestionCtrl := AiGui.Add("Edit", "x18 y108 w424 h90 +Multi +WantReturn -Wrap VScroll Background" uiInputBg " c" colorText, "")
-
-    AiAskBtnCtrl := AiGui.Add("Text", "x18 y210 w136 h32 +0x200 Center Background" colorAccent " c" colorText, "Спросить")
-    BindTextButton(AiAskBtnCtrl, colorAccent, SubmitAiQuestion)
-    clearBtn := AiGui.Add("Text", "x162 y210 w136 h32 +0x200 Center Background" colorCardAlt " c" colorText, "Очистить")
-    BindTextButton(clearBtn, colorCardAlt, ClearAiAssistant)
-    histBtn := AiGui.Add("Text", "x306 y210 w136 h32 +0x200 Center Background" colorCardAlt " c" colorText, "История")
-    BindTextButton(histBtn, colorCardAlt, ShowAiHistoryDialog)
-
-    AiGui.SetFont("s9 Bold c" colorText, "Segoe UI")
-    AiGui.Add("Text", "x18 y256 w424 h20 Background" colorBg, "Ответ")
-    AiGui.SetFont("s10 Norm c" colorText, "Segoe UI")
-    AiAnswerCtrl := AiGui.Add("Edit", "x18 y280 w424 h170 +Multi +ReadOnly Wrap +VScroll Background" colorCard " c" colorText, "")
-
-    AiGui.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    AiStatusCtrl := AiGui.Add("Text", "x18 y462 w424 h40 Background" colorBg " c" colorMuted, "Ключ и лимит — из Google-таблицы по нику.")
-
-    showOpts := "w460 h520"
-    if (aiGuiX = "Center" || aiGuiY = "Center" || aiGuiX = "" || aiGuiY = "")
-        showOpts .= " xCenter yCenter"
+ToggleGameHud(*) {
+    global hudBridgeVisible
+    hudBridgeVisible := hudBridgeVisible ? 0 : 1
+    WriteHudBridgeState()
+    if hudBridgeVisible
+        ShowToast("HUD: показан", 1200)
     else
-        showOpts .= " x" aiGuiX " y" aiGuiY
-    AiGui.Show(showOpts)
-
-    try {
-        WinActivate(AiGui.Hwnd)
-        AiQuestionCtrl.Focus()
-    }
-
-    if !aiConfigLoaded {
-        if IsObject(AiLimitCtrl)
-            AiLimitCtrl.Text := "Лимит: загрузка из Cloud…"
-        if IsObject(AiStatusCtrl)
-            AiStatusCtrl.Text := "Подключение к Cloud, загрузка ключа и лимита…"
-    }
-    SetTimer(RefreshAiConfigAfterOpen, -50)
+        ShowToast("HUD: скрыт", 1200)
 }
 
-RefreshAiConfigAfterOpen(*) {
-    global AiLimitCtrl, AiStatusCtrl, aiProvider, colorGreen, colorRed
-    ok := FetchAiConfigFromCloud()
-    if IsObject(AiLimitCtrl)
-        AiLimitCtrl.Text := GetAiLimitStatusText()
-    if !IsObject(AiStatusCtrl)
-        return
-    if ok && (GetCurrentAiApiKey() != "") {
-        AiStatusCtrl.Text := "Готово (" GetAiProviderLabel() "). Можно задавать вопрос."
-        AiStatusCtrl.SetFont("s9 Norm c" colorGreen, "Segoe UI")
-    } else if ok {
-        AiStatusCtrl.Text := "Конфиг получен, но ключ " GetAiProviderLabel() " пуст (проверьте " GetAiKeyCellHint() ")."
-        AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
-    } else {
-        AiStatusCtrl.Text := "Не удалось загрузить AI-конфиг. Проверьте Cloud и ник."
-        AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
-    }
+; Хоткей сброса нормы → запрос подтверждения в игровой панели (CEF)
+PromptManualNormReset(*) {
+    global pendingNormResetConfirm
+    pendingNormResetConfirm := 1
+    WriteHudBridgeState()
 }
 
-SubmitAiQuestion(*) {
-    global AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, aiRequestBusy
-    global geminiApiKey, aiProvider, colorAccent, colorYellow, colorRed, colorMuted, colorGreen
-
-    if !IsObject(AiQuestionCtrl) || aiRequestBusy
-        return
-
-    question := Trim(AiQuestionCtrl.Value)
-    if (question = "") {
-        if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Введите вопрос, затем нажмите «Спросить»."
-            AiStatusCtrl.SetFont("s9 Norm c" colorYellow, "Segoe UI")
-        }
-        return
-    }
-
-    aiRequestBusy := true
-    SetAiAskButtonLoading(true)
-    if IsObject(AiAnswerCtrl)
-        AiAnswerCtrl.Value := "Загрузка ответа…"
-    if IsObject(AiStatusCtrl) {
-        AiStatusCtrl.Text := "Ожидание ответа Gemini…"
-        AiStatusCtrl.SetFont("s9 Norm c" colorAccent, "Segoe UI")
-    }
-
-    ; Не блокируем UI полностью: async HTTP с Sleep внутри
-    if (GetCurrentAiApiKey() = "")
-        FetchAiConfigFromCloud()
-
-    if (GetCurrentAiApiKey() = "") {
-        if IsObject(AiAnswerCtrl)
-            AiAnswerCtrl.Value := ""
-        if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Ключ " GetAiProviderLabel() " пуст. Проверьте " GetAiKeyCellHint() " и доступ ника."
-            AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
-        }
-        SetAiAskButtonLoading(false)
-        aiRequestBusy := false
-        return
-    }
-
-    quota := ConsumeAiQuotaFromCloud()
-    if IsObject(AiLimitCtrl)
-        AiLimitCtrl.Text := GetAiLimitStatusText()
-
-    if !quota["ok"] {
-        if IsObject(AiAnswerCtrl)
-            AiAnswerCtrl.Value := ""
-        if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := quota["reason"]
-            AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
-        }
-        SetAiAskButtonLoading(false)
-        aiRequestBusy := false
-        return
-    }
-
-    try {
-        if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Ожидание ответа " GetAiProviderLabel() "…"
-            AiStatusCtrl.SetFont("s9 Norm c" colorAccent, "Segoe UI")
-        }
-        answer := AskAI(question)
-        PushAiHistory(question, answer)
-        if IsObject(AiAnswerCtrl)
-            AiAnswerCtrl.Value := answer
-        if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Ответ получен (" GetAiProviderLabel() ")."
-            AiStatusCtrl.SetFont("s9 Norm c" colorGreen, "Segoe UI")
-        }
-        if IsObject(AiLimitCtrl)
-            AiLimitCtrl.Text := GetAiLimitStatusText()
-        try RefreshAiHistoryPanel()
-    } catch as err {
-        LogError("SubmitAiQuestion", GetAiProviderLabel(), err.Message)
-        if IsObject(AiAnswerCtrl)
-            AiAnswerCtrl.Value := "Ошибка: " err.Message
-        if IsObject(AiStatusCtrl) {
-            AiStatusCtrl.Text := "Не удалось получить ответ."
-            AiStatusCtrl.SetFont("s9 Norm c" colorRed, "Segoe UI")
-        }
-    }
-
-    SetAiAskButtonLoading(false)
-    aiRequestBusy := false
+CancelPendingNormReset() {
+    global pendingNormResetConfirm
+    pendingNormResetConfirm := 0
+    WriteHudBridgeState()
 }
 
-ClearAiAssistant(*) {
-    global AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, colorMuted, aiRequestBusy
-    if aiRequestBusy
-        return
-    if IsObject(AiQuestionCtrl)
-        AiQuestionCtrl.Value := ""
-    if IsObject(AiAnswerCtrl)
-        AiAnswerCtrl.Value := ""
-    if IsObject(AiStatusCtrl) {
-        AiStatusCtrl.Text := "Поле очищено."
-        AiStatusCtrl.SetFont("s9 Norm c" colorMuted, "Segoe UI")
+DoManualNormReset() {
+    global pmCount, beepPlayed, saveFile, settingsFile, lastResetDate
+    global StatusDotCtrl, PMCountTextCtrl, dotRed, pendingNormResetConfirm
+
+    pendingNormResetConfirm := 0
+    SaveDayStats()
+    pmCount := 0
+    TryFileDelete(saveFile, "DoManualNormReset", "Ошибка удаления pm_count.txt")
+    lastResetDate := FormatTime(A_Now, "yyyyMMdd")
+    TryIniWrite(lastResetDate, settingsFile, "Main", "lastResetDate", "DoManualNormReset")
+    if IsObject(PMCountTextCtrl)
+        PMCountTextCtrl.Text := "PM:0"
+    UpdatePMDisplay()
+    if IsObject(StatusDotCtrl) {
+        StatusDotCtrl.Text := "●"
+        StatusDotCtrl.SetFont("c" dotRed)
     }
-    try {
-        if IsObject(AiQuestionCtrl)
-            AiQuestionCtrl.Focus()
-    }
+    beepPlayed := false
+    AppendPmLog("Действие", "Сброшен счетчик PM (вручную)")
+    WriteHudBridgeState()
+    WriteNormHistoryState()
+    WritePmLogsState()
+    ShowToast("✓ Норма сброшена", 1800)
 }
-
-CloseAiAssistant(*) {
-    global AiGui, AiQuestionCtrl, AiAnswerCtrl, AiStatusCtrl, AiLimitCtrl, AiAskBtnCtrl, aiRequestBusy
-    SaveAiGuiPosition()
-    aiRequestBusy := false
-    SafeDestroyGui(&AiGui)
-    AiQuestionCtrl := ""
-    AiAnswerCtrl := ""
-    AiStatusCtrl := ""
-    AiLimitCtrl := ""
-    AiAskBtnCtrl := ""
-}
-
-RefreshAiHistoryPanel() {
-    ; no-op: история в отдельном диалоге
-}
-
-ShowAiHistoryDialog(*) {
-    global colorBg, colorCard, colorAccent, colorText, colorMuted
-    report := BuildAiHistoryText()
-    dlg := Gui("+Border", "История AI")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-    dlg.Add("Text", "x0 y0 w520 h440 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w484 h50 Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x34 y28 w400 h24 Background" colorCard, "История вопросов")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x34 y52 w400 h18 Background" colorCard, "Последние ответы (новые сверху)")
-    dlg.SetFont("s9 Norm c" colorText, "Segoe UI")
-    dlg.Add("Edit", "x18 y80 w484 h300 +Multi +ReadOnly -Wrap +VScroll Background" colorCard " c" colorText, report)
-    closeBtn := dlg.Add("Text", "x382 y392 w120 h30 +0x200 Center Background" colorAccent " c" colorText, "Закрыть")
-    BindTextButton(closeBtn, colorAccent, (*) => dlg.Destroy())
-    dlg.OnEvent("Close", (*) => dlg.Destroy())
-    dlg.OnEvent("Escape", (*) => dlg.Destroy())
-    dlg.Show("w520 h440")
-    try WinActivate(dlg.Hwnd)
-}
-
 GetAiSystemPrompt() {
     return "Ты помощник администратора игрового сервера (CRMP / SA-MP). Отвечай кратко, по делу, на русском. Обычный текст без markdown, без HTML, без JSON-экранирования (не пиши \\u003e и подобное). Для цитат используй символ >. Помогай с формулировками наказаний, ответами на репорты и шаблонами. Не выдумывай внутренние правила сервера, если их не указали."
 }
@@ -7664,7 +6727,7 @@ RegisterAiChatHotstring() {
         try Hotstring(":*?B0X:/AI ", "Off")
         aiChatHotstringRegistered := false
     }
-    if !aiEnabled || !aiKeyEnabled
+    if !aiEnabled
         return
     try {
         Hotstring(":*?B0X:/ai ", OnAiChatPrefix)
@@ -7737,6 +6800,9 @@ RunAiFromGameChat(question) {
         PushAiToGameHud(question, "Ошибка: " err.Message, true)
     } finally {
         aiRequestBusy := false
+        try {
+            WriteAiState()
+        }
     }
 }
 
@@ -7840,8 +6906,9 @@ ExtractOpenAiText(responseText) {
     return "Не удалось разобрать ответ API.`n" SubStr(responseText, 1, 400)
 }
 
+; Hotkeys: HUD (aiKey), ручной сброс нормы (resetKey), хотстринг /ai.
 RegisterHotkeys() {
-    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, aiEnabled, RegisteredStandardHotkeys
+    global aiKey, aiKeyEnabled, resetKey, resetKeyEnabled, menuKey, menuKeyEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
@@ -7849,65 +6916,30 @@ RegisterHotkeys() {
     RegisteredStandardHotkeys := []
 
     if menuKeyEnabled {
-        Hotkey(menuKey, OpenMenu, "On")
-        RegisteredStandardHotkeys.Push(menuKey)
+        try {
+            Hotkey(menuKey, ToggleGamePanel, "On")
+            RegisteredStandardHotkeys.Push(menuKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать menuKey: " menuKey, err.Message)
+        }
+    }
+    if aiKeyEnabled {
+        try {
+            Hotkey(aiKey, ToggleGameHud, "On")
+            RegisteredStandardHotkeys.Push(aiKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать aiKey: " aiKey, err.Message)
+        }
     }
     if resetKeyEnabled {
-        Hotkey(resetKey, ResetPM, "On")
-        RegisteredStandardHotkeys.Push(resetKey)
-    }
-    if aiEnabled && aiKeyEnabled {
-        Hotkey(aiKey, OpenAiAssistant, "On")
-        RegisteredStandardHotkeys.Push(aiKey)
+        try {
+            Hotkey(resetKey, PromptManualNormReset, "On")
+            RegisteredStandardHotkeys.Push(resetKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать resetKey: " resetKey, err.Message)
+        }
     }
     RegisterAiChatHotstring()
-    try RebuildTrayMenu()
-}
-
-WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
-    global MainGui, SettingsGui
-
-    if IsObject(MainGui) && (hwnd = MainGui.Hwnd || DllCall("IsChild", "Ptr", MainGui.Hwnd, "Ptr", hwnd, "Int")) {
-        DragGuiWindow(MainGui.Hwnd)
-        return
-    }
-
-    if IsObject(SettingsGui) && (hwnd = SettingsGui.Hwnd || DllCall("IsChild", "Ptr", SettingsGui.Hwnd, "Ptr", hwnd, "Int")) {
-        MouseGetPos(&mouseX, &mouseY)
-        SettingsGui.GetPos(&winX, &winY)
-        relX := mouseX - winX
-        relY := mouseY - winY
-        if (relY >= 0 && relY <= 70 && relX < 780)
-            DragGuiWindow(SettingsGui.Hwnd)
-        return
-    }
-}
-
-WM_NCHITTEST(wParam, lParam, msg, hwnd) {
-    global MainGui, SettingsGui
-
-    if IsObject(MainGui) && (hwnd = MainGui.Hwnd)
-        return 2
-
-    if IsObject(SettingsGui) && (hwnd = SettingsGui.Hwnd) {
-        mouseX := lParam & 0xFFFF
-        if (mouseX & 0x8000)
-            mouseX -= 0x10000
-        mouseY := (lParam >> 16) & 0xFFFF
-        if (mouseY & 0x8000)
-            mouseY -= 0x10000
-        SettingsGui.GetPos(&winX, &winY)
-        relX := mouseX - winX
-        relY := mouseY - winY
-        if (relY >= 0 && relY <= 70 && relX < 780)
-            return 2
-    }
-
-}
-
-DragGuiWindow(guiHwnd) {
-    DllCall("ReleaseCapture")
-    DllCall("SendMessage", "Ptr", guiHwnd, "UInt", 0xA1, "Ptr", 2, "Ptr", 0)
 }
 
 SortRecordsNewestFirst(lines, recordType) {
@@ -8105,13 +7137,6 @@ GetLastErrorLogLines(maxLines := 20) {
     return RTrim(text, "`n")
 }
 
-RefreshErrorsLogView(*) {
-    global ErrorsLogTextCtrl
-
-    if IsObject(ErrorsLogTextCtrl)
-        ErrorsLogTextCtrl.Value := GetLastErrorLogLines()
-}
-
 OpenErrorsLogFile(*) {
     global errorsLogFile
 
@@ -8123,260 +7148,6 @@ OpenErrorsLogFile(*) {
         LogError("OpenErrorsLogFile", "Не удалось открыть errors.log", err.Message)
         ShowToast("⚠ Не удалось открыть errors.log", 2200)
     }
-}
-
-ClearErrorsLog(*) {
-    global errorsLogFile
-
-    result := ShowAppDialog("Подтверждение очистки", "Очистить errors.log?", "OKCancel")
-    if (result != "OK")
-        return
-
-    try {
-        file := FileOpen(errorsLogFile, "w", "UTF-8")
-        file.Close()
-    } catch as err {
-        LogError("ClearErrorsLog", "Не удалось очистить errors.log", err.Message)
-        ShowToast("⚠ Не удалось очистить errors.log", 2200)
-        return
-    }
-
-    RefreshErrorsLogView()
-}
-
-
-; ------------------------------------------------------------
-; 09. Unified mini windows and dialogs
-; ------------------------------------------------------------
-
-AppDialogResult := ""
-NickInputResult := ""
-NickInputValue := ""
-NickInputEditCtrl := ""
-
-ShowAppDialog(title, message, buttons := "OK", accentColor := "") {
-    global AppDialogResult, colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted, colorRed
-
-    if (accentColor = "")
-        accentColor := colorAccent
-
-    ; Высота под текст: длинные сообщения больше не обрезаются.
-    lineBreak := Chr(10)
-    normalized := StrReplace(StrReplace(message, "`r`n", lineBreak), "`r", lineBreak)
-    lineCount := 1
-    Loop Parse, normalized, lineBreak
-        lineCount := A_Index
-    approxWrapped := 0
-    Loop Parse, normalized, lineBreak {
-        lineLen := StrLen(A_LoopField)
-        approxWrapped += Max(1, Ceil(lineLen / 42))
-    }
-    textLines := Max(lineCount, approxWrapped)
-    textHeight := Min(220, Max(64, textLines * 16))
-    cardHeight := 58 + textHeight
-    dlgHeight := cardHeight + 72
-    buttonY := dlgHeight - 40
-
-    AppDialogResult := ""
-    ; Обычное окно с заголовком (как редактор биндов): видно на панели задач, не AlwaysOnTop.
-    dlg := Gui("+Border", title)
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-
-    dlg.Add("Text", "x0 y0 w420 h" dlgHeight " Background" colorBg)
-    dlg.Add("Text", "x18 y18 w384 h" cardHeight " Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y32 w330 h24 Background" colorCard, title)
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y66 w345 h" textHeight " Background" colorCard, message)
-
-    if (buttons = "OKCancel") {
-        AddDialogTextButton(dlg, 176, buttonY, 104, 28, "Отмена", colorCardAlt, "Cancel")
-        AddDialogTextButton(dlg, 292, buttonY, 104, 28, "OK", accentColor, "OK")
-    } else if (buttons = "YesNo") {
-        AddDialogTextButton(dlg, 176, buttonY, 104, 28, "Нет", colorCardAlt, "No")
-        AddDialogTextButton(dlg, 292, buttonY, 104, 28, "Да", colorRed, "Yes")
-    } else {
-        AddDialogTextButton(dlg, 292, buttonY, 104, 28, "OK", accentColor, "OK")
-    }
-
-    dlg.OnEvent("Close", (*) => CloseAppDialog(dlg, "Cancel"))
-    dlg.Show("w420 h" dlgHeight)
-    try WinActivate(dlg.Hwnd)
-    WinWaitClose("ahk_id " dlg.Hwnd)
-    return AppDialogResult
-}
-
-AddDialogTextButton(dlg, x, y, w, h, label, bgColor, result) {
-    global colorText, colorAccent
-    dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
-    ctrl := dlg.Add("Text", "x" x " y" y " w" w " h" h " +0x200 Center Background" bgColor, label)
-    ctrl.OnEvent("Click", (*) => (FlashControl(ctrl, bgColor), CloseAppDialog(dlg, result)))
-    return ctrl
-}
-
-CloseAppDialog(dlg, result) {
-    global AppDialogResult
-    AppDialogResult := result
-    try dlg.Destroy()
-}
-
-AddMiniWindowButton(guiObj, x, y, w, h, label, bgColor, callback) {
-    global colorText
-    guiObj.SetFont("s9 Bold c" colorText, "Segoe UI")
-    ctrl := guiObj.Add("Text", "x" x " y" y " w" w " h" h " +0x200 Center Background" bgColor, label)
-    ctrl.OnEvent("Click", (*) => (FlashControl(ctrl, bgColor), callback()))
-    return ctrl
-}
-
-; Короткая вспышка фона — видно, что клик принят.
-FlashControl(ctrl, normalBg := "", flashBg := "", ms := 140) {
-    global colorAccent
-    if !IsObject(ctrl)
-        return
-    if (flashBg = "")
-        flashBg := (normalBg = colorAccent) ? "8B83FF" : colorAccent
-    try {
-        ctrl.Opt("Background" flashBg)
-        restoreBg := normalBg
-        restoreCtrl := ctrl
-        SetTimer(() => RestoreControlBackground(restoreCtrl, restoreBg), -ms)
-    }
-}
-
-RestoreControlBackground(ctrl, normalBg) {
-    if !IsObject(ctrl) || (normalBg = "")
-        return
-    try ctrl.Opt("Background" normalBg)
-}
-
-; Ненавязчивое уведомление об успехе (не модальное, само закрывается).
-ShowToast(message, durationMs := 1600) {
-    global ToastGui, colorBg, colorCard, colorAccent, colorText
-
-    SafeDestroyGui(&ToastGui)
-    ToastGui := Gui("+AlwaysOnTop -Caption +ToolWindow +Border", "ChesNovaToast")
-    ToastGui.BackColor := colorBg
-    ToastGui.MarginX := 0
-    ToastGui.MarginY := 0
-    ToastGui.SetFont("s9 Bold c" colorText, "Segoe UI")
-    ToastGui.Add("Text", "x0 y0 w320 h44 Background" colorCard)
-    ToastGui.Add("Text", "x0 y0 w4 h44 Background" colorAccent)
-    ToastGui.Add("Text", "x16 y12 w290 h22 Background" colorCard " c" colorText, message)
-    ToastGui.Show("w320 h44 xCenter y80 NA")
-    SetTimer(CloseToastGui, -durationMs)
-}
-
-CloseToastGui(*) {
-    global ToastGui
-    SafeDestroyGui(&ToastGui)
-}
-
-; Обёртка клика для Text-кнопок в главном меню: вспышка + действие.
-BindTextButton(ctrl, normalBg, callback) {
-    ctrl.OnEvent("Click", (*) => (FlashControl(ctrl, normalBg), callback()))
-    return ctrl
-}
-
-ShowBindCategoryInputDialog(defaultValue := "") {
-    global BindCategoryInputResult, BindCategoryInputValue, BindCategoryInputCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    BindCategoryInputResult := ""
-    BindCategoryInputValue := ""
-
-    dlg := Gui("+Border", "Категория биндов")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-
-    dlg.Add("Text", "x0 y0 w420 h218 Background" colorBg)
-    dlg.Add("Text", "x18 y18 w384 h136 Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x38 y32 w280 h26 Background" colorCard, "Новая категория")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x38 y70 w344 h22 Background" colorCard, "Название категории")
-    BindCategoryInputCtrl := dlg.Add("Edit", "x38 y98 w344 h26 c" colorText " Background" uiInputBg, defaultValue)
-
-    AddMiniWindowButton(dlg, 178, 172, 104, 28, "Отмена", colorCardAlt, (*) => CloseBindCategoryInputDialog(dlg, "Cancel"))
-    AddMiniWindowButton(dlg, 294, 172, 108, 28, "Добавить", colorAccent, (*) => CloseBindCategoryInputDialog(dlg, "OK"))
-
-    dlg.OnEvent("Close", (*) => CloseBindCategoryInputDialog(dlg, "Cancel"))
-    dlg.OnEvent("Escape", (*) => CloseBindCategoryInputDialog(dlg, "Cancel"))
-
-    BindCategoryInputValue := defaultValue
-    dlg.Show("w420 h218")
-    try BindCategoryInputCtrl.Focus()
-    WinWaitClose("ahk_id " dlg.Hwnd)
-
-    return {Result: BindCategoryInputResult, Value: BindCategoryInputValue}
-}
-
-CloseBindCategoryInputDialog(dlg, result) {
-    global BindCategoryInputResult, BindCategoryInputValue, BindCategoryInputCtrl
-
-    BindCategoryInputResult := result
-    if IsObject(BindCategoryInputCtrl)
-        BindCategoryInputValue := BindCategoryInputCtrl.Value
-    try dlg.Destroy()
-}
-
-ShowNickInputDialog(message, defaultValue := "") {
-    global NickInputResult, NickInputValue, NickInputEditCtrl
-    global colorBg, colorCard, colorCardAlt, colorAccent, colorText, colorMuted
-
-    NickInputResult := ""
-    NickInputValue := ""
-
-    dlg := Gui("+Border", "ChesNova Cloud")
-    dlg.BackColor := colorBg
-    dlg.MarginX := 0
-    dlg.MarginY := 0
-    dlg.SetFont("s10 c" colorText, "Segoe UI")
-
-    dlg.Add("Text", "x0 y0 w460 h244 Background" colorBg)
-    dlg.Add("Text", "x24 y24 w412 h158 Background" colorCard)
-    dlg.SetFont("s12 Bold c" colorText, "Segoe UI")
-    dlg.Add("Text", "x48 y40 w364 h26 Background" colorCard, "Cloud доступ")
-    dlg.SetFont("s9 Norm c" colorMuted, "Segoe UI")
-    dlg.Add("Text", "x48 y78 w364 h38 Background" colorCard, message)
-    dlg.Add("Text", "x48 y130 w180 h20 Background" colorCard " c" colorMuted, "Ник администратора")
-    NickInputEditCtrl := dlg.Add("Edit", "x48 y152 w364 h26 c" colorText " Background" uiInputBg, defaultValue)
-
-    dlg.SetFont("s9 Bold c" colorText, "Segoe UI")
-    cancelBtn := dlg.Add("Text", "x226 y198 w90 h30 +0x200 Center Background" colorCardAlt, "Отмена")
-    BindTextButton(cancelBtn, colorCardAlt, (*) => CloseNickInputDialog(dlg, "Cancel"))
-    okBtn := dlg.Add("Text", "x328 y198 w84 h30 +0x200 Center Background" colorAccent, "OK")
-    BindTextButton(okBtn, colorAccent, (*) => CloseNickInputDialog(dlg, "OK"))
-
-    dlg.OnEvent("Close", (*) => CloseNickInputDialog(dlg, "Cancel"))
-    dlg.OnEvent("Escape", (*) => CloseNickInputDialog(dlg, "Cancel"))
-
-    NickInputValue := defaultValue
-    dlg.Show("w460 h244")
-    try NickInputEditCtrl.Focus()
-    WinWaitClose("ahk_id " dlg.Hwnd)
-
-    return {Result: NickInputResult, Value: NickInputValue}
-}
-
-CloseNickInputDialog(dlg, result) {
-    global NickInputResult, NickInputValue, NickInputEditCtrl
-
-    NickInputResult := result
-    if IsObject(NickInputEditCtrl)
-        NickInputValue := NickInputEditCtrl.Value
-    try dlg.Destroy()
-}
-
-SafeDestroyGui(&guiObj) {
-    if IsObject(guiObj) {
-        try guiObj.Destroy()
-    }
-    guiObj := ""
 }
 
 SafeFileRead(filePath, source := "SafeFileRead") {
@@ -8477,34 +7248,13 @@ LoadRecordCache(filePath, recordCache, source := "LoadRecordCache") {
 
 
 EnsureNickBeforeCloudAccess(forcePrompt := false, message := "") {
-    global nick, userNick, settingsFile
+    global nick, userNick
 
     nick := Trim(nick)
-    if (!forcePrompt && nick != "" && nick != "Nick_Name") {
+    if (nick != "" && nick != "Nick_Name")
         userNick := nick
-        return
-    }
-
-    loop {
-        prompt := message
-        if (prompt != "")
-            prompt .= "`n`n"
-        prompt .= "Введите ваш ник администратора для проверки доступа:"
-
-        result := ShowNickInputDialog(prompt, nick)
-        if (result.Result = "Cancel")
-            ExitApp()
-
-        enteredNick := Trim(result.Value)
-        if (enteredNick != "" && enteredNick != "Nick_Name") {
-            nick := enteredNick
-            userNick := nick
-            try IniWrite(nick, settingsFile, "Main", "nick")
-            return
-        }
-
-        MsgBox("Введите корректный ник администратора.", "ChesNova", "Icon!")
-    }
+    ; Без GUI ник не запрашивается — задаётся в панели (Cloud → ник администратора).
+    return
 }
 ; HTTP GET с таймаутами. resolve/connect/send/receive в мс.
 HttpGetText(url, resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiveMs := 45000) {
@@ -8585,8 +7335,8 @@ CheckCloudAccess(exitOnDenied := true, promptOnDenied := true) {
         if (!promptOnDenied)
             return false
 
-        MsgBox("Ник не найден в базе доступа.`nНик: " nick, "ChesNova", "Iconx")
-        EnsureNickBeforeCloudAccess(true, "Ник не найден в базе доступа.`nНик: " nick)
+        LogError("CheckCloudAccess", "Ник не найден в базе доступа: " nick)
+        return false
     }
 }
 
@@ -8604,4 +7354,44 @@ UriEncode(str) {
     }
 
     return result
+}
+; ============================================================
+; 🔇 БЕЗ GUI: визуал полностью отключён, остались только «мозги».
+; Пустышки сохраняют совместимость с логикой, которая вызывала окна/тосты.
+; ============================================================
+
+MsgBox(params*) {
+    return
+}
+
+ShowToast(message, durationMs := 1600) {
+    return
+}
+
+ShowAppDialog(title, message, buttons := "OK", accentColor := "") {
+    ; Молчаливое подтверждение: действие продолжается по умолчанию.
+    if (buttons = "YesNo")
+        return "Yes"
+    return "OK"
+}
+
+RefreshDashboardView(*) {
+    return
+}
+
+; ============================================================
+; HEADLESS STUBS: удалённые GUI-функции, оставленные как no-op,
+; чтобы вызовы из логики не падали в рантайме.
+; ============================================================
+
+RefreshSettingsView(*) {
+    return
+}
+
+RefreshScriptsView(*) {
+    return
+}
+
+DownloadTestVersionManifest() {
+    return ""
 }
