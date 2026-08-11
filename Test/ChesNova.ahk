@@ -292,6 +292,9 @@ SetTimer(FetchAiConfigFromCloud, 1800000)
 SetTimer(StartupNetworkInit, -300)
 versionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/version.json"
 testVersionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/Test.json"
+stableChesJsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/ches.js"
+testChesJsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ches.js"
+testAhkUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk"
 notifications := []
 notificationStates := Map()
 LoadNotificationsCache()
@@ -782,7 +785,7 @@ IsChesNovaHudInstalled(gamePath := "") {
 ; createOnlyMissing=true — не перезаписывать существующие файлы,
 ; кроме тех, у которых alwaysUpdate=true (ches.js, loader-js.json — всегда после рестарта/обновы).
 EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
-    global dataPath, scriptsGamePath
+    global dataPath, scriptsGamePath, testerMode
 
     gamePath := GetScriptsGamePath()
     if (gamePath = "" || !DirExist(gamePath))
@@ -814,7 +817,7 @@ EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
         ),
         Map(
             "name", "ches.js",
-            "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/ches.js",
+            "url", testerMode ? testChesJsUrl : stableChesJsUrl,
             "dest", paths["ches"],
             "alwaysUpdate", true
         )
@@ -6043,7 +6046,7 @@ CheckTestUpdatesFromPanel() {
 
 ; Скачать test-сборку из панели (GET /tester/download → hud_commands.ini)
 DownloadTestUpdateFromPanel() {
-    global testerMode
+    global testerMode, testAhkUrl
 
     if !testerMode {
         ShowToast("⚠ Включи режим тестировщика", 2200)
@@ -6052,11 +6055,10 @@ DownloadTestUpdateFromPanel() {
 
     try {
         versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
-        if (versionInfo["download"] = "") {
-            ShowToast("⚠ В Test/Test.json нет ссылки download", 2200)
-            return
-        }
-        Run(versionInfo["download"])
+        downloadUrl := versionInfo["download"]
+        if (downloadUrl = "")
+            downloadUrl := testAhkUrl
+        Run(downloadUrl)
         ShowToast("✓ Открыта ссылка на test-сборку", 1800)
     } catch as err {
         LogError("DownloadTestUpdateFromPanel", "Ошибка скачивания test", err.Message)
@@ -6066,7 +6068,7 @@ DownloadTestUpdateFromPanel() {
 
 ; Установить test-сборку из панели (GET /tester/install → hud_commands.ini)
 InstallTestUpdateFromPanel() {
-    global testerMode, basePath, backupPath
+    global testerMode, basePath, backupPath, testAhkUrl
 
     if !testerMode {
         ShowToast("⚠ Включи режим тестировщика", 2200)
@@ -6077,16 +6079,8 @@ InstallTestUpdateFromPanel() {
     newScript := basePath "\ChesNova_test_new.ahk"
 
     try {
-        versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
-        downloadUrl := versionInfo["download"]
-        if (downloadUrl = "")
-            throw Error("Нет поля download в Test/Test.json.")
-
-        if InStr(StrLower(downloadUrl), ".zip") {
-            Run(downloadUrl)
-            ShowToast("ZIP-сборка — ссылка открыта", 2200)
-            return
-        }
+        ; Прямая ссылка на test-сборку: Test/ChesNova.ahk
+        downloadUrl := testAhkUrl
 
         if !FileExist(mainScript)
             throw Error("Не найден текущий ChesNova.ahk.")
@@ -7472,5 +7466,12 @@ RefreshScriptsView(*) {
 }
 
 DownloadTestVersionManifest() {
-    return ""
+    global testVersionInfoUrl
+
+    ; Уникальный параметр и no-cache не дают GitHub CDN вернуть старую копию JSON.
+    requestUrl := testVersionInfoUrl "?nocache=" A_Now "_" A_TickCount
+    result := HttpGetText(requestUrl)
+    if (result["status"] != 200)
+        throw Error("GitHub вернул HTTP " result["status"] ".")
+    return result["text"]
 }
