@@ -1,10 +1,10 @@
 {
-  "latest": "12.0",
+  "latest": "12.0.2",
   "download": "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk",
   "changelog": [
-    "Тестовая сборка 12.0",
-    "Полностью переработана вся система",
-    "Переход в игровую зону",
+    "Тестовая сборка 12.0.2",
+    "--",
+    "--",
     "--"
   ],
   "required": false
