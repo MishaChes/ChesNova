@@ -40,7 +40,7 @@ if (A_LastError = 183) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.0"
+CURRENT_VERSION := "12.0.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -110,6 +110,10 @@ aiHudAnswer := ""
 aiHudIsError := false
 aiHudExpireTick := 0
 aiHudThinking := false
+; Уведомление в игре после установки скрипта (по центру экрана, ~5 сек)
+scriptNoticeId := 0
+scriptNoticeText := ""
+scriptNoticeExpireTick := 0
 try {
     if !FileExist(errorsLogFile)
         FileAppend("", errorsLogFile, "UTF-8")
@@ -908,6 +912,7 @@ UpdateCloudHudDot() {
 WriteHudBridgeState(*) {
     global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, nick, pmCount, norm, healthState, healthMessage
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
+    global scriptNoticeId, scriptNoticeText, scriptNoticeExpireTick
     global logFile, scriptsGamePath
 
     try {
@@ -967,6 +972,19 @@ WriteHudBridgeState(*) {
                 . "}"
         } else {
             json .= ',"ai":null'
+        }
+
+        if (scriptNoticeText != "" && A_TickCount < scriptNoticeExpireTick) {
+            remainMs := scriptNoticeExpireTick - A_TickCount
+            if (remainMs < 0)
+                remainMs := 0
+            json .= ',"scriptNotice":{'
+                . '"id":' Integer(scriptNoticeId) ','
+                . '"text":"' JsonEscape(scriptNoticeText) '",'
+                . '"ttl":' Integer(remainMs)
+                . "}"
+        } else {
+            json .= ',"scriptNotice":null'
         }
 
         json .= "}"
@@ -2256,6 +2274,7 @@ InstallScriptPackageFromPanel(packageId) {
     }
 
     WriteScriptsState()
+    PushScriptNotice("Для того чтобы скрипт заработал, перезайдите в игру")
     if (skippedLocked > 0)
         ShowToast("✓ " package["displayTitle"] " установлен (часть .asi уже была, игра могла держать файлы)", 3200)
     else
@@ -2317,6 +2336,26 @@ ClearExpiredAiHud(*) {
     if (aiHudThinking)
         return
     if (A_TickCount >= aiHudExpireTick)
+        WriteHudBridgeState()
+}
+
+; Показать уведомление в игре (по центру экрана, ~5 сек) — после установки скрипта
+PushScriptNotice(text, durationMs := 5000) {
+    global scriptNoticeId, scriptNoticeText, scriptNoticeExpireTick
+
+    text := Trim(text)
+    if (text = "")
+        return
+    scriptNoticeId += 1
+    scriptNoticeText := text
+    scriptNoticeExpireTick := A_TickCount + Max(1000, durationMs)
+    WriteHudBridgeState()
+    SetTimer(ClearExpiredScriptNotice, -durationMs - 200)
+}
+
+ClearExpiredScriptNotice(*) {
+    global scriptNoticeExpireTick
+    if (A_TickCount >= scriptNoticeExpireTick)
         WriteHudBridgeState()
 }
 
@@ -5168,7 +5207,7 @@ CheckLog(*) {
             processedLineCount++
             if !InStr(line, nick)
                 continue
-            if RegExMatch(line, "^\[\d{2}:\d{2}:\d{2}\] Администратор " . nick . "\[\d+\] для ") {
+            if RegExMatch(line, "^\[\d{2}:\d{2}:\d{2}\] (?:Администратор|Агент поддержки) " . nick . "\[\d+\] для ") {
                 pmCount++
                 pmCountChanged := true
                 SavePmLogFromLine(line)
