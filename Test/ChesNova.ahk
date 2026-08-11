@@ -40,7 +40,7 @@ if (A_LastError = 183) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.0"
+CURRENT_VERSION := "12.0.2"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -110,6 +110,10 @@ aiHudAnswer := ""
 aiHudIsError := false
 aiHudExpireTick := 0
 aiHudThinking := false
+; Уведомление в игре после установки скрипта (по центру экрана, ~5 сек)
+scriptNoticeId := 0
+scriptNoticeText := ""
+scriptNoticeExpireTick := 0
 try {
     if !FileExist(errorsLogFile)
         FileAppend("", errorsLogFile, "UTF-8")
@@ -908,6 +912,7 @@ UpdateCloudHudDot() {
 WriteHudBridgeState(*) {
     global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, nick, pmCount, norm, healthState, healthMessage
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
+    global scriptNoticeId, scriptNoticeText, scriptNoticeExpireTick
     global logFile, scriptsGamePath
 
     try {
@@ -969,6 +974,19 @@ WriteHudBridgeState(*) {
             json .= ',"ai":null'
         }
 
+        if (scriptNoticeText != "" && A_TickCount < scriptNoticeExpireTick) {
+            remainMs := scriptNoticeExpireTick - A_TickCount
+            if (remainMs < 0)
+                remainMs := 0
+            json .= ',"scriptNotice":{'
+                . '"id":' Integer(scriptNoticeId) ','
+                . '"text":"' JsonEscape(scriptNoticeText) '",'
+                . '"ttl":' Integer(remainMs)
+                . "}"
+        } else {
+            json .= ',"scriptNotice":null'
+        }
+
         json .= "}"
         f := FileOpen(hudBridgeStateFile, "w", "UTF-8")
         f.Write(json)
@@ -982,10 +1000,13 @@ WriteHudBridgeState(*) {
 WriteSettingsState(*) {
     global hudBridgeSettingsFile, nick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
     global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled
+    global logFile, scriptsGamePath
 
     try {
         json := "{"
             . '"nick":"' JsonEscape(nick) '",'
+            . '"logFile":"' JsonEscape(logFile) '",'
+            . '"gamePath":"' JsonEscape(scriptsGamePath) '",'
             . '"norm":' Integer(norm) ','
             . '"autoReset":' (autoResetEnabled ? 1 : 0) ','
             . '"startWithWindows":' (startWithWindows ? 1 : 0) ','
@@ -2256,6 +2277,7 @@ InstallScriptPackageFromPanel(packageId) {
     }
 
     WriteScriptsState()
+    PushScriptNotice("Для того чтобы скрипт заработал, перезайдите в игру")
     if (skippedLocked > 0)
         ShowToast("✓ " package["displayTitle"] " установлен (часть .asi уже была, игра могла держать файлы)", 3200)
     else
@@ -2277,6 +2299,26 @@ SaveScriptsPathFromPanel(path) {
     TryIniWrite(path, settingsFile, "Scripts", "gamePath", "SaveScriptsPathFromPanel")
     WriteScriptsState()
     ShowToast("✓ Путь к игре сохранён", 1800)
+}
+
+; Сохранить путь к chatlog из панели (GET /settings/chatlog → hud_commands.ini)
+SaveChatlogPathFromPanel(path) {
+    global logFile, lastSize, settingsFile
+
+    path := Trim(path)
+    if (path = "")
+        return
+    if !FileExist(path) || DirExist(path) {
+        ShowToast("⚠ Файл chatlog не найден", 2000)
+        return
+    }
+    logFile := path
+    try lastSize := FileGetSize(logFile)
+    catch
+        lastSize := 0
+    TryIniWrite(logFile, settingsFile, "Main", "logFile", "SaveChatlogPathFromPanel")
+    WriteSettingsState()
+    ShowToast("✓ Путь к chatlog сохранён", 1800)
 }
 
 ; Индикатор «AI думает…» в ches.js
@@ -2317,6 +2359,26 @@ ClearExpiredAiHud(*) {
     if (aiHudThinking)
         return
     if (A_TickCount >= aiHudExpireTick)
+        WriteHudBridgeState()
+}
+
+; Показать уведомление в игре (по центру экрана, ~5 сек) — после установки скрипта
+PushScriptNotice(text, durationMs := 5000) {
+    global scriptNoticeId, scriptNoticeText, scriptNoticeExpireTick
+
+    text := Trim(text)
+    if (text = "")
+        return
+    scriptNoticeId += 1
+    scriptNoticeText := text
+    scriptNoticeExpireTick := A_TickCount + Max(1000, durationMs)
+    WriteHudBridgeState()
+    SetTimer(ClearExpiredScriptNotice, -durationMs - 200)
+}
+
+ClearExpiredScriptNotice(*) {
+    global scriptNoticeExpireTick
+    if (A_TickCount >= scriptNoticeExpireTick)
         WriteHudBridgeState()
 }
 
@@ -2372,6 +2434,17 @@ EnsureHudBridgeScript() {
         "        }`n"
         "      }`n"
         "      try { [System.IO.File]::WriteAllLines($pendingFile, $lines, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/settings/chatlog\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveChatlogPath=' + $vals['path'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
         "      $json = '{`"ok`":true}'`n"
         "    } elseif ($requestLine -match 'GET\s+/settings') {`n"
         "      $json = '{`"ok`":true}'`n"
@@ -2923,6 +2996,12 @@ CheckPendingCommands(*) {
             scriptsPathRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "saveScriptsPath", ""))
             if (scriptsPathRaw != "") {
                 SaveScriptsPathFromPanel(scriptsPathRaw)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "saveChatlogPath", "") != "" {
+            chatlogPathRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "saveChatlogPath", ""))
+            if (chatlogPathRaw != "") {
+                SaveChatlogPathFromPanel(chatlogPathRaw)
             }
         }
         if IniRead(hudBridgeCommandFile, "Commands", "openScriptTopic", "") != "" {
@@ -5168,7 +5247,7 @@ CheckLog(*) {
             processedLineCount++
             if !InStr(line, nick)
                 continue
-            if RegExMatch(line, "^\[\d{2}:\d{2}:\d{2}\] Администратор " . nick . "\[\d+\] для ") {
+            if RegExMatch(line, "^\[\d{2}:\d{2}:\d{2}\] (?:Администратор|Агент поддержки) " . nick . "\[\d+\] для ") {
                 pmCount++
                 pmCountChanged := true
                 SavePmLogFromLine(line)
