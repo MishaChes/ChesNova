@@ -66,7 +66,6 @@
   var currentView = 'Dashboard';
   var navButtons = {};
   var topButtons = {};
-  var notifBadgeEl = null;
   var topTitleEl = null;
   var betaBadgeEl = null;
   var resetConfirmEl = null;
@@ -336,7 +335,7 @@
 
   var notificationsCount = 0;
   var notificationsList = [];
-  var notificationsRefs = { list: null, countBadge: null, refreshBtn: null, readBtn: null };
+  var notificationsRefs = { list: null, refreshBtn: null, readBtn: null };
 
   /* ====================== СТИЛИ ======================
      Каждый блок стилей отдельно — легко найти и изменить.
@@ -439,31 +438,24 @@
       font-weight: 600;
       border-color: #3b82f6;
     }
-    .ches-top-btn.has-badge {
-      position: relative;
-      padding-right: 22px;
+    .ches-top-btn.has-unread {
+      background: #3a1a22;
+      border-color: #ff6b8c;
+      color: #ff8fa8;
+      font-weight: 600;
+      animation: ches-notif-pulse 1.2s ease-in-out infinite;
     }
-    .ches-top-btn .ches-notif-badge {
-      position: absolute;
-      top: 50%;
-      right: 4px;
-      margin-top: -7px;
-      min-width: 14px;
-      height: 14px;
-      padding: 0 3px;
-      background: #e5484d;
-      color: #fff;
-      font-size: 9px;
-      font-weight: 700;
-      line-height: 14px;
-      text-align: center;
-      border-radius: 7px;
-      box-sizing: border-box;
-      pointer-events: none;
-      z-index: 2;
+    .ches-top-btn.has-unread:hover {
+      background: #4a222c;
+      color: #ffb0c0;
     }
-    .ches-top-btn .ches-notif-badge.hidden {
-      display: none;
+    @keyframes ches-notif-pulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 107, 140, .5);
+      }
+      50% {
+        box-shadow: 0 0 0 6px rgba(255, 107, 140, 0);
+      }
     }
 
     /* ---------- Кнопка закрытия ---------- */
@@ -1747,7 +1739,7 @@
     .ches-binds-filter-label {
       font-size: 12px;
       color: #7c8899;
-      margin-right: 8px;
+      margin-right: 10px;
       flex-shrink: 0;
     }
     .ches-binds-toolbar {
@@ -1756,13 +1748,21 @@
       flex-wrap: wrap;
     }
     .ches-binds-toolbar > * {
-      margin-right: 10px;
+      margin-right: 16px;
       margin-bottom: 8px;
     }
     .ches-binds-toolbar-grow {
       flex: 1;
       min-width: 8px;
       margin-right: 0;
+    }
+    .ches-binds-head-btns {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .ches-binds-head-btns > * + * {
+      margin-left: 8px;
     }
     .ches-binds-btn {
       height: 32px;
@@ -1793,14 +1793,14 @@
     }
     .ches-binds-main {
       display: flex;
+      flex-direction: column;
       align-items: stretch;
     }
     .ches-binds-main > * + * {
-      margin-left: 14px;
+      margin-top: 14px;
     }
     .ches-binds-list {
-      flex: 3;
-      min-width: 0;
+      width: 100%;
       background: #121824;
       border: 1px solid #232c3a;
       border-radius: 10px;
@@ -1813,7 +1813,7 @@
       align-items: center;
       background: #161d29;
       border-bottom: 1px solid #232c3a;
-      padding: 10px 12px;
+      padding: 10px 14px;
     }
     .ches-binds-list-head .ches-binds-cell {
       color: #7c8899;
@@ -1823,9 +1823,8 @@
       letter-spacing: 0.3px;
     }
     .ches-binds-list-body {
-      min-height: 200px;
       padding: 0;
-      flex: 1 1 auto;
+      flex: 0 1 auto;
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
@@ -1846,20 +1845,22 @@
     .ches-binds-cell:last-child {
       margin-right: 0;
     }
-    .ches-binds-col-type { width: 88px; flex-shrink: 0; }
-    .ches-binds-col-cat { width: 100px; flex-shrink: 0; }
-    .ches-binds-col-name { width: 110px; flex-shrink: 0; }
-    .ches-binds-col-trigger { width: 78px; flex-shrink: 0; }
-    .ches-binds-col-status { flex: 1; min-width: 70px; margin-right: 0; }
+    .ches-binds-col-type { width: 92px; flex-shrink: 0; }
+    .ches-binds-col-cat { width: 150px; flex-shrink: 0; }
+    .ches-binds-col-name { flex: 1; min-width: 0; }
+    .ches-binds-col-trigger { width: 110px; flex-shrink: 0; }
+    .ches-binds-col-status { width: 100px; flex-shrink: 0; margin-right: 0; }
     .ches-binds-preview {
-      flex: 2;
-      min-width: 0;
+      width: 100%;
       background: #121824;
       border: 1px solid #232c3a;
       border-radius: 10px;
-      padding: 12px 14px;
+      padding: 14px 16px;
       display: flex;
       flex-direction: column;
+    }
+    .ches-binds-preview.empty {
+      display: none;
     }
     .ches-binds-preview-title {
       font-size: 12px;
@@ -1872,8 +1873,7 @@
       margin-top: 10px;
     }
     .ches-binds-preview-body {
-      flex: 1;
-      min-height: 130px;
+      min-height: 48px;
       background: #0c1119;
       border: 1px solid #1c2431;
       border-radius: 8px;
@@ -1906,7 +1906,7 @@
     .ches-binds-item {
       display: flex;
       align-items: center;
-      padding: 11px 12px;
+      padding: 11px 14px;
       border-bottom: 1px solid #1b2330;
       cursor: pointer;
     }
@@ -1939,11 +1939,22 @@
       word-break: break-word;
       color: #aab4c5;
     }
+    .ches-binds-preview-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f5f7fb;
+      word-break: break-word;
+    }
     .ches-binds-preview-meta {
       margin-top: 10px;
+      padding: 8px 10px;
+      background: #0c1119;
+      border: 1px solid #1c2431;
+      border-radius: 6px;
       font-size: 11px;
       color: #7c8899;
       line-height: 1.7;
+      white-space: pre-line;
     }
     .ches-binds-actions {
       display: flex;
@@ -2121,7 +2132,7 @@
       border-radius: 7px;
       padding: 8px;
       color: #e6ebf4;
-      font: 12px Consolas, monospace;
+      font: 12px Roboto, "Open Sans", Consolas, monospace;
       line-height: 1.5;
       resize: vertical;
       outline: none;
@@ -2666,19 +2677,6 @@
       font-weight: 700;
       color: #f5f7fb;
     }
-    .ches-notif-count {
-      font-size: 11px;
-      font-weight: 700;
-      color: #fff;
-      background: #e5484d;
-      border-radius: 9px;
-      min-width: 18px;
-      height: 18px;
-      line-height: 18px;
-      padding: 0 5px;
-      text-align: center;
-      box-sizing: border-box;
-    }
     .ches-notif-list {
       display: flex;
       flex-direction: column;
@@ -3193,10 +3191,8 @@
   }
 
   function notify(message) {
-    if (!notifBadgeEl) return;
     notificationsCount++;
-    notifBadgeEl.textContent = notificationsCount;
-    notifBadgeEl.classList.remove('hidden');
+    updateNotifBadge();
   }
 
   function updateBetaBadge(enabled) {
@@ -3207,14 +3203,10 @@
   }
 
   function updateNotifBadge() {
-    if (!notifBadgeEl) return;
-    if (notificationsCount > 0) {
-      notifBadgeEl.textContent = notificationsCount;
-      notifBadgeEl.classList.remove('hidden');
-    } else {
-      notifBadgeEl.classList.add('hidden');
-      notifBadgeEl.textContent = '';
-    }
+    var btn = topButtons['Notifications'];
+    if (!btn) return;
+    if (notificationsCount > 0) btn.classList.add('has-unread');
+    else btn.classList.remove('has-unread');
   }
 
   function makeDropdown(options, opts) {
@@ -4444,18 +4436,46 @@
 
     var wrap = el('div', 'ches-binds');
 
-    /* Карточка: включение + поиск + фильтр категории */
+    /* Карточка: включение + действия */
     var card = el('div', 'ches-binds-card');
     var toggleRow = makeToggleRow('Бинды включены', 'Разрешить использование биндов', bindsState.enabled, 'bind');
     bindsRefs.toggle = toggleRow.querySelector('.ches-toggle');
     bindsRefs.toggle.addEventListener('click', function () {
       toggleBindsAll(bindsRefs.toggle.classList.contains('on') ? 1 : 0);
     });
+
+    var headBtns = el('div', 'ches-binds-head-btns');
+    var addBtn = el('div', 'ches-binds-btn primary', 'Добавить');
+    addBtn.addEventListener('click', function () {
+      openBindEditor(null);
+    });
+    headBtns.appendChild(addBtn);
+
+    var importBtn = el('div', 'ches-binds-btn', 'Импорт');
+    importBtn.addEventListener('click', function () {
+      openBindImport();
+    });
+    headBtns.appendChild(importBtn);
+
+    var exportBtn = el('div', 'ches-binds-btn', 'Экспорт');
+    exportBtn.addEventListener('click', function () {
+      exportBinds();
+    });
+    headBtns.appendChild(exportBtn);
+
+    var dupBtn = el('div', 'ches-binds-btn', 'Дубликаты');
+    dupBtn.addEventListener('click', function () {
+      showBindDuplicates();
+    });
+    headBtns.appendChild(dupBtn);
+
+    toggleRow.appendChild(headBtns);
     card.appendChild(toggleRow);
 
+    /* Поиск + фильтр категории */
     var toolbar = el('div', 'ches-binds-toolbar');
     toolbar.appendChild(el('div', 'ches-binds-filter-label', 'Поиск'));
-    var searchIn = makeOnishiInput({ width: '160px' });
+    var searchIn = makeOnishiInput({ width: '180px' });
     bindsRefs.searchIn = searchIn.input;
     searchIn.input.addEventListener('input', function () {
       bindsState.search = searchIn.input.value;
@@ -4468,30 +4488,6 @@
 
     var toolGrow = el('div', 'ches-binds-toolbar-grow');
     toolbar.appendChild(toolGrow);
-
-    var addBtn = el('div', 'ches-binds-btn primary', 'Добавить');
-    addBtn.addEventListener('click', function () {
-      openBindEditor(null);
-    });
-    toolbar.appendChild(addBtn);
-
-    var importBtn = el('div', 'ches-binds-btn', 'Импорт');
-    importBtn.addEventListener('click', function () {
-      openBindImport();
-    });
-    toolbar.appendChild(importBtn);
-
-    var exportBtn = el('div', 'ches-binds-btn', 'Экспорт');
-    exportBtn.addEventListener('click', function () {
-      exportBinds();
-    });
-    toolbar.appendChild(exportBtn);
-
-    var dupBtn = el('div', 'ches-binds-btn', 'Дубликаты');
-    dupBtn.addEventListener('click', function () {
-      showBindDuplicates();
-    });
-    toolbar.appendChild(dupBtn);
 
     card.appendChild(toolbar);
     wrap.appendChild(card);
@@ -4550,7 +4546,7 @@
     list.appendChild(listBody);
     main.appendChild(list);
 
-    var preview = el('div', 'ches-binds-preview');
+    var preview = el('div', 'ches-binds-preview empty');
     preview.appendChild(el('div', 'ches-binds-preview-title', 'Превью содержимого'));
     var previewBody = el('div', 'ches-binds-preview-body');
     bindsRefs.previewBody = previewBody;
@@ -4651,7 +4647,7 @@
       var nameEl = el('div', 'ches-binds-cat-name', cat.name);
       row.appendChild(nameEl);
 
-      var delBtn = el('div', 'ches-binds-cat-del' + (bindsState.confirmCategory === cat.name ? ' confirm' : ''), '✕');
+      var delBtn = el('div', 'ches-binds-cat-del' + (bindsState.confirmCategory === cat.name ? ' confirm' : ''), '×');
       delBtn.addEventListener('click', function () {
         if (bindsState.confirmCategory === cat.name) {
           bindsState.confirmCategory = '';
@@ -4722,9 +4718,10 @@
 
   function renderBindPreview(b) {
     if (!bindsRefs.previewBody) return;
+    bindsRefs.previewBody.parentNode.classList.remove('empty');
     bindsRefs.previewBody.innerHTML = '';
     bindsRefs.previewBody.style.justifyContent = 'flex-start';
-    bindsRefs.previewBody.appendChild(el('div', 'ches-binds-preview-content', b.name || ''));
+    bindsRefs.previewBody.appendChild(el('div', 'ches-binds-preview-name', b.name || ''));
     bindsRefs.previewBody.appendChild(el('div', 'ches-binds-preview-content', b.content || ''));
     bindsRefs.previewBody.appendChild(el('div', 'ches-binds-preview-meta',
       'Тип: ' + getBindTypeLabel(b.type) +
@@ -4941,7 +4938,9 @@
       bindsState.confirmTrigger = '';
       if (bindsRefs.previewBody) {
         bindsRefs.previewBody.innerHTML = '';
+        bindsRefs.previewBody.style.justifyContent = '';
         bindsRefs.previewBody.appendChild(el('div', 'ches-binds-empty', 'Выберите бинд в списке'));
+        bindsRefs.previewBody.parentNode.classList.add('empty');
       }
       setTimeout(function () { loadBinds(); }, 300);
     };
@@ -5018,6 +5017,7 @@
   function openBindImport() {
     if (!bindsRefs.previewBody) return;
     bindsState.selectedTrigger = '';
+    bindsRefs.previewBody.parentNode.classList.remove('empty');
     bindsRefs.previewBody.innerHTML = '';
     bindsRefs.previewBody.style.justifyContent = 'flex-start';
     bindsRefs.previewBody.appendChild(el('div', 'ches-binds-preview-content',
@@ -5037,7 +5037,9 @@
     var cancelBtn = el('div', 'ches-binds-btn', 'Отмена');
     cancelBtn.addEventListener('click', function () {
       bindsRefs.previewBody.innerHTML = '';
+      bindsRefs.previewBody.style.justifyContent = '';
       bindsRefs.previewBody.appendChild(el('div', 'ches-binds-empty', 'Выберите бинд в списке'));
+      bindsRefs.previewBody.parentNode.classList.add('empty');
     });
     actions.appendChild(cancelBtn);
     bindsRefs.previewBody.appendChild(actions);
@@ -5170,6 +5172,7 @@
     });
 
     bindsState.selectedTrigger = '';
+    bindsRefs.previewBody.parentNode.classList.remove('empty');
     bindsRefs.previewBody.innerHTML = '';
     bindsRefs.previewBody.style.justifyContent = 'flex-start';
 
@@ -5775,9 +5778,6 @@
 
     var head = el('div', 'ches-notif-head');
     head.appendChild(el('div', 'ches-notif-title', 'Уведомления'));
-    var countBadge = el('div', 'ches-notif-count hidden', '');
-    notificationsRefs.countBadge = countBadge;
-    head.appendChild(countBadge);
     var refreshBtn = el('div', 'ches-notif-btn', 'Обновить');
     notificationsRefs.refreshBtn = refreshBtn;
     refreshBtn.addEventListener('click', function () {
@@ -5845,6 +5845,28 @@
       item.appendChild(el('div', 'ches-notif-time', n.time || ''));
       list.appendChild(item);
     });
+  }
+
+  function pollNotifications() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', NOTIFICATIONS_URL, true);
+    xhr.timeout = 1500;
+    xhr.onload = function () {
+      if (xhr.status < 200 || xhr.status >= 300) return;
+      try {
+        var d = JSON.parse(xhr.responseText);
+        if (!d || !d.ok) return;
+        var items = Array.isArray(d.items) ? d.items : [];
+        var unread = items.filter(function (n) { return !n.read; }).length;
+        if (unread !== notificationsCount) {
+          notificationsCount = unread;
+          updateNotifBadge();
+        }
+      } catch (e) {}
+    };
+    xhr.onerror = function () {};
+    xhr.ontimeout = function () {};
+    xhr.send();
   }
 
   function markNotificationsRead() {
@@ -6244,12 +6266,6 @@
       topButtons[key].className = 'ches-top-btn' + (key === id ? ' active' : '');
     });
 
-    if (id === 'Notifications' && notifBadgeEl) {
-      notificationsCount = 0;
-      notifBadgeEl.classList.add('hidden');
-      notifBadgeEl.textContent = '';
-    }
-
     if (contentTitleEl) contentTitleEl.textContent = getViewTitle(id);
 
     if (id === 'Settings') loadSettings(renderSettings);
@@ -6332,12 +6348,6 @@
     topList.forEach(function (item) {
       var btn = el('div', 'ches-top-btn', item.label);
       btn.addEventListener('click', function () { showView(item.id); });
-      if (item.id === 'Notifications') {
-        btn.classList.add('has-badge');
-        var badge = el('span', 'ches-notif-badge hidden');
-        btn.appendChild(badge);
-        notifBadgeEl = badge;
-      }
       topBtns.appendChild(btn);
       topButtons[item.id] = btn;
     });
@@ -6437,6 +6447,7 @@
         }
       }
       loadSettings();
+      loadNotifications();
     } catch (e) {
       initialized = false;
     }
@@ -6469,6 +6480,8 @@
     if (currentView === 'Scripts') loadScripts();
     if (currentView === 'Tester') loadTester();
     if (currentView === 'AI') loadAi();
+    if (currentView === 'Cloud') loadCloud();
+    pollNotifications();
   }, 2000);
 
   tick();
@@ -6508,6 +6521,11 @@
   var lastThinking = false;
 
   var thinkEl = null;
+
+  var noticeEl = null;
+  var noticeTextEl = null;
+  var noticeHideTimer = null;
+  var lastScriptNoticeId = 0;
 
   var settings = {
     nick: ''
@@ -6570,7 +6588,12 @@
       '.ches-reset-btn.primary{background:#22304a;border-color:#3b82f6;color:#f5f7fb}',
       '.ches-reset-btn.primary:hover{background:#2a3c5c}',
       '.ches-reset-btn.danger{background:#3a1a22;border-color:#ff6b8c;color:#ff8fa8}',
-      '.ches-reset-btn.danger:hover{background:#4a222c;color:#ffb0c0}'
+      '.ches-reset-btn.danger:hover{background:#4a222c;color:#ffb0c0}',
+      /* Уведомление после установки скрипта — по центру экрана, ~5 сек */
+      '#ches-notice{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%) translateY(8px);z-index:100002;display:none;flex-direction:column;align-items:center;text-align:center;max-width:min(420px,calc(100vw - 32px));background:rgba(11,14,20,.95);border:1px solid #2B3443;border-radius:14px;padding:18px 26px;color:#F5F7FB;font:12px/1.4 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 12px 32px rgba(0,0,0,.45);backdrop-filter:blur(8px);opacity:0;transition:opacity .22s ease,transform .22s ease}',
+      '#ches-notice.ches-notice-on{display:flex;opacity:1;transform:translate(-50%,-50%) translateY(0)}',
+      '#ches-notice .ches-notice-badge{font-weight:700;font-size:11px;letter-spacing:.5px;color:#3DD97A;text-transform:uppercase;margin-bottom:8px}',
+      '#ches-notice .ches-notice-text{color:#F5F7FB;font-size:13px;font-weight:500;line-height:1.5;word-break:break-word}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -6803,6 +6826,47 @@
     }
   }
 
+  function ensureNotice() {
+    if (noticeEl || !document.body) return;
+    ensureStyles();
+    noticeEl = document.createElement('div');
+    noticeEl.id = 'ches-notice';
+    noticeEl.innerHTML = [
+      '<div class="ches-notice-badge">Скрипт установлен</div>',
+      '<div class="ches-notice-text"></div>'
+    ].join('');
+    document.body.appendChild(noticeEl);
+    noticeTextEl = noticeEl.querySelector('.ches-notice-text');
+  }
+
+  function hideScriptNotice() {
+    if (!noticeEl) return;
+    noticeEl.classList.remove('ches-notice-on');
+    if (noticeHideTimer) {
+      clearTimeout(noticeHideTimer);
+      noticeHideTimer = null;
+    }
+  }
+
+  function showScriptNotice(payload) {
+    ensureNotice();
+    if (!noticeEl) return;
+    var text = (payload && payload.text) ? String(payload.text) : '';
+    if (!text) return;
+
+    var ttl = 5000;
+    if (payload && payload.ttl != null) {
+      var t = parseInt(payload.ttl, 10);
+      if (!isNaN(t) && t > 0) ttl = Math.min(Math.max(t, 1500), 10000);
+    }
+
+    if (noticeTextEl) noticeTextEl.textContent = text;
+    noticeEl.classList.add('ches-notice-on');
+
+    if (noticeHideTimer) clearTimeout(noticeHideTimer);
+    noticeHideTimer = setTimeout(hideScriptNotice, ttl);
+  }
+
   function calcMult(pm, norm) {
     var p = parseInt(pm, 10);
     var n = parseInt(norm, 10);
@@ -6920,12 +6984,16 @@
     if (!data || typeof data !== 'object') return;
     if (data.panelToggle != null) {
       var pt = parseInt(data.panelToggle, 10);
-      if (!isNaN(pt) && pt > 0 && pt !== lastPanelToggle) {
-        lastPanelToggle = pt;
-        try {
-          if (window.ChesPanel && typeof window.ChesPanel.toggle === 'function')
-            window.ChesPanel.toggle();
-        } catch (e) {}
+      if (!isNaN(pt) && pt > 0) {
+        if (lastPanelToggle === 0) {
+          lastPanelToggle = pt;
+        } else if (pt !== lastPanelToggle) {
+          lastPanelToggle = pt;
+          try {
+            if (window.ChesPanel && typeof window.ChesPanel.toggle === 'function')
+              window.ChesPanel.toggle();
+          } catch (e) {}
+        }
       }
     }
     if (data.confirmReset != null) {
@@ -6992,6 +7060,14 @@
       }
     } else if (lastThinking) {
       setThinking(false);
+    }
+
+    if (data.scriptNotice && typeof data.scriptNotice === 'object') {
+      var snId = parseInt(data.scriptNotice.id, 10);
+      if (!isNaN(snId) && snId > 0 && snId !== lastScriptNoticeId) {
+        lastScriptNoticeId = snId;
+        showScriptNotice(data.scriptNotice);
+      }
     }
   }
 
@@ -7101,6 +7177,7 @@
     try { ensureHud(); } catch (e) {}
     try { ensureAiPanel(); } catch (e) {}
     try { ensureThink(); } catch (e) {}
+    try { ensureNotice(); } catch (e) {}
     try { installChatHook(); } catch (e) {}
     try { announceLoaded(); } catch (e) {}
   }
@@ -7109,6 +7186,7 @@
     ensureHud();
     ensureAiPanel();
     ensureThink();
+    ensureNotice();
     installChatHook();
     pollHud();
   }, POLL_MS);
