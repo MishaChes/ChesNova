@@ -4,6 +4,8 @@
   /* ====================== НАСТРОЙКИ ====================== */
   var CURSOR_NAME = 'ChesPanel';
   var SETTINGS_URL = 'http://127.0.0.1:17890/settings';
+  var SETTINGS_CHATLOG_URL = 'http://127.0.0.1:17890/settings/chatlog';
+  var SCRIPTS_PATH_URL = 'http://127.0.0.1:17890/scripts/path';
   var DASH_URL = 'http://127.0.0.1:17890/hud';
   var PUN_URL = 'http://127.0.0.1:17890/punishments';
   var PM_URL = 'http://127.0.0.1:17890/pmlogs';
@@ -16,6 +18,7 @@
   var DAYSOFF_FORUM_URL = 'http://127.0.0.1:17890/daysoff/forum';
   var SCRIPTS_URL = 'http://127.0.0.1:17890/scripts';
   var SCRIPTS_INSTALL_URL = 'http://127.0.0.1:17890/scripts/install';
+  var SCRIPTS_DELETE_URL = 'http://127.0.0.1:17890/scripts/delete';
   var SCRIPTS_TOPIC_URL = 'http://127.0.0.1:17890/scripts/topic';
   var BINDS_URL = 'http://127.0.0.1:17890/binds';
   var BINDS_TOGGLE_URL = 'http://127.0.0.1:17890/binds/toggle';
@@ -54,6 +57,10 @@
   var AI_PROVIDER_URL = 'http://127.0.0.1:17890/ai/provider';
   var AI_ASK_URL = 'http://127.0.0.1:17890/ai/ask';
   var AI_CLEAR_URL = 'http://127.0.0.1:17890/ai/clear';
+  var VEHICLES_URL = 'http://127.0.0.1:17890/vehicles';
+  var VEHICLES_REFRESH_URL = 'http://127.0.0.1:17890/vehicles/refresh';
+  var DM_MAP_URL = 'http://127.0.0.1:17890/useful/map';
+  var DM_MAP_DOWNLOAD_URL = 'http://127.0.0.1:17890/useful/map/download';
 
   var domReady = false;
   var hooked = false;
@@ -79,7 +86,9 @@
     startWithWindows: false,
     resetTime: { hours: '00', minutes: '00' },
     binds: { panel: 'F10', normReset: 'F9', hideHud: 'F7' },
-    bindEnabled: { panel: false, normReset: false, hideHud: false }
+    bindEnabled: { panel: false, normReset: false, hideHud: false },
+    chatlogPath: '',
+    gamePath: ''
   };
   var settingsRefs = {};
 
@@ -107,8 +116,77 @@
     admin: { nick: '—', norm: '—', daysOff: '—' },
     systems: { chatlog: '—', root: '—', hud: '—' }
   };
-  var dashRefs = { info: {}, sys: {} };
+  var dashRefs = { info: {}, sys: {}, stats: {} };
   var dashPollBusy = false;
+
+  /* Статистика админа за неделю (Главная) */
+  var dashStats = {
+    loaded: false,
+    days: 0,
+    totalPm: 0,
+    avgPm: 0,
+    maxPm: 0,
+    minPm: 0,
+    normsDone: 0,
+    punCount: 0
+  };
+
+  var usefulState = {
+    tab: 'weapons',
+    search: '',
+    cmdSearch: '',
+    eppSearch: '',
+    vehicles: { updated: '', list: [], loaded: false },
+    dmMap: { image: '', loaded: false, downloading: false, failed: false },
+    refs: { tabBtns: {}, searchIn: null, body: null, infoEl: null, vehSearchIn: null, vehBody: null, vehInfoEl: null, dmMapBox: null, dmMapBtn: null, cmdSearchIn: null, cmdBody: null, cmdInfoEl: null, eppSearchIn: null, eppBody: null, eppInfoEl: null }
+  };
+
+  /* Справочник ID оружия (Radmir) */
+  var USEFUL_WEAPONS = [
+    { id: 1, name: 'Кастет' },
+    { id: 2, name: 'Клюшка для гольфа' },
+    { id: 3, name: 'Полицейская дубинка' },
+    { id: 4, name: 'Нож' },
+    { id: 5, name: 'Бейсбольная бита' },
+    { id: 6, name: 'Лопата' },
+    { id: 7, name: 'Кий' },
+    { id: 8, name: 'Катана' },
+    { id: 9, name: 'Бензопила' },
+    { id: 10, name: 'Двухсторонний дилдо' },
+    { id: 11, name: 'Дилдо' },
+    { id: 12, name: 'Вибратор' },
+    { id: 13, name: 'Серебряный вибратор' },
+    { id: 14, name: 'Букет цветов' },
+    { id: 15, name: 'Трость' },
+    { id: 16, name: 'Граната' },
+    { id: 17, name: 'Слезоточивый газ' },
+    { id: 18, name: 'Коктейль Молотова' },
+    { id: 22, name: 'Glock 19' },
+    { id: 23, name: 'Пистолет 9мм с глушителем' },
+    { id: 24, name: 'Пистолет Desert Eagle' },
+    { id: 25, name: 'Remington 870' },
+    { id: 26, name: 'Обрез' },
+    { id: 27, name: 'Сайга-12' },
+    { id: 28, name: 'ОЦ-14 Гроза' },
+    { id: 29, name: 'АКС-74У' },
+    { id: 30, name: 'АКМ' },
+    { id: 31, name: 'HK416' },
+    { id: 32, name: 'Скорпион 61' },
+    { id: 33, name: 'MSR' },
+    { id: 34, name: 'AWM' },
+    { id: 35, name: 'РПГ' },
+    { id: 36, name: 'Самонаводящиеся ракеты HS' },
+    { id: 37, name: 'Огнемет' },
+    { id: 38, name: 'Миниган' },
+    { id: 39, name: 'Сумка с тротилом2' },
+    { id: 40, name: 'Детонатор к сумке' },
+    { id: 41, name: 'Баллончик с краской' },
+    { id: 42, name: 'Огнетушитель' },
+    { id: 43, name: 'Фотоаппарат' },
+    { id: 44, name: 'Прибор ночного видения' },
+    { id: 45, name: 'Тепловизор' },
+    { id: 46, name: 'Парашют' }
+  ];
 
   var punPeriods = [
     { id: 'today', label: 'Сегодня' },
@@ -309,6 +387,9 @@
   };
   var diagRefs = { healthRow: null, textBody: null, refreshBtn: null };
 
+  var vehiclesState = { updated: '', list: [], loaded: false };
+  var vehiclesRefs = { searchIn: null, refreshBtn: null, listBody: null, infoEl: null };
+
   var mainNav = [
     { id: 'Dashboard', label: 'Главная' },
     { id: 'Punishments', label: 'Наказания' },
@@ -316,7 +397,8 @@
     { id: 'NormHistory', label: 'Норма' },
     { id: 'DaysOff', label: 'Отгулы' },
     { id: 'Binds', label: 'Бинды' },
-    { id: 'Scripts', label: 'Скрипты' }
+    { id: 'Scripts', label: 'Скрипты' },
+    { id: 'Useful', label: 'Полезное' }
   ];
 
   var bottomNav = [
@@ -535,10 +617,42 @@
     .ches-nav.active .ches-nav-ind {
       background: #3b82f6;
     }
+    /* Вкладка «Полезное» — зелёная, мигает, пока не открыта */
+    .ches-nav.useful {
+      color: #6fe08a;
+      font-weight: 600;
+    }
+    .ches-nav.useful:hover {
+      color: #9bf0b1;
+      background: #141b26;
+    }
+    .ches-nav.useful.active {
+      background: #15261d;
+      color: #9bf0b1;
+    }
+    .ches-nav.useful.active .ches-nav-ind {
+      background: #41D07A;
+    }
+    .ches-nav.useful.blink {
+      background: #14271c;
+      color: #9bf0b1;
+      animation: ches-useful-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes ches-useful-pulse {
+      0%, 100% {
+        box-shadow: inset 0 0 0 1px rgba(65, 208, 122, .55), 0 0 0 0 rgba(65, 208, 122, .5);
+      }
+      50% {
+        box-shadow: inset 0 0 0 1px rgba(65, 208, 122, .55), 0 0 0 6px rgba(65, 208, 122, 0);
+      }
+    }
     .ches-nav-sep {
       height: 1px;
       background: #232c3a;
       margin: 12px 16px;
+    }
+    .ches-sidebar .ches-nav:last-child {
+      margin-bottom: 14px;
     }
 
     /* ---------- Контент ---------- */
@@ -783,9 +897,60 @@
     .ches-settings-save:hover {
       background: #2a3c5c;
     }
-    .ches-settings-save.saved {
-      background: #1c3a2a;
-      border-color: #65c466;
+
+    /* ---------- Кнопки: отклик на нажатие ---------- */
+    .ches-top-btn,
+    .ches-top-close,
+    .ches-settings-save,
+    .ches-ai-btn,
+    .ches-pml-clear,
+    .ches-norm-btn,
+    .ches-days-btn,
+    .ches-dropdown-btn,
+    .ches-binds-btn,
+    .ches-binds-cat-del,
+    .ches-scripts-btn,
+    .ches-reset-btn,
+    .ches-tester-btn,
+    .ches-updates-btn,
+    .ches-notif-btn,
+    .ches-help-btn,
+    .ches-cloud-btn,
+    .ches-diag-btn {
+      transition: transform .06s ease, filter .1s ease;
+    }
+    .ches-top-btn:active,
+    .ches-top-close:active,
+    .ches-settings-save:active,
+    .ches-ai-btn:active,
+    .ches-pml-clear:active,
+    .ches-norm-btn:active,
+    .ches-days-btn:active,
+    .ches-dropdown-btn:active,
+    .ches-binds-btn:active,
+    .ches-binds-cat-del:active,
+    .ches-scripts-btn:active,
+    .ches-reset-btn:active,
+    .ches-tester-btn:active,
+    .ches-updates-btn:active,
+    .ches-notif-btn:active,
+    .ches-help-btn:active,
+    .ches-cloud-btn:active,
+    .ches-diag-btn:active {
+      transform: scale(.95);
+      filter: brightness(1.25);
+    }
+    .ches-nav:active,
+    .ches-toggle:active,
+    .ches-norm-row:active,
+    .ches-days-list-row:active,
+    .ches-binds-item:active,
+    .ches-scripts-link:active,
+    .ches-dd-item:active,
+    .ches-ai-opt:active,
+    .ches-pun-period:active,
+    .ches-pun-type:active {
+      filter: brightness(1.2);
     }
 
     /* ---------- Тумблеры биндов (зелёный вкл / красный выкл) ---------- */
@@ -1096,6 +1261,290 @@
     .ches-dash-dot.off {
       background: #FF5B6B;
       box-shadow: 0 0 0 2px rgba(255, 91, 107, .18);
+    }
+
+    /* Главная: статистика за неделю */
+    .ches-dash-stats {
+      margin-top: 16px;
+      background: #121824;
+      border: 1px solid #232c3a;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .ches-dash-stats-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .ches-dash-stats-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f5f7fb;
+      letter-spacing: .3px;
+    }
+    .ches-dash-stats-sub {
+      font-size: 11px;
+      color: #5d6879;
+    }
+    .ches-dash-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      margin: -5px;
+    }
+    .ches-dash-stat-card {
+      position: relative;
+      background: #161d29;
+      border: 1px solid #232c3a;
+      border-radius: 8px;
+      padding: 10px 12px 10px 16px;
+      margin: 5px;
+      overflow: hidden;
+    }
+    .ches-dash-stat-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--acc, #5d6879);
+    }
+    .ches-dash-stat-card.c-totalPm {
+      --acc: #3b82f6;
+      background: rgba(59, 130, 246, .1);
+      border-color: rgba(59, 130, 246, .35);
+    }
+    .ches-dash-stat-card.c-avgPm {
+      --acc: #22d3ee;
+      background: rgba(34, 211, 238, .1);
+      border-color: rgba(34, 211, 238, .35);
+    }
+    .ches-dash-stat-card.c-maxPm {
+      --acc: #41D07A;
+      background: rgba(65, 208, 122, .1);
+      border-color: rgba(65, 208, 122, .35);
+    }
+    .ches-dash-stat-card.c-minPm {
+      --acc: #f6a623;
+      background: rgba(246, 166, 35, .1);
+      border-color: rgba(246, 166, 35, .35);
+    }
+    .ches-dash-stat-card.c-normsDone {
+      --acc: #a78bfa;
+      background: rgba(167, 139, 250, .1);
+      border-color: rgba(167, 139, 250, .35);
+    }
+    .ches-dash-stat-card.c-punCount {
+      --acc: #ff5b6b;
+      background: rgba(255, 91, 107, .1);
+      border-color: rgba(255, 91, 107, .35);
+    }
+    .ches-dash-stat-card.c-totalPm .ches-dash-stat-value { color: #7aa5ff; }
+    .ches-dash-stat-card.c-avgPm .ches-dash-stat-value { color: #6fe0ee; }
+    .ches-dash-stat-card.c-maxPm .ches-dash-stat-value { color: #6fe08a; }
+    .ches-dash-stat-card.c-minPm .ches-dash-stat-value { color: #f6b64d; }
+    .ches-dash-stat-card.c-normsDone .ches-dash-stat-value { color: #bda7fb; }
+    .ches-dash-stat-card.c-punCount .ches-dash-stat-value { color: #ff7d8e; }
+    .ches-dash-stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #f5f7fb;
+    }
+    .ches-dash-stat-label {
+      font-size: 11px;
+      color: #7c8899;
+      margin-top: 2px;
+    }
+    .ches-dash-stats-empty {
+      font-size: 12px;
+      color: #5d6879;
+    }
+
+    /* ---------- Вкладка Полезное ---------- */
+    .ches-useful-tabs {
+      display: flex;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .ches-useful-tab {
+      height: 32px;
+      line-height: 30px;
+      padding: 0 16px;
+      margin-right: 8px;
+      background: #161d29;
+      color: #aab4c5;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 7px;
+      border: 1px solid #232c3a;
+      cursor: pointer;
+      user-select: none;
+      transition: transform .06s ease, filter .1s ease, background .15s ease;
+    }
+    .ches-useful-tab:hover {
+      background: #1e2736;
+      color: #f5f7fb;
+    }
+    .ches-useful-tab.active {
+      background: #15261d;
+      border-color: #41D07A;
+      color: #9bf0b1;
+    }
+    .ches-useful-tab:active {
+      transform: scale(.95);
+      filter: brightness(1.2);
+    }
+    .ches-useful-search {
+      position: relative;
+      width: 260px;
+      height: 40px;
+      margin-bottom: 12px;
+    }
+    .ches-useful-info {
+      font-size: 11px;
+      color: #5d6879;
+      margin-bottom: 10px;
+    }
+    .ches-useful-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      margin: -3px;
+      max-height: 300px;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+    .ches-useful-row {
+      display: flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      margin: 3px;
+      background: #121824;
+      border: 1px solid #1c2431;
+      border-radius: 6px;
+    }
+    .ches-useful-id {
+      flex-shrink: 0;
+      min-width: 44px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #6fe08a;
+    }
+    .ches-useful-name {
+      font-size: 12px;
+      color: #c3ccda;
+      margin-left: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ches-useful-empty {
+      font-size: 12px;
+      color: #5d6879;
+      padding: 18px 0;
+    }
+    .ches-useful-cap {
+      font-size: 12px;
+      color: #7c8899;
+      line-height: 1.4;
+      margin-bottom: 10px;
+    }
+    .ches-useful-map-box {
+      max-width: 100%;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: #7c8899;
+    }
+    .ches-useful-map-img {
+      display: block;
+      max-width: 100%;
+      max-height: 60vh;
+      border-radius: 8px;
+      border: 1px solid #1c2431;
+    }
+    /* ---------- Вкладка Команды (уровни админки) ---------- */
+    .ches-cmd-list {
+      max-height: 320px;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+    .ches-cmd-sec-head {
+      display: flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 10px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      border: 1px solid;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .ches-cmd-sec-count {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+      opacity: .65;
+    }
+    .ches-cmd-row {
+      display: flex;
+      align-items: baseline;
+      padding: 5px 8px 5px 12px;
+      border-left: 2px solid;
+    }
+    .ches-cmd-name {
+      flex: 0 1 auto;
+      min-width: 120px;
+      max-width: 42%;
+      font-size: 12px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ches-cmd-desc {
+      flex: 1 1 auto;
+      font-size: 12px;
+      color: #7c8899;
+      margin-left: 10px;
+    }
+    /* Уровень 1 — зелёный */
+    .ches-cmd-sec-head.l1 { color: #6fe08a; background: rgba(65,208,122,.08); border-color: rgba(65,208,122,.35); }
+    .ches-cmd-row.l1 { border-left-color: rgba(65,208,122,.55); }
+    .ches-cmd-row.l1 .ches-cmd-name { color: #6fe08a; }
+    /* Уровень 2 — голубой */
+    .ches-cmd-sec-head.l2 { color: #7cc4ff; background: rgba(56,189,248,.08); border-color: rgba(56,189,248,.35); }
+    .ches-cmd-row.l2 { border-left-color: rgba(56,189,248,.55); }
+    .ches-cmd-row.l2 .ches-cmd-name { color: #7cc4ff; }
+    /* Уровень 3 — жёлтый */
+    .ches-cmd-sec-head.l3 { color: #ffd166; background: rgba(246,166,35,.08); border-color: rgba(246,166,35,.35); }
+    .ches-cmd-row.l3 { border-left-color: rgba(246,166,35,.55); }
+    .ches-cmd-row.l3 .ches-cmd-name { color: #ffd166; }
+    /* Уровень 4 — красный */
+    .ches-cmd-sec-head.l4 { color: #ff8a94; background: rgba(255,91,107,.08); border-color: rgba(255,91,107,.35); }
+    .ches-cmd-row.l4 { border-left-color: rgba(255,91,107,.55); }
+    .ches-cmd-row.l4 .ches-cmd-name { color: #ff8a94; }
+    .ches-map-btn {
+      display: inline-block;
+      height: 30px;
+      line-height: 28px;
+      padding: 0 14px;
+      background: #161d29;
+      border: 1px solid #232c3a;
+      color: #aab4c5;
+      font-size: 12px;
+      border-radius: 7px;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .ches-map-btn:hover {
+      background: #1e2736;
+      color: #f5f7fb;
+    }
+    .ches-map-btn.busy {
+      opacity: .6;
+      pointer-events: none;
     }
 
     /* ---------- Вкладка Наказания ---------- */
@@ -1599,8 +2048,11 @@
     .ches-days-list-row {
       display: flex;
       align-items: center;
-      gap: 12px;
       padding: 8px 2px;
+    }
+    .ches-days-list-row > * + * {
+      margin-left: 12px;
+    }
       border-bottom: 1px solid #1b2431;
       cursor: pointer;
       font-family: "Open Sans", Arial, sans-serif;
@@ -2143,7 +2595,9 @@
     .ches-binds-editor-actions {
       display: flex;
       align-items: center;
-      gap: 8px;
+    }
+    .ches-binds-editor-actions > * + * {
+      margin-left: 8px;
     }
     .ches-binds-error {
       color: #ff7d9c;
@@ -2169,6 +2623,11 @@
     }
     .ches-scripts > * + * {
       margin-top: 12px;
+    }
+    .ches-scripts-hint {
+      font-size: 11px;
+      line-height: 1.4;
+      color: #ff5b6b;
     }
     .ches-scripts-toolbar {
       display: flex;
@@ -2206,6 +2665,15 @@
       padding: 0 14px;
       font-size: 12px;
       flex-shrink: 0;
+    }
+    .ches-scripts-btn.danger {
+      background: #2a1720;
+      border-color: #ff5b6b;
+      color: #ff8fa0;
+    }
+    .ches-scripts-btn.danger:hover {
+      background: #3a1f2b;
+      color: #ffb0bd;
     }
     .ches-scripts-list {
       display: flex;
@@ -3108,6 +3576,62 @@
       min-height: 200px;
       max-height: 300px;
     }
+
+    /* ---------- Транспорт ---------- */
+    .ches-veh-toolbar {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .ches-veh-toolbar > * + * {
+      margin-left: 10px;
+    }
+    .ches-veh-toolbar .ches-inputbox {
+      flex: 1;
+      min-width: 0;
+      width: auto;
+    }
+    .ches-veh-info {
+      font-size: 11px;
+      color: #5d6879;
+      margin-bottom: 8px;
+      min-height: 14px;
+    }
+    .ches-veh-list {
+      background: #0c1119;
+      border: 1px solid #1c2431;
+      border-radius: 8px;
+      overflow-y: auto;
+      min-height: 120px;
+      max-height: 300px;
+      padding: 4px 0;
+      color: #aab4c5;
+      font-size: 12px;
+    }
+    .ches-veh-row {
+      display: flex;
+      align-items: center;
+      padding: 5px 14px;
+    }
+    .ches-veh-row > * + * {
+      margin-left: 12px;
+    }
+    .ches-veh-row:hover {
+      background: #131a26;
+    }
+    .ches-veh-id {
+      width: 70px;
+      flex-shrink: 0;
+      font-weight: 700;
+      color: #3b82f6;
+      font-variant-numeric: tabular-nums;
+    }
+    .ches-veh-name {
+      color: #c3ccda;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   `;
 
   /* ====================== ВСПОМОГАТЕЛЬНОЕ ====================== */
@@ -3357,6 +3881,28 @@
     blockWin.appendChild(winToggle);
     form.appendChild(blockWin);
 
+    /* Блок — пути (если автоматически найден неверный) */
+    var blockPaths = makeSettingsBlock('Пути');
+    blockPaths.appendChild(el('div', 'ches-settings-info',
+      'Если путь найден автоматически неверно (на ПК может быть несколько копий игры) — укажите верный вручную.'));
+    var rowCl = el('div', 'ches-settings-row');
+    var clField = makeSettingsField('Chatlog');
+    var clIn = makeOnishiInput({ value: settings.chatlogPath, placeholder: 'Документы\\RADMIR CRMP User Files\\SAMP\\chatlog.txt' });
+    clIn.box.style.width = '100%';
+    settingsRefs.chatlogPath = clIn.input;
+    clField.appendChild(clIn.box);
+    rowCl.appendChild(clField);
+    blockPaths.appendChild(rowCl);
+    var rowGp = el('div', 'ches-settings-row');
+    var gpField = makeSettingsField('Корень игры');
+    var gpIn = makeOnishiInput({ value: settings.gamePath, placeholder: 'C:\\Games\\Radmir CRMP' });
+    gpIn.box.style.width = '100%';
+    settingsRefs.gamePath = gpIn.input;
+    gpField.appendChild(gpIn.box);
+    rowGp.appendChild(gpField);
+    blockPaths.appendChild(rowGp);
+    form.appendChild(blockPaths);
+
     /* Блок 3 — бинды */
     var block3 = makeSettingsBlock('Бинды');
     var binds = [
@@ -3381,8 +3927,8 @@
     var saveBtn = el('div', 'ches-settings-save', '\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c');
     saveBtn.addEventListener('click', function () {
       saveSettings();
-      saveBtn.classList.add('saved');
-      setTimeout(function () { saveBtn.classList.remove('saved'); }, 1200);
+      saveBtn.textContent = '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e';
+      setTimeout(function () { saveBtn.textContent = '\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c'; }, 1500);
     });
     form.appendChild(saveBtn);
 
@@ -3404,6 +3950,25 @@
     settings.bindEnabled.normReset = settingsRefs.normResetToggle.classList.contains('on');
     settings.bindEnabled.hideHud = settingsRefs.hideHudToggle.classList.contains('on');
     saveSettingsToBridge();
+    saveSettingsPaths();
+  }
+
+  /* Сохранение путей в AHK (GET /settings/chatlog, /scripts/path) */
+  function saveSettingsPaths() {
+    var clp = settingsRefs.chatlogPath ? settingsRefs.chatlogPath.value.trim() : '';
+    if (clp) {
+      var x1 = new XMLHttpRequest();
+      x1.open('GET', SETTINGS_CHATLOG_URL + '?path=' + encodeURIComponent(clp), true);
+      x1.timeout = 1500;
+      x1.send();
+    }
+    var gp = settingsRefs.gamePath ? settingsRefs.gamePath.value.trim() : '';
+    if (gp) {
+      var x2 = new XMLHttpRequest();
+      x2.open('GET', SCRIPTS_PATH_URL + '?path=' + encodeURIComponent(gp), true);
+      x2.timeout = 1500;
+      x2.send();
+    }
   }
 
   /* Загрузка настроек из AHK (GET /settings) */
@@ -3416,6 +3981,8 @@
         try {
           var d = JSON.parse(xhr.responseText);
           if (d.nick != null) settings.nick = String(d.nick);
+          if (d.logFile != null) settings.chatlogPath = String(d.logFile);
+          if (d.gamePath != null) settings.gamePath = String(d.gamePath);
           if (d.norm != null) settings.norm = String(d.norm);
           if (d.autoReset != null) settings.autoResetEnabled = d.autoReset === 1 || d.autoReset === '1';
           if (d.startWithWindows != null) settings.startWithWindows = d.startWithWindows === 1 || d.startWithWindows === '1' || d.startWithWindows === true;
@@ -3748,7 +4315,144 @@
     columns.appendChild(sysPane);
 
     contentBodyEl.appendChild(columns);
+
+    /* Статистика за неделю */
+    var statsPane = el('div', 'ches-dash-stats');
+    var statsHead = el('div', 'ches-dash-stats-head');
+    statsHead.appendChild(el('div', 'ches-dash-stats-title', 'Статистика за неделю'));
+    var statsSub = el('div', 'ches-dash-stats-sub', 'Загрузка…');
+    dashRefs.stats.sub = statsSub;
+    statsHead.appendChild(statsSub);
+    statsPane.appendChild(statsHead);
+
+    var statDefs = [
+      { key: 'totalPm', label: 'Всего ПМ' },
+      { key: 'avgPm', label: 'Средний ПМ' },
+      { key: 'maxPm', label: 'Максимум ПМ' },
+      { key: 'minPm', label: 'Минимум ПМ' },
+      { key: 'normsDone', label: 'Норм выполнено' },
+      { key: 'punCount', label: 'Всего наказаний' }
+    ];
+    var statGrid = el('div', 'ches-dash-stats-grid');
+    statDefs.forEach(function (s) {
+      var card = el('div', 'ches-dash-stat-card c-' + s.key);
+      var value = el('div', 'ches-dash-stat-value', '—');
+      card.appendChild(value);
+      card.appendChild(el('div', 'ches-dash-stat-label', s.label));
+      dashRefs.stats[s.key] = value;
+      statGrid.appendChild(card);
+    });
+    statsPane.appendChild(statGrid);
+    contentBodyEl.appendChild(statsPane);
+
     pollDashboard();
+    loadDashStats();
+  }
+
+  function loadDashStats() {
+    var done = { norm: false, pun: false };
+
+    function finish() {
+      if (!done.norm || !done.pun) return;
+      updateDashStatsDom();
+    }
+
+    var xhrNorm = new XMLHttpRequest();
+    xhrNorm.open('GET', NORM_URL, true);
+    xhrNorm.timeout = 1500;
+    xhrNorm.onload = function () {
+      done.norm = true;
+      try {
+        if (xhrNorm.status >= 200 && xhrNorm.status < 300) {
+          var d = JSON.parse(xhrNorm.responseText);
+          if (d && Array.isArray(d.records)) {
+            var recs = d.records.slice();
+            recs.sort(function (a, b) { return String(a.raw || '').localeCompare(String(b.raw || '')); });
+            recs = recs.slice(-7);
+            dashStats.days = recs.length;
+            dashStats.totalPm = 0;
+            dashStats.maxPm = 0;
+            dashStats.minPm = 0;
+            dashStats.normsDone = 0;
+            var anyPm = false;
+            recs.forEach(function (r) {
+              var pm = parseInt(r.pm, 10) || 0;
+              var norm = parseInt(r.norm, 10) || 0;
+              dashStats.totalPm += pm;
+              if (pm > 0) {
+                anyPm = true;
+                if (dashStats.maxPm === 0 || pm > dashStats.maxPm) dashStats.maxPm = pm;
+                if (dashStats.minPm === 0 || pm < dashStats.minPm) dashStats.minPm = pm;
+              }
+              if (norm > 0 && pm >= norm) dashStats.normsDone++;
+            });
+            if (!anyPm) dashStats.minPm = 0;
+            dashStats.avgPm = dashStats.days ? Math.round(dashStats.totalPm / dashStats.days) : 0;
+            dashStats.loaded = true;
+          }
+        }
+      } catch (e) {}
+      finish();
+    };
+    xhrNorm.onerror = function () { done.norm = true; finish(); };
+    xhrNorm.ontimeout = function () { done.norm = true; finish(); };
+    xhrNorm.send();
+
+    var xhrPun = new XMLHttpRequest();
+    xhrPun.open('GET', PUN_URL, true);
+    xhrPun.timeout = 1500;
+    xhrPun.onload = function () {
+      done.pun = true;
+      try {
+        if (xhrPun.status >= 200 && xhrPun.status < 300) {
+          var d = JSON.parse(xhrPun.responseText);
+          if (d && Array.isArray(d.records)) {
+            var cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - 6);
+            var cutoffKey = cutoff.getFullYear() + '-' +
+              pad2(cutoff.getMonth() + 1) + '-' + pad2(cutoff.getDate());
+            var count = 0;
+            d.records.forEach(function (r) {
+              var key = parseRuDate(r.date);
+              if (key && key >= cutoffKey) count++;
+            });
+            dashStats.punCount = count;
+          }
+        }
+      } catch (e) {}
+      finish();
+    };
+    xhrPun.onerror = function () { done.pun = true; finish(); };
+    xhrPun.ontimeout = function () { done.pun = true; finish(); };
+    xhrPun.send();
+  }
+
+  function parseRuDate(str) {
+    var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(str || ''));
+    if (!m) return null;
+    return m[3] + '-' + m[2] + '-' + m[1];
+  }
+
+  function updateDashStatsDom() {
+    if (!contentBodyEl || currentView !== 'Dashboard') return;
+    if (!dashStats.loaded) return;
+    if (dashRefs.stats.sub) {
+      dashRefs.stats.sub.textContent = 'дней в базе: ' + dashStats.days;
+    }
+    var labels = {
+      totalPm: String(dashStats.totalPm),
+      avgPm: String(dashStats.avgPm),
+      maxPm: String(dashStats.maxPm),
+      minPm: String(dashStats.minPm),
+      normsDone: dashStats.normsDone + ' из ' + dashStats.days,
+      punCount: String(dashStats.punCount)
+    };
+    Object.keys(labels).forEach(function (key) {
+      var el2 = dashRefs.stats[key];
+      if (!el2) return;
+      el2.textContent = labels[key];
+      el2.className = 'ches-dash-stat-value';
+    });
   }
 
   function pollDashboard() {
@@ -5206,6 +5910,9 @@
 
     var wrap = el('div', 'ches-scripts');
 
+    /* Предупреждение в самом начале вкладки */
+    wrap.appendChild(el('div', 'ches-scripts-hint', 'После удаления скриптов рекомендуем провести проверку файлов игры'));
+
     /* Список пакетов */
     var list = el('div', 'ches-scripts-list');
     scriptsRefs.list = list;
@@ -5266,6 +5973,13 @@
         installScript(p.id, installBtn);
       });
       actions.appendChild(installBtn);
+      if (p.installed) {
+        var delBtn = el('div', 'ches-scripts-btn danger install', 'Удалить');
+        delBtn.addEventListener('click', function () {
+          deleteScript(p.id, delBtn);
+        });
+        actions.appendChild(delBtn);
+      }
       item.appendChild(actions);
       scriptsRefs.list.appendChild(item);
     });
@@ -5350,6 +6064,43 @@
     };
     xhr.ontimeout = function () {
       /* Таймаут XHR ≠ провал установки: команда могла уйти, ждём статус */
+      setTimeout(function () { loadScripts(); }, 3000);
+    };
+    xhr.send();
+  }
+
+  function deleteScript(id, btn) {
+    if (btn.getAttribute('data-arm') !== '1') {
+      btn.setAttribute('data-arm', '1');
+      btn.textContent = 'Точно?';
+      setTimeout(function () {
+        btn.setAttribute('data-arm', '0');
+        btn.textContent = 'Удалить';
+      }, 3000);
+      return;
+    }
+    btn.setAttribute('data-arm', '0');
+    btn.textContent = 'Удаляю…';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', SCRIPTS_DELETE_URL + '?id=' + encodeURIComponent(id), true);
+    /* Мост только ставит команду; само удаление идёт в AHK */
+    xhr.timeout = 8000;
+    xhr.onload = function () {
+      /* Старый мост (без /scripts/delete) отвечает HUD-состоянием без ok:true */
+      var ok = false;
+      try { ok = xhr.responseText.indexOf('"ok":true') !== -1; } catch (e) {}
+      if (!ok) {
+        btn.textContent = 'Ошибка моста';
+        setTimeout(function () { loadScripts(); }, 2000);
+        return;
+      }
+      setTimeout(function () { loadScripts(); }, 2500);
+    };
+    xhr.onerror = function () {
+      btn.textContent = 'Ошибка';
+      setTimeout(function () { loadScripts(); }, 2000);
+    };
+    xhr.ontimeout = function () {
       setTimeout(function () { loadScripts(); }, 3000);
     };
     xhr.send();
@@ -5503,25 +6254,41 @@
 
   function checkTestUpdates() {
     if (!testerState.enabled) return;
+    var btn = testerRefs.btnCheck;
+    if (btn) btn.textContent = 'Проверяется…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', TESTER_CHECK_URL, true);
     xhr.timeout = 3000;
     xhr.onload = function () {
       setTimeout(function () { loadTester(); }, 1500);
     };
-    xhr.onerror = function () {};
-    xhr.ontimeout = function () {};
+    xhr.onerror = function () {
+      if (btn) btn.textContent = 'Проверить';
+    };
+    xhr.ontimeout = function () {
+      if (btn) btn.textContent = 'Проверить';
+    };
     xhr.send();
   }
 
   function downloadTestUpdate() {
     if (!testerState.enabled) return;
+    var btn = testerRefs.btnDownload;
+    if (btn) btn.textContent = 'Открываю…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', TESTER_DOWNLOAD_URL, true);
     xhr.timeout = 3000;
-    xhr.onload = function () {};
-    xhr.onerror = function () {};
-    xhr.ontimeout = function () {};
+    xhr.onload = function () {
+      setTimeout(function () {
+        if (btn) btn.textContent = 'Ссылка';
+      }, 600);
+    };
+    xhr.onerror = function () {
+      if (btn) btn.textContent = 'Ссылка';
+    };
+    xhr.ontimeout = function () {
+      if (btn) btn.textContent = 'Ссылка';
+    };
     xhr.send();
   }
 
@@ -5714,7 +6481,7 @@
 
   function checkUpdates() {
     var btn = updatesRefs.checkBtn;
-    if (btn) btn.textContent = 'Проверка…';
+    if (btn) btn.textContent = 'Проверяется…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', UPDATES_CHECK_URL, true);
     xhr.timeout = 15000;
@@ -5731,12 +6498,22 @@
   }
 
   function downloadUpdate() {
+    var btn = updatesRefs.dlBtn;
+    if (btn) btn.textContent = 'Скачивание…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', UPDATES_DOWNLOAD_URL, true);
     xhr.timeout = 15000;
-    xhr.onload = function () {};
-    xhr.onerror = function () {};
-    xhr.ontimeout = function () {};
+    xhr.onload = function () {
+      setTimeout(function () {
+        if (btn) btn.textContent = 'Скачать последнюю версию';
+      }, 600);
+    };
+    xhr.onerror = function () {
+      if (btn) btn.textContent = 'Скачать последнюю версию';
+    };
+    xhr.ontimeout = function () {
+      if (btn) btn.textContent = 'Скачать последнюю версию';
+    };
     xhr.send();
   }
 
@@ -5860,8 +6637,8 @@
         var unread = items.filter(function (n) { return !n.read; }).length;
         if (unread !== notificationsCount) {
           notificationsCount = unread;
-          updateNotifBadge();
         }
+        updateNotifBadge();
       } catch (e) {}
     };
     xhr.onerror = function () {};
@@ -5870,14 +6647,23 @@
   }
 
   function markNotificationsRead() {
+    var btn = notificationsRefs.readBtn;
+    if (btn) btn.textContent = 'Читаю…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', NOTIFICATIONS_READ_URL, true);
     xhr.timeout = 1500;
     xhr.onload = function () {
-      setTimeout(function () { loadNotifications(); }, 400);
+      setTimeout(function () {
+        if (btn) btn.textContent = 'Прочитать все';
+        loadNotifications();
+      }, 400);
     };
-    xhr.onerror = function () {};
-    xhr.ontimeout = function () {};
+    xhr.onerror = function () {
+      if (btn) btn.textContent = 'Прочитать все';
+    };
+    xhr.ontimeout = function () {
+      if (btn) btn.textContent = 'Прочитать все';
+    };
     xhr.send();
   }
 
@@ -6124,7 +6910,7 @@
 
   function cloudCheck() {
     var btn = cloudRefs.checkBtn;
-    if (btn) btn.textContent = 'Проверка…';
+    if (btn) btn.textContent = 'Проверяется…';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', CLOUD_CHECK_URL, true);
     xhr.timeout = 15000;
@@ -6251,6 +7037,699 @@
     }
   }
 
+  function renderVehicles() {
+    clearBody();
+
+    var wrap = el('div', 'ches-diag');
+
+    var hint = el('div', 'ches-diag-hint', 'Список ID транспорта Radmir • данные качаются с GitHub и кэшируются');
+    wrap.appendChild(hint);
+
+    var toolbar = el('div', 'ches-veh-toolbar');
+
+    var searchBox = el('div', 'ches-inputbox');
+    var searchIn = document.createElement('input');
+    searchIn.className = 'ches-input';
+    searchIn.type = 'text';
+    searchIn.placeholder = ' ';
+    searchBox.appendChild(searchIn);
+    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск: ID или название'));
+    vehiclesRefs.searchIn = searchIn;
+    toolbar.appendChild(searchBox);
+
+    var refreshBtn = el('div', 'ches-diag-btn primary', 'Обновить');
+    vehiclesRefs.refreshBtn = refreshBtn;
+    refreshBtn.addEventListener('click', refreshVehiclesData);
+    toolbar.appendChild(refreshBtn);
+    wrap.appendChild(toolbar);
+
+    var infoEl = el('div', 'ches-veh-info', '');
+    vehiclesRefs.infoEl = infoEl;
+    wrap.appendChild(infoEl);
+
+    var listBody = el('div', 'ches-veh-list', 'Загрузка…');
+    vehiclesRefs.listBody = listBody;
+    wrap.appendChild(listBody);
+
+    contentBodyEl.appendChild(wrap);
+
+    searchIn.addEventListener('input', applyVehicleFilter);
+    loadVehicles();
+  }
+
+  function loadVehicles() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', VEHICLES_URL, true);
+    xhr.timeout = 1500;
+    xhr.onload = function () {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          var d = JSON.parse(xhr.responseText);
+          if (d && Array.isArray(d.vehicles)) {
+            vehiclesState.list = d.vehicles;
+            vehiclesState.updated = d.updated || '';
+            vehiclesState.loaded = true;
+            applyVehicleFilter();
+          }
+        } catch (e) {}
+      }
+    };
+    xhr.send();
+  }
+
+  function refreshVehiclesData() {
+    var btn = vehiclesRefs.refreshBtn;
+    if (btn) btn.textContent = 'Обновление…';
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', VEHICLES_REFRESH_URL, true);
+    xhr.timeout = 3000;
+    xhr.onload = function () {
+      if (btn) btn.textContent = 'Обновить';
+      setTimeout(loadVehicles, 800);
+    };
+    xhr.onerror = function () {
+      if (btn) btn.textContent = 'Обновить';
+    };
+    xhr.ontimeout = function () {
+      if (btn) btn.textContent = 'Обновить';
+    };
+    xhr.send();
+  }
+
+  function applyVehicleFilter() {
+    var listBody = vehiclesRefs.listBody;
+    if (!listBody) return;
+
+    var q = (vehiclesRefs.searchIn ? vehiclesRefs.searchIn.value : '');
+    q = (q || '').toLowerCase().trim();
+    var qid = parseInt(q, 10);
+
+    var rows = vehiclesState.list.slice().sort(function (a, b) { return a.id - b.id; });
+    if (q) {
+      rows = rows.filter(function (v) {
+        if (!isNaN(qid) && v.id === qid) return true;
+        var nm = String(v.name || '').toLowerCase();
+        return nm.indexOf(q) !== -1;
+      });
+    }
+
+    if (!vehiclesState.loaded) {
+      listBody.textContent = 'Загрузка…';
+      return;
+    }
+    if (rows.length === 0) {
+      listBody.textContent = q ? 'Ничего не найдено' : 'Список пуст. Нажмите «Обновить», чтобы скачать данные.';
+      if (vehiclesRefs.infoEl) vehiclesRefs.infoEl.textContent = '';
+      return;
+    }
+
+    if (vehiclesRefs.infoEl) {
+      var info = 'Найдено: ' + rows.length + (q ? ' (фильтр)' : ' из ' + vehiclesState.list.length);
+      if (vehiclesState.updated) info += ' • данные от ' + vehiclesState.updated;
+      vehiclesRefs.infoEl.textContent = info;
+    }
+
+    listBody.innerHTML = '';
+    for (var i = 0; i < rows.length; i++) {
+      var v = rows[i];
+      var row = el('div', 'ches-veh-row');
+      row.appendChild(el('div', 'ches-veh-id', String(v.id)));
+      row.appendChild(el('div', 'ches-veh-name', v.name || ''));
+      listBody.appendChild(row);
+    }
+  }
+
+  /* ====================== ПОЛЕЗНОЕ ====================== */
+  function renderUseful() {
+    clearBody();
+
+    var wrap = el('div', 'ches-useful');
+
+    var tabs = [
+      { id: 'weapons', label: 'Оружие' },
+      { id: 'commands', label: 'Команды' },
+      { id: 'transport', label: 'Транспорт' },
+      { id: 'epp', label: 'ЕПП ТС' },
+      { id: 'dmMap', label: 'DM Zona' }
+    ];
+    var tabBar = el('div', 'ches-useful-tabs');
+    tabs.forEach(function (t) {
+      var btn = el('div', 'ches-useful-tab' + (usefulState.tab === t.id ? ' active' : ''), t.label);
+      btn.addEventListener('click', function () {
+        usefulState.tab = t.id;
+        Object.keys(usefulState.refs.tabBtns).forEach(function (key) {
+          usefulState.refs.tabBtns[key].className = 'ches-useful-tab' + (key === t.id ? ' active' : '');
+        });
+        renderUsefulTab();
+      });
+      tabBar.appendChild(btn);
+      usefulState.refs.tabBtns[t.id] = btn;
+    });
+    wrap.appendChild(tabBar);
+
+    var body = el('div', 'ches-useful-body');
+    usefulState.refs.body = body;
+    wrap.appendChild(body);
+
+    contentBodyEl.appendChild(wrap);
+
+    renderUsefulTab();
+  }
+
+  function renderUsefulTab() {
+    var body = usefulState.refs.body;
+    if (!body) return;
+    body.innerHTML = '';
+    if (usefulState.tab === 'weapons') renderUsefulWeapons(body);
+    else if (usefulState.tab === 'commands') renderUsefulCommands(body);
+    else if (usefulState.tab === 'epp') renderUsefulEpp(body);
+    else if (usefulState.tab === 'dmMap') renderUsefulDmMap(body);
+    else renderUsefulTransport(body);
+    var scroller = contentBodyEl ? contentBodyEl.parentElement : null;
+    if (scroller) scroller.scrollTop = 0;
+  }
+
+  function renderUsefulWeapons(body) {
+    var searchBox = el('div', 'ches-useful-search');
+    var input = document.createElement('input');
+    input.className = 'ches-input';
+    input.type = 'text';
+    input.placeholder = ' ';
+    input.value = usefulState.search;
+    searchBox.appendChild(input);
+    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск: ID или название'));
+    body.appendChild(searchBox);
+    usefulState.refs.searchIn = input;
+
+    var infoEl = el('div', 'ches-useful-info', '');
+    body.appendChild(infoEl);
+    usefulState.refs.infoEl = infoEl;
+
+    var grid = el('div', 'ches-useful-grid');
+    usefulState.refs.grid = grid;
+    body.appendChild(grid);
+
+    input.addEventListener('input', function () {
+      usefulState.search = input.value;
+      applyUsefulWeaponsFilter();
+    });
+    applyUsefulWeaponsFilter();
+  }
+
+  function applyUsefulWeaponsFilter() {
+    var grid = usefulState.refs.grid;
+    if (!grid) return;
+    var q = (usefulState.search || '').toLowerCase().trim();
+    var qid = parseInt(q, 10);
+    var rows = USEFUL_WEAPONS.filter(function (w) {
+      if (!q) return true;
+      if (!isNaN(qid) && w.id === qid) return true;
+      return String(w.name || '').toLowerCase().indexOf(q) !== -1;
+    });
+    grid.innerHTML = '';
+    if (rows.length === 0) {
+      grid.appendChild(el('div', 'ches-useful-empty', 'Ничего не найдено'));
+    } else {
+      rows.forEach(function (w) {
+        var row = el('div', 'ches-useful-row');
+        row.appendChild(el('div', 'ches-useful-id', 'ID ' + w.id));
+        row.appendChild(el('div', 'ches-useful-name', w.name));
+        grid.appendChild(row);
+      });
+    }
+    if (usefulState.refs.infoEl) {
+      usefulState.refs.infoEl.textContent = 'Всего: ' + USEFUL_WEAPONS.length + (q ? ' • найдено: ' + rows.length : '');
+    }
+  }
+
+  /* Справочник спецтранспорта (ЕПП ТС) */
+  var USEFUL_EPP_VEHICLES = [
+    { id: 568, name: 'Bandos (Багги)' },
+    { id: 15239, name: 'Sherp Вездеход' },
+    { id: 15295, name: 'Ford HotRod' },
+    { id: 15297, name: 'Mercedes Br P900 R' },
+    { id: 15294, name: 'Mercedes Br P900 R.HW' },
+    { id: 15616, name: 'Bentley UltraTank' },
+    { id: 15612, name: 'GAZ 52 Тайга' },
+    { id: 15635, name: 'UAZ 452 Концепт Пикап' },
+    { id: 15632, name: 'Toyota LC 300 Safari' },
+    { id: 444, name: 'БРДМ' },
+    { id: 556, name: 'Mercedes Brabus Crawler' },
+    { id: 15660, name: 'Lamborghini Huracan Sterrato' },
+    { id: 15667, name: 'BMW XM OR' },
+    { id: 15668, name: 'BMW M4 G82 Camper' },
+    { id: 15647, name: 'GMC Hummer EV' },
+    { id: 15681, name: 'ZIL 131 600' },
+    { id: 557, name: 'Mercedes Brabus XLP 900 6x6' },
+    { id: 15688, name: 'Porsche Gemballa Marsien' },
+    { id: 572, name: 'Mercedes Brabus Iseki 26' },
+    { id: 15177, name: 'Hummer H1' },
+    { id: 17404, name: 'Audi R8 Titan' },
+    { id: 17405, name: 'GAZ 24-95 Кочевник' },
+    { id: 17409, name: 'Lamborghini Aventador Pickup' },
+    { id: 15083, name: 'GAZ 66' },
+    { id: 17445, name: 'Mercedes G-EVO' },
+    { id: 438, name: 'Porsche Cayenne 957 Rally' },
+    { id: 15232, name: 'Mercedes Unimog U5023' },
+    { id: 15631, name: 'UAZ 452 Концепт' },
+    { id: 15195, name: 'UAZ 469 Разбойник' },
+    { id: 15104, name: 'Tesla Cybertruck' }
+  ];
+
+  function renderUsefulEpp(body) {
+    var searchBox = el('div', 'ches-useful-search');
+    var input = document.createElement('input');
+    input.className = 'ches-input';
+    input.type = 'text';
+    input.placeholder = ' ';
+    input.value = usefulState.eppSearch;
+    searchBox.appendChild(input);
+    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск: ID или название'));
+    body.appendChild(searchBox);
+    usefulState.refs.eppSearchIn = input;
+
+    var infoEl = el('div', 'ches-useful-info', '');
+    body.appendChild(infoEl);
+    usefulState.refs.eppInfoEl = infoEl;
+
+    var grid = el('div', 'ches-useful-grid');
+    usefulState.refs.eppBody = grid;
+    body.appendChild(grid);
+
+    input.addEventListener('input', applyUsefulEppFilter);
+    applyUsefulEppFilter();
+  }
+
+  function applyUsefulEppFilter() {
+    var grid = usefulState.refs.eppBody;
+    if (!grid) return;
+    var q = (usefulState.refs.eppSearchIn ? usefulState.refs.eppSearchIn.value : '').toLowerCase().trim();
+    usefulState.eppSearch = q;
+    var qid = parseInt(q, 10);
+    var rows = USEFUL_EPP_VEHICLES.filter(function (v) {
+      if (!q) return true;
+      if (!isNaN(qid) && v.id === qid) return true;
+      return String(v.name || '').toLowerCase().indexOf(q) !== -1;
+    });
+    grid.innerHTML = '';
+    if (rows.length === 0) {
+      grid.appendChild(el('div', 'ches-useful-empty', 'Ничего не найдено'));
+    } else {
+      rows.forEach(function (v) {
+        var row = el('div', 'ches-useful-row');
+        row.appendChild(el('div', 'ches-useful-id', 'ID ' + v.id));
+        row.appendChild(el('div', 'ches-useful-name', v.name));
+        grid.appendChild(row);
+      });
+    }
+    if (usefulState.refs.eppInfoEl) {
+      usefulState.refs.eppInfoEl.textContent = 'Всего: ' + USEFUL_EPP_VEHICLES.length + (q ? ' • найдено: ' + rows.length : '');
+    }
+  }
+
+  var ADMIN_COMMANDS = [
+    {
+      level: 1,
+      title: 'Администратор 1 уровня',
+      commands: [
+        { cmd: '/a', desc: 'чат администрации' },
+        { cmd: '/ac', desc: 'вызвать администратора' },
+        { cmd: '/admins', desc: 'список администраторов в сети' },
+        { cmd: '/ahelp', desc: 'список доступных команд' },
+        { cmd: '/pm', desc: 'ответить на репорт' },
+        { cmd: '/slap', desc: 'подбросить игрока (/slap + /slap - / покинуть вверх/вниз)' },
+        { cmd: '/sp', desc: 'следить за игроком' },
+        { cmd: '/tdo_delete', desc: 'удалить информатор на земле' },
+        { cmd: '/z', desc: 'ответить на запрос' },
+        { cmd: '/a_packet_info', desc: 'если не собираетесь сразу банить читера, вводите ID читера' }
+      ]
+    },
+    {
+      level: 2,
+      title: 'Администратор 2 уровня',
+      commands: [
+        { cmd: '/ac', desc: 'присоединиться к чату саппортов' },
+        { cmd: '/back', desc: 'возвращение на позицию входа в глобальный мир' },
+        { cmd: '/fixcar', desc: 'починить автомобиль' },
+        { cmd: '/flip', desc: 'восстановление позиции ТС' },
+        { cmd: '/fly', desc: 'режим полёта камерой' },
+        { cmd: '/getcar', desc: 'телепортировать к себе авто' },
+        { cmd: '/gunban | /un gunban', desc: 'блокировка оружия / снятие блокировки оружия' },
+        { cmd: '/gh', desc: 'подменить себе ник' },
+        { cmd: '/goto', desc: 'телепортироваться к игроку' },
+        { cmd: '/hp', desc: 'установить ХП только себе' },
+        { cmd: '/kick', desc: 'кикнуть игрока' },
+        { cmd: '/online', desc: 'количество игроков во всех фракциях в онлайне' },
+        { cmd: '/reset_table', desc: 'восстановление столов казино' },
+        { cmd: '/spawn', desc: 'заспавнить игрока' },
+        { cmd: '/spcar', desc: 'заспавнить автомобиль' },
+        { cmd: '/stats', desc: 'просмотр статистики игрока' },
+        { cmd: '/tplist', desc: 'список телепортов' },
+        { cmd: '/tplist_add | /tplist_del', desc: 'добавить точки телепорта / удалить точки телепорта' },
+        { cmd: '/truckers_radio', desc: 'прослушка рации дальнобойщиков' },
+        { cmd: '/jail | /unjail', desc: 'посадить в деморган / выпустить из тюрьмы' },
+        { cmd: '/kjail | /unjail', desc: 'посадить в КПЗ / выпустить из тюрьмы' },
+        { cmd: '/fmute | /unfmute', desc: 'полная блокировка всех игровых чатов / снятие блокировки' },
+        { cmd: '/mute | /unmute', desc: 'дать затычку / снять затычку' },
+        { cmd: '/rmute | /unrmute', desc: 'дать затычку репорта / снять затычку репорта' },
+        { cmd: '/v_mute | /v_unmute', desc: 'мут голосового чата / снять затычку голосового чата' },
+        { cmd: '/set_vw', desc: 'сменить виртуальный мир' },
+        { cmd: '/eps', desc: 'поднять игрока из состояния нока' },
+        { cmd: '/gangs', desc: 'присоединиться к банде, которая в сети' },
+        { cmd: '/freeze | /unfreeze', desc: 'заморозить игрока / разморозить' },
+        { cmd: '/time', desc: 'сколько осталось времени у активного наказания у игрока' },
+        { cmd: '/gethere', desc: 'перемещение игрока к себе' }
+      ]
+    },
+    {
+      level: 3,
+      title: 'Администратор 3 уровня',
+      commands: [
+        { cmd: '/a_boombox_delete', desc: 'удалить boombox игрока' },
+        { cmd: '/a_notify', desc: 'отправить уведомление игроку в /nt' },
+        { cmd: '/aputveh', desc: 'сесть за руль авто' },
+        { cmd: '/ban', desc: 'забанить игрока' },
+        { cmd: '/billboard_reset', desc: 'удалить билборд' },
+        { cmd: '/biz', desc: 'телепортироваться к бизнесу' },
+        { cmd: '/delravito', desc: 'удаление объявления с Равито' },
+        { cmd: '/ears', desc: 'прослушка СМС' },
+        { cmd: '/rwc', desc: 'спавн незанятого личного ТС (без разрешения Га/Зга нельзя)' },
+        { cmd: '/ent', desc: 'телепортироваться к подъезду' },
+        { cmd: '/evacuate_mhouse', desc: 'отправить дом на колёсах на штрафстоянку' },
+        { cmd: '/fixcarall', desc: 'починка автомобилей в радиусе' },
+        { cmd: '/gangs', desc: 'вступить в банду из предложенного списка на сервере' },
+        { cmd: '/gar', desc: 'телепортироваться к гаражу' },
+        { cmd: '/gotocar', desc: 'телепортироваться к авто' },
+        { cmd: '/house', desc: 'телепортироваться к дому' },
+        { cmd: '/hp', desc: 'установить ХП игроку' },
+        { cmd: '/offban', desc: 'забанить игрока в оффлайн' },
+        { cmd: '/offjail', desc: 'выдать игроку джайл в оффлайне' },
+        { cmd: '/offwarn', desc: 'выдать предупреждение оффлайн' },
+        { cmd: '/nlist', desc: 'открыть список заявок на смену ников' },
+        { cmd: '/respv', desc: 'респавн автомобилей в радиусе' },
+        { cmd: '/spcars', desc: 'спавн всего незанятого транспорта (без разрешения Га/Зга нельзя)' },
+        { cmd: '/set_gps', desc: 'установить метку и маршрут игроку по GPS' },
+        { cmd: '/twarn', desc: 'выдать устное предупреждение игроку' },
+        { cmd: '/warn', desc: 'выдать предупреждение игроку' },
+        { cmd: '/miners_show', desc: 'показать шахтёров' }
+      ]
+    },
+    {
+      level: 4,
+      title: 'Администратор 4 уровня',
+      commands: [
+        { cmd: '/acarpass', desc: 'посмотреть информацию о машине' },
+        { cmd: '/alist', desc: 'список нарушений игрока' },
+        { cmd: '/alock', desc: 'открыть автомобиль' },
+        { cmd: '/fban', desc: 'блокировка аккаунта и всех аккаунтов на данном IP' },
+        { cmd: '/fine_park', desc: 'отправить машину на штрафстоянку' },
+        { cmd: '/hpall', desc: 'выдать ХП в указанном радиусе' },
+        { cmd: '/mp_end', desc: 'завершить МП' },
+        { cmd: '/mp_freeze', desc: 'заморозка/разморозка на МП' },
+        { cmd: '/mp_get', desc: 'телепортировать к себе команду' },
+        { cmd: '/mp_gun', desc: 'выдача оружия командам на МП' },
+        { cmd: '/mp_skin', desc: 'скины команд на МП' },
+        { cmd: '/mp_team', desc: 'количество команд на МП' },
+        { cmd: '/mp_tp', desc: 'создать точку телепорта на МП' },
+        { cmd: '/msg (/o)', desc: 'написать в общий чат' },
+        { cmd: '/pos', desc: 'телепортация по координатам [x/y/z]' },
+        { cmd: '/sban', desc: 'забанить навсегда тихим баном' },
+        { cmd: '/set_fuel', desc: 'заправить ТС' },
+        { cmd: '/setpoint', desc: 'установить точку телепорта' },
+        { cmd: '/settime (/st)', desc: 'установить время на всём сервере' },
+        { cmd: '/settp', desc: 'открыть точку телепорта для игроков' },
+        { cmd: '/setweather (/sw)', desc: 'установить погоду' },
+        { cmd: '/soffban', desc: 'тихо забанить игрока в оффлайне' },
+        { cmd: '/templeader', desc: 'назначить себя временным лидером' },
+        { cmd: '/tpmark', desc: 'телепортироваться на установленную точку' },
+        { cmd: '/unrban', desc: 'разбанить IP' },
+        { cmd: '/unwarn', desc: 'снять предупреждение (онлайн)' },
+        { cmd: '/veh', desc: 'создать автомобиль' },
+        { cmd: '/v', desc: 'выдать себе авто' },
+        { cmd: '/vl_info', desc: 'информация о транспорте' }
+      ]
+    }
+  ];
+
+  function renderUsefulCommands(body) {
+    var searchBox = el('div', 'ches-useful-search');
+    var input = document.createElement('input');
+    input.className = 'ches-input';
+    input.type = 'text';
+    input.placeholder = ' ';
+    input.value = usefulState.cmdSearch;
+    searchBox.appendChild(input);
+    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск: команда или описание'));
+    body.appendChild(searchBox);
+    usefulState.refs.cmdSearchIn = input;
+
+    var infoEl = el('div', 'ches-useful-info', '');
+    body.appendChild(infoEl);
+    usefulState.refs.cmdInfoEl = infoEl;
+
+    var list = el('div', 'ches-cmd-list');
+    usefulState.refs.cmdBody = list;
+    body.appendChild(list);
+
+    input.addEventListener('input', applyUsefulCommandsFilter);
+    applyUsefulCommandsFilter();
+  }
+
+  function applyUsefulCommandsFilter() {
+    var list = usefulState.refs.cmdBody;
+    if (!list) return;
+    var q = (usefulState.refs.cmdSearchIn ? usefulState.refs.cmdSearchIn.value : '').toLowerCase().trim();
+    usefulState.cmdSearch = q;
+    list.innerHTML = '';
+
+    var total = 0;
+    var matched = 0;
+    for (var s = 0; s < ADMIN_COMMANDS.length; s++) {
+      var sec = ADMIN_COMMANDS[s];
+      var rows = sec.commands;
+      if (q) {
+        rows = rows.filter(function (c) {
+          return c.cmd.toLowerCase().indexOf(q) !== -1 || c.desc.toLowerCase().indexOf(q) !== -1;
+        });
+      }
+      total += sec.commands.length;
+      matched += rows.length;
+      if (rows.length === 0) continue;
+
+      var head = el('div', 'ches-cmd-sec-head l' + sec.level);
+      head.appendChild(el('div', 'ches-cmd-sec-title', sec.title));
+      head.appendChild(el('div', 'ches-cmd-sec-count', rows.length + ' / ' + sec.commands.length));
+      list.appendChild(head);
+
+      for (var i = 0; i < rows.length; i++) {
+        var row = el('div', 'ches-cmd-row l' + sec.level);
+        row.appendChild(el('div', 'ches-cmd-name', rows[i].cmd));
+        row.appendChild(el('div', 'ches-cmd-desc', rows[i].desc));
+        list.appendChild(row);
+      }
+    }
+
+    if (usefulState.refs.cmdInfoEl) {
+      usefulState.refs.cmdInfoEl.textContent = 'Всего команд: ' + total + (q ? ' • найдено: ' + matched : '');
+    }
+  }
+
+  function renderUsefulTransport(body) {
+    var searchBox = el('div', 'ches-useful-search');
+    var input = document.createElement('input');
+    input.className = 'ches-input';
+    input.type = 'text';
+    input.placeholder = ' ';
+    searchBox.appendChild(input);
+    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск: ID или название'));
+    body.appendChild(searchBox);
+    usefulState.refs.vehSearchIn = input;
+
+    var infoEl = el('div', 'ches-useful-info', '');
+    body.appendChild(infoEl);
+    usefulState.refs.vehInfoEl = infoEl;
+
+    var list = el('div', 'ches-veh-list', 'Загрузка…');
+    usefulState.refs.vehBody = list;
+    body.appendChild(list);
+
+    input.addEventListener('input', applyUsefulVehiclesFilter);
+
+    if (!usefulState.vehicles.loaded) loadUsefulVehicles();
+    else applyUsefulVehiclesFilter();
+  }
+
+  function loadUsefulVehicles() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', VEHICLES_URL, true);
+    xhr.timeout = 1500;
+    xhr.onload = function () {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          var d = JSON.parse(xhr.responseText);
+          if (d && Array.isArray(d.vehicles)) {
+            usefulState.vehicles.list = d.vehicles;
+            usefulState.vehicles.updated = d.updated || '';
+            usefulState.vehicles.loaded = true;
+            applyUsefulVehiclesFilter();
+          }
+        } catch (e) {}
+      }
+    };
+    xhr.send();
+  }
+
+  function applyUsefulVehiclesFilter() {
+    var list = usefulState.refs.vehBody;
+    if (!list) return;
+    var q = (usefulState.refs.vehSearchIn ? usefulState.refs.vehSearchIn.value : '');
+    q = (q || '').toLowerCase().trim();
+    var qid = parseInt(q, 10);
+
+    if (!usefulState.vehicles.loaded) {
+      list.textContent = 'Загрузка…';
+      return;
+    }
+    var rows = usefulState.vehicles.list.slice().sort(function (a, b) { return a.id - b.id; });
+    if (q) {
+      rows = rows.filter(function (v) {
+        if (!isNaN(qid) && v.id === qid) return true;
+        return String(v.name || '').toLowerCase().indexOf(q) !== -1;
+      });
+    }
+    if (rows.length === 0) {
+      list.textContent = q ? 'Ничего не найдено' : 'Список пуст.';
+      if (usefulState.refs.vehInfoEl) usefulState.refs.vehInfoEl.textContent = '';
+      return;
+    }
+    if (usefulState.refs.vehInfoEl) {
+      var info = 'Найдено: ' + rows.length + (q ? ' (фильтр)' : ' из ' + usefulState.vehicles.list.length);
+      if (usefulState.vehicles.updated) info += ' • данные от ' + usefulState.vehicles.updated;
+      usefulState.refs.vehInfoEl.textContent = info;
+    }
+    list.innerHTML = '';
+    for (var i = 0; i < rows.length; i++) {
+      var v = rows[i];
+      var row = el('div', 'ches-veh-row');
+      row.appendChild(el('div', 'ches-veh-id', String(v.id)));
+      row.appendChild(el('div', 'ches-veh-name', v.name || ''));
+      list.appendChild(row);
+    }
+  }
+
+  function renderUsefulDmMap(body) {
+    var cap = el('div', 'ches-useful-cap', 'Карта, где запрещён DM между бандами и МВД');
+    body.appendChild(cap);
+
+    var box = el('div', 'ches-useful-map-box', 'Загрузка…');
+    usefulState.refs.dmMapBox = box;
+    body.appendChild(box);
+
+    var btn = el('div', 'ches-map-btn', 'Скачать карту');
+    btn.addEventListener('click', refreshUsefulDmMap);
+    usefulState.refs.dmMapBtn = btn;
+    body.appendChild(btn);
+
+    if (!usefulState.dmMap.loaded) loadUsefulDmMap();
+    else renderUsefulDmMapImage();
+  }
+
+  function renderUsefulDmMapImage() {
+    var box = usefulState.refs.dmMapBox;
+    if (!box) return;
+    if (usefulState.dmMap.downloading) {
+      box.innerHTML = '';
+      box.textContent = 'Скачивание…';
+      return;
+    }
+    if (usefulState.dmMap.loaded && usefulState.dmMap.image) {
+      box.innerHTML = '';
+      var img = document.createElement('img');
+      img.className = 'ches-useful-map-img';
+      img.src = usefulState.dmMap.image;
+      img.alt = 'Карта DM-зоны';
+      box.appendChild(img);
+    } else {
+      box.textContent = usefulState.dmMap.failed ? 'Не удалось получить карту.' : 'Карта не найдена. Нажми «Скачать карту».';
+    }
+  }
+
+  function loadUsefulDmMap() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', DM_MAP_URL, true);
+    xhr.timeout = 4000;
+    xhr.onload = function () {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          var d = JSON.parse(xhr.responseText);
+          if (d && d.ok && d.image) {
+            usefulState.dmMap.image = d.image;
+            usefulState.dmMap.loaded = true;
+            usefulState.dmMap.failed = false;
+          } else {
+            usefulState.dmMap.loaded = false;
+            usefulState.dmMap.image = '';
+            usefulState.dmMap.failed = true;
+          }
+        } catch (e) {
+          usefulState.dmMap.failed = true;
+        }
+      } else {
+        usefulState.dmMap.failed = true;
+      }
+      renderUsefulDmMapImage();
+    };
+    xhr.onerror = function () {
+      usefulState.dmMap.failed = true;
+      renderUsefulDmMapImage();
+    };
+    xhr.ontimeout = function () {
+      usefulState.dmMap.failed = true;
+      renderUsefulDmMapImage();
+    };
+    xhr.send();
+  }
+
+  function refreshUsefulDmMap() {
+    var btn = usefulState.refs.dmMapBtn;
+    if (usefulState.dmMap.downloading) return;
+    usefulState.dmMap.downloading = true;
+    if (btn) {
+      btn.textContent = 'Скачивается…';
+      btn.classList.add('busy');
+    }
+    renderUsefulDmMapImage();
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', DM_MAP_DOWNLOAD_URL, true);
+    xhr.timeout = 4000;
+    xhr.onload = function () {
+      setTimeout(loadUsefulDmMap, 500);
+      usefulState.dmMap.downloading = false;
+      if (btn) {
+        btn.textContent = 'Скачать карту';
+        btn.classList.remove('busy');
+      }
+    };
+    xhr.onerror = function () {
+      usefulState.dmMap.downloading = false;
+      if (btn) {
+        btn.textContent = 'Скачать карту';
+        btn.classList.remove('busy');
+      }
+      renderUsefulDmMapImage();
+    };
+    xhr.ontimeout = function () {
+      usefulState.dmMap.downloading = false;
+      if (btn) {
+        btn.textContent = 'Скачать карту';
+        btn.classList.remove('busy');
+      }
+      renderUsefulDmMapImage();
+    };
+    xhr.send();
+  }
+
   function renderEmpty() {
     clearBody();
   }
@@ -6260,11 +7739,15 @@
     try { if (id !== 'Scripts') hideScriptInfo(); } catch (e) {}
 
     Object.keys(navButtons).forEach(function (key) {
-      navButtons[key].className = 'ches-nav' + (key === id ? ' active' : '');
+      var cls = 'ches-nav';
+      if (key === 'Useful') cls += ' useful';
+      if (key === id) cls += ' active';
+      navButtons[key].className = cls;
     });
     Object.keys(topButtons).forEach(function (key) {
       topButtons[key].className = 'ches-top-btn' + (key === id ? ' active' : '');
     });
+    updateNotifBadge();
 
     if (contentTitleEl) contentTitleEl.textContent = getViewTitle(id);
 
@@ -6283,6 +7766,7 @@
     else if (id === 'Help') renderHelp();
     else if (id === 'Cloud') renderCloud();
     else if (id === 'Diagnostics') renderDiagnostics();
+    else if (id === 'Useful') renderUseful();
     else renderEmpty();
   }
 
@@ -6483,6 +7967,13 @@
     if (currentView === 'Cloud') loadCloud();
     pollNotifications();
   }, 2000);
+
+  /* «Полезное» пульсирует, пока вкладка не открыта */
+  setInterval(function () {
+    var b = navButtons['Useful'];
+    if (!b) return;
+    b.classList.toggle('blink', currentView !== 'Useful');
+  }, 600);
 
   tick();
 })();
