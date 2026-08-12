@@ -40,7 +40,7 @@ if (A_LastError = 183) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.0.1"
+CURRENT_VERSION := "12.0.2"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -76,6 +76,7 @@ hudBridgePosFile := dataPath "\hud_pos.json"
 hudBridgeScriptFile := dataPath "\hud_http_bridge.ps1"
 hudBridgePidFile := dataPath "\hud_http_bridge.pid"
 hudBridgePid := 0
+scriptDeleteRetry := Map()
 hudBridgeVisible := 1
 panelToggleSeq := 0
 pendingNormResetConfirm := 0
@@ -103,6 +104,8 @@ hudBridgeHelpFile := dataPath "\hud_help_state.json"
 hudBridgeDiagnosticsFile := dataPath "\hud_diagnostics_state.json"
 hudBridgeAiFile := dataPath "\hud_ai_state.json"
 hudBridgeAiQuestionFile := dataPath "\hud_ai_question.tmp"
+hudBridgeVehiclesFile := dataPath "\vehicles.json"
+hudBridgeDmMapFile := dataPath "\hud_dm_map.jpg"
 ; AI-ответ для in-game панели (ches.js), ~10 сек
 aiHudId := 0
 aiHudQuestion := ""
@@ -290,8 +293,15 @@ EnsureNickBeforeCloudAccess()
 SetTimer(SendCloudPing, 3600000)
 SetTimer(FetchAiConfigFromCloud, 1800000)
 SetTimer(StartupNetworkInit, -300)
+SetTimer(UpdateVehiclesData, -25000)
+SetTimer(DownloadDmMap, -30000)
 versionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/version.json"
 testVersionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/Test.json"
+stableChesJsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/ches.js"
+testChesJsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ches.js"
+testAhkUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk"
+vehiclesUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/vehicles.json"
+dmMapUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/map.jpg"
 notifications := []
 notificationStates := Map()
 LoadNotificationsCache()
@@ -782,7 +792,7 @@ IsChesNovaHudInstalled(gamePath := "") {
 ; createOnlyMissing=true — не перезаписывать существующие файлы,
 ; кроме тех, у которых alwaysUpdate=true (ches.js, loader-js.json — всегда после рестарта/обновы).
 EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
-    global dataPath, scriptsGamePath
+    global dataPath, scriptsGamePath, testerMode
 
     gamePath := GetScriptsGamePath()
     if (gamePath = "" || !DirExist(gamePath))
@@ -814,7 +824,7 @@ EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
         ),
         Map(
             "name", "ches.js",
-            "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/ches.js",
+            "url", testerMode ? testChesJsUrl : stableChesJsUrl,
             "dest", paths["ches"],
             "alwaysUpdate", true
         )
@@ -1000,10 +1010,13 @@ WriteHudBridgeState(*) {
 WriteSettingsState(*) {
     global hudBridgeSettingsFile, nick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
     global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled
+    global logFile, scriptsGamePath
 
     try {
         json := "{"
             . '"nick":"' JsonEscape(nick) '",'
+            . '"logFile":"' JsonEscape(logFile) '",'
+            . '"gamePath":"' JsonEscape(scriptsGamePath) '",'
             . '"norm":' Integer(norm) ','
             . '"autoReset":' (autoResetEnabled ? 1 : 0) ','
             . '"startWithWindows":' (startWithWindows ? 1 : 0) ','
@@ -2281,6 +2294,149 @@ InstallScriptPackageFromPanel(packageId) {
         ShowToast("✓ Пакет " package["displayTitle"] " установлен", 2200)
 }
 
+; Удалить пакет скрипта из панели (GET /scripts/delete → hud_commands.ini)
+UninstallScriptPackageFromPanel(packageId) {
+    global scriptDeleteRetry
+
+    package := GetScriptPackageById(packageId)
+    if !IsObject(package) {
+        ShowToast("⚠ Пакет скрипта не найден", 2200)
+        return
+    }
+
+    gamePath := GetScriptsGamePath()
+    if (gamePath = "") {
+        ShowToast("⚠ Укажите путь к корню игры", 2200)
+        return
+    }
+    if !DirExist(gamePath) {
+        ShowToast("⚠ Папка игры не найдена: " gamePath, 2800)
+        return
+    }
+
+    protected := ["loader-js.asi", "loader-js.json", "ches.js"]
+    deleted := 0
+    kept := 0
+    lockedPaths := []
+    for _, file in package["files"] {
+        rel := StrReplace(file["relativePath"], "/", "\")
+        while InStr(rel, "\\")
+            rel := StrReplace(rel, "\\", "\")
+        rel := LTrim(rel, "\")
+        destination := gamePath "\" rel
+        if IsPathProtected(rel, protected) {
+            kept += 1
+            continue
+        }
+        try {
+            if DirExist(destination) {
+                DirDelete(destination, true)
+                deleted += 1
+                continue
+            }
+            if FileExist(destination) {
+                FileDelete(destination)
+                deleted += 1
+            }
+        } catch as err {
+            lockedPaths.Push(destination)
+            LogError("UninstallScriptPackageFromPanel", "Не удалось удалить " destination, err.Message)
+        }
+    }
+
+    ; Дополнительная зачистка рантайм-файлов пакета (не влияет на статус установки)
+    if package.Has("cleanup") {
+        for _, relRaw in package["cleanup"] {
+            rel := StrReplace(relRaw, "/", "\")
+            destination := gamePath "\" rel
+            try {
+                if DirExist(destination) {
+                    DirDelete(destination, true)
+                    continue
+                }
+                if FileExist(destination)
+                    FileDelete(destination)
+            } catch as err {
+                lockedPaths.Push(destination)
+                LogError("UninstallScriptPackageFromPanel", "Не удалось удалить " destination, err.Message)
+            }
+        }
+    }
+
+    if (lockedPaths.Length > 0) {
+        scriptDeleteRetry[packageId] := Map("package", package, "remaining", lockedPaths, "attempt", 0, "notified", 0)
+        SetTimer(RetryScriptDeletion, 2500)
+        WriteScriptsState()
+        ShowToast("⏳ Файлы заняты игрой, удалю автоматически после закрытия игры", 3200)
+        return
+    }
+
+    WriteScriptsState()
+    PushScriptNotice("Скрипт удалён. Чтобы применить, перезайдите в игру")
+    if (deleted = 0 && kept > 0)
+        ShowToast("⚠ У пакета нет файлов для удаления (защищены ядровые: " kept ")", 3200)
+    else if (kept > 0)
+        ShowToast("✓ " package["displayTitle"] " удалён (защищены ядровые файлы: " kept ")", 3200)
+    else
+        ShowToast("✓ Пакет " package["displayTitle"] " удалён", 2400)
+}
+
+; Доретраить удаление занятых файлов (игра закроется → .asi освободится)
+RetryScriptDeletion(*) {
+    global scriptDeleteRetry
+
+    if (scriptDeleteRetry.Count = 0) {
+        SetTimer(RetryScriptDeletion, 0)
+        return
+    }
+    done := []
+    for packageId, entry in scriptDeleteRetry {
+        entry["attempt"] += 1
+        stillLocked := []
+        for _, destination in entry["remaining"] {
+            try {
+                if DirExist(destination) {
+                    DirDelete(destination, true)
+                    continue
+                }
+                if FileExist(destination) {
+                    FileDelete(destination)
+                    continue
+                }
+            } catch as err {
+                stillLocked.Push(destination)
+            }
+        }
+        if (stillLocked.Length = 0) {
+            done.Push(packageId)
+            WriteScriptsState()
+            PushScriptNotice("Скрипт удалён. Чтобы применить, перезайдите в игру")
+            ShowToast("✓ " entry["package"]["displayTitle"] " удалён", 2600)
+        } else if (entry["attempt"] >= 240) {
+            done.Push(packageId)
+            WriteScriptsState()
+            LogError("UninstallScriptPackageFromPanel", "Не удалось удалить файлы " packageId, JoinArrayRange(entry["remaining"], 1, entry["remaining"].Length, ", "))
+            ShowToast("⚠ Не удалось удалить файлы. Закройте игру и повторите", 3600)
+        } else if (entry["notified"] + 24 <= entry["attempt"]) {
+            entry["notified"] := entry["attempt"]
+            ShowToast("⏳ Удаление ждёт: закройте игру, файлы уйдут сами", 2200)
+        }
+    }
+    for _, packageId in done
+        scriptDeleteRetry.Delete(packageId)
+    if (scriptDeleteRetry.Count = 0)
+        SetTimer(RetryScriptDeletion, 0)
+}
+
+IsPathProtected(rel, protectedList) {
+    SplitPath(rel, &fileName)
+    for _, name in protectedList {
+        if (StrLower(fileName) = StrLower(name))
+            return true
+    }
+    return false
+}
+
 ; Сохранить путь к игре из панели (GET /scripts/path → hud_commands.ini)
 SaveScriptsPathFromPanel(path) {
     global scriptsGamePath, settingsFile
@@ -2296,6 +2452,26 @@ SaveScriptsPathFromPanel(path) {
     TryIniWrite(path, settingsFile, "Scripts", "gamePath", "SaveScriptsPathFromPanel")
     WriteScriptsState()
     ShowToast("✓ Путь к игре сохранён", 1800)
+}
+
+; Сохранить путь к chatlog из панели (GET /settings/chatlog → hud_commands.ini)
+SaveChatlogPathFromPanel(path) {
+    global logFile, lastSize, settingsFile
+
+    path := Trim(path)
+    if (path = "")
+        return
+    if !FileExist(path) || DirExist(path) {
+        ShowToast("⚠ Файл chatlog не найден", 2000)
+        return
+    }
+    logFile := path
+    try lastSize := FileGetSize(logFile)
+    catch
+        lastSize := 0
+    TryIniWrite(logFile, settingsFile, "Main", "logFile", "SaveChatlogPathFromPanel")
+    WriteSettingsState()
+    ShowToast("✓ Путь к chatlog сохранён", 1800)
 }
 
 ; Индикатор «AI думает…» в ches.js
@@ -2388,6 +2564,8 @@ EnsureHudBridgeScript() {
         "$diagnosticsFile = $args[16]`n"
         "$aiFile = $args[17]`n"
         "$aiQuestionFile = $args[18]`n"
+        "$vehiclesFile = $args[19]`n"
+        "$dmMapFile = $args[20]`n"
         "$ip = [System.Net.IPAddress]::Loopback`n"
         "$listener = [System.Net.Sockets.TcpListener]::new($ip, $port)`n"
         "try { $listener.Start() } catch { exit 1 }`n"
@@ -2411,6 +2589,17 @@ EnsureHudBridgeScript() {
         "        }`n"
         "      }`n"
         "      try { [System.IO.File]::WriteAllLines($pendingFile, $lines, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/settings/chatlog\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      $vals = @{}`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+        "      }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveChatlogPath=' + $vals['path'] + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
         "      $json = '{`"ok`":true}'`n"
         "    } elseif ($requestLine -match 'GET\s+/settings') {`n"
         "      $json = '{`"ok`":true}'`n"
@@ -2501,8 +2690,19 @@ EnsureHudBridgeScript() {
         "      }`n"
         "      $iniText = '[Commands]' + [Environment]::NewLine + 'installScript=' + $vals['id'] + [Environment]::NewLine`n"
         "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
-        "      $json = '{`"ok`":true}'`n"
-        "    } elseif ($requestLine -match 'GET\s+/scripts/path\?([^\s]+)') {`n"
+         "      $json = '{`"ok`":true}'`n"
+         "    } elseif ($requestLine -match 'GET\s+/scripts/delete\?([^\s]+)') {`n"
+         "      $q = $Matches[1]`n"
+         "      $parts = $q -split '&'`n"
+         "      $vals = @{}`n"
+         "      foreach ($pair in $parts) {`n"
+         "        $kv = $pair -split '=', 2`n"
+         "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
+         "      }`n"
+         "      $iniText = '[Commands]' + [Environment]::NewLine + 'deleteScript=' + $vals['id'] + [Environment]::NewLine`n"
+         "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+         "      $json = '{`"ok`":true}'`n"
+         "    } elseif ($requestLine -match 'GET\s+/scripts/path\?([^\s]+)') {`n"
         "      $q = $Matches[1]`n"
         "      $parts = $q -split '&'`n"
         "      $vals = @{}`n"
@@ -2787,6 +2987,32 @@ EnsureHudBridgeScript() {
         "        [System.IO.File]::WriteAllText($posFile, $posJson, [System.Text.UTF8Encoding]::new($false))`n"
         "      } catch {}`n"
         "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/vehicles/refresh') {`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'refreshVehicles=1' + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/useful/map/download') {`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'refreshDmMap=1' + [Environment]::NewLine`n"
+        "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/useful/map') {`n"
+        "      $json = '{`"ok`":false,`"image`":`"`"}'`n"
+        "      if (Test-Path -LiteralPath $dmMapFile) {`n"
+        "        try {`n"
+        "          $mapBytes = [System.IO.File]::ReadAllBytes($dmMapFile)`n"
+        "          if ($mapBytes.Length -gt 0) {`n"
+        "            $mapB64 = [Convert]::ToBase64String($mapBytes)`n"
+        "            $json = '{`"ok`":true,`"image`":`"data:image/jpeg;base64,' + $mapB64 + '`"}'`n"
+        "          }`n"
+        "        } catch {}`n"
+        "      }`n"
+        "    } elseif ($requestLine -match 'GET\s+/vehicles') {`n"
+        "      $json = '{`"ok`":true,`"updated`":`"`",`"vehicles`":[]}'`n"
+        "      if (Test-Path -LiteralPath $vehiclesFile) {`n"
+        "        try { $json = [System.IO.File]::ReadAllText($vehiclesFile, [System.Text.Encoding]::UTF8) } catch {`n"
+        "          try { $json = [System.IO.File]::ReadAllText($vehiclesFile, [System.Text.Encoding]::Unicode) } catch {}`n"
+        "        }`n"
+        "      }`n"
         "    } else {`n"
         "      $json = '{`"nick`":`"`",`"pm`":0,`"health`":`"ok`",`"message`":`"`",`"hud`":null}'`n"
         "      if (Test-Path -LiteralPath $stateFile) {`n"
@@ -2840,7 +3066,7 @@ StartHudHttpBridge(*) {
     global hudBridgeCommandFile, hudBridgeNormFile, hudBridgeDaysoffFile, hudBridgeScriptsFile
     global hudBridgeBindsFile, hudBridgeTesterFile
     global hudBridgeUpdatesFile, hudBridgeNotificationsFile, hudBridgeCloudFile, hudBridgeHelpFile, hudBridgeDiagnosticsFile
-    global hudBridgeAiFile, hudBridgeAiQuestionFile
+    global hudBridgeAiFile, hudBridgeAiQuestionFile, hudBridgeVehiclesFile
 
     StopHudHttpBridge()
     WriteHudBridgeState()
@@ -2869,7 +3095,8 @@ StartHudHttpBridge(*) {
             . hudBridgeDaysoffFile '" "' hudBridgeScriptsFile '" "' hudBridgeBindsFile '" "' hudBridgeTesterFile '" "'
             . hudBridgeUpdatesFile '" "' hudBridgeNotificationsFile '" "' hudBridgeCloudFile '" "'
             . hudBridgeHelpFile '" "' hudBridgeDiagnosticsFile '" "'
-            . hudBridgeAiFile '" "' hudBridgeAiQuestionFile '"'
+            . hudBridgeAiFile '" "' hudBridgeAiQuestionFile '" "' hudBridgeVehiclesFile '" "'
+            . hudBridgeDmMapFile '"'
         Run(cmd, , "Hide", &pid)
         hudBridgePid := pid
         try {
@@ -2958,10 +3185,22 @@ CheckPendingCommands(*) {
                 InstallScriptPackageFromPanel(installScriptId)
             }
         }
+        if IniRead(hudBridgeCommandFile, "Commands", "deleteScript", "") != "" {
+            deleteScriptId := Trim(IniRead(hudBridgeCommandFile, "Commands", "deleteScript", ""))
+            if (deleteScriptId != "") {
+                UninstallScriptPackageFromPanel(deleteScriptId)
+            }
+        }
         if IniRead(hudBridgeCommandFile, "Commands", "saveScriptsPath", "") != "" {
             scriptsPathRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "saveScriptsPath", ""))
             if (scriptsPathRaw != "") {
                 SaveScriptsPathFromPanel(scriptsPathRaw)
+            }
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "saveChatlogPath", "") != "" {
+            chatlogPathRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "saveChatlogPath", ""))
+            if (chatlogPathRaw != "") {
+                SaveChatlogPathFromPanel(chatlogPathRaw)
             }
         }
         if IniRead(hudBridgeCommandFile, "Commands", "openScriptTopic", "") != "" {
@@ -3066,6 +3305,12 @@ CheckPendingCommands(*) {
         }
         if IniRead(hudBridgeCommandFile, "Commands", "refreshDiagnostics", "") = "1" {
             RefreshDiagnosticsFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "refreshVehicles", "") = "1" {
+            UpdateVehiclesData(true)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "refreshDmMap", "") = "1" {
+            DownloadDmMap(true)
         }
         setAiEnabled := IniRead(hudBridgeCommandFile, "Commands", "setAiEnabled", "")
         if (setAiEnabled != "") {
@@ -5315,6 +5560,7 @@ GetScriptPackages() {
             "files", [
                 Map("name", "aTools.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/aTools.asi", "relativePath", "aTools.asi")
             ],
+            "cleanup", ["atools-config.json"],
             "activationCommands", "/wh  /ddl  /unl  /trec"
         ),
         Map(
@@ -6003,7 +6249,7 @@ CheckTestUpdatesFromPanel() {
 
 ; Скачать test-сборку из панели (GET /tester/download → hud_commands.ini)
 DownloadTestUpdateFromPanel() {
-    global testerMode
+    global testerMode, testAhkUrl
 
     if !testerMode {
         ShowToast("⚠ Включи режим тестировщика", 2200)
@@ -6012,11 +6258,10 @@ DownloadTestUpdateFromPanel() {
 
     try {
         versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
-        if (versionInfo["download"] = "") {
-            ShowToast("⚠ В Test/Test.json нет ссылки download", 2200)
-            return
-        }
-        Run(versionInfo["download"])
+        downloadUrl := versionInfo["download"]
+        if (downloadUrl = "")
+            downloadUrl := testAhkUrl
+        Run(downloadUrl)
         ShowToast("✓ Открыта ссылка на test-сборку", 1800)
     } catch as err {
         LogError("DownloadTestUpdateFromPanel", "Ошибка скачивания test", err.Message)
@@ -6026,7 +6271,7 @@ DownloadTestUpdateFromPanel() {
 
 ; Установить test-сборку из панели (GET /tester/install → hud_commands.ini)
 InstallTestUpdateFromPanel() {
-    global testerMode, basePath, backupPath
+    global testerMode, basePath, backupPath, testAhkUrl
 
     if !testerMode {
         ShowToast("⚠ Включи режим тестировщика", 2200)
@@ -6037,16 +6282,8 @@ InstallTestUpdateFromPanel() {
     newScript := basePath "\ChesNova_test_new.ahk"
 
     try {
-        versionInfo := ParseVersionManifest(DownloadTestVersionManifest())
-        downloadUrl := versionInfo["download"]
-        if (downloadUrl = "")
-            throw Error("Нет поля download в Test/Test.json.")
-
-        if InStr(StrLower(downloadUrl), ".zip") {
-            Run(downloadUrl)
-            ShowToast("ZIP-сборка — ссылка открыта", 2200)
-            return
-        }
+        ; Прямая ссылка на test-сборку: Test/ChesNova.ahk
+        downloadUrl := testAhkUrl
 
         if !FileExist(mainScript)
             throw Error("Не найден текущий ChesNova.ahk.")
@@ -7432,5 +7669,74 @@ RefreshScriptsView(*) {
 }
 
 DownloadTestVersionManifest() {
-    return ""
+    global testVersionInfoUrl
+
+    ; Уникальный параметр и no-cache не дают GitHub CDN вернуть старую копию JSON.
+    requestUrl := testVersionInfoUrl "?nocache=" A_Now "_" A_TickCount
+    result := HttpGetText(requestUrl)
+    if (result["status"] != 200)
+        throw Error("GitHub вернул HTTP " result["status"] ".")
+    return result["text"]
+}
+
+; Скачать актуальный список транспорта (JS code/vehicles.json на GitHub) и закэшировать локально.
+UpdateVehiclesData(manual := false) {
+    global vehiclesUrl, hudBridgeVehiclesFile
+
+    try {
+        requestUrl := vehiclesUrl "?nocache=" A_Now "_" A_TickCount
+        result := HttpGetText(requestUrl)
+        if (result["status"] != 200)
+            throw Error("GitHub вернул HTTP " result["status"] ".")
+        text := Trim(result["text"])
+        if (text = "" || !InStr(text, "vehicles"))
+            throw Error("Ответ не похож на список транспорта.")
+
+        try {
+            f := FileOpen(hudBridgeVehiclesFile, "w", "UTF-8-RAW")
+            f.Write(text)
+            f.Close()
+        }
+        if (manual)
+            ShowToast("✓ Список транспорта обновлён", 2000)
+    } catch as err {
+        LogError("UpdateVehiclesData", "Не удалось обновить список транспорта", err.Message)
+        if (manual)
+            ShowToast("⚠ Не удалось обновить список транспорта", 2200)
+    }
+}
+
+; Скачать бинарный файл (GET) и сохранить в filePath.
+DownloadBinaryToFile(url, filePath) {
+    http := ComObject("WinHttp.WinHttpRequest.5.1")
+    http.Open("GET", url, true)
+    try http.SetTimeouts(15000, 15000, 30000, 60000)
+    http.SetRequestHeader("Cache-Control", "no-cache")
+    http.SetRequestHeader("Pragma", "no-cache")
+    http.Send()
+    HttpWaitAsync(http, 110000)
+    if (http.Status != 200)
+        throw Error("GitHub вернул HTTP " http.Status ".")
+    stream := ComObject("ADODB.Stream")
+    stream.Type := 1
+    stream.Open()
+    stream.Write(http.ResponseBody)
+    stream.SaveToFile(filePath, 2)
+    stream.Close()
+}
+
+; Скачать карту DM-зоны (files/map.jpg на GitHub) в локальный файл для панели.
+DownloadDmMap(manual := false) {
+    global dmMapUrl, hudBridgeDmMapFile
+
+    try {
+        requestUrl := dmMapUrl "?nocache=" A_Now "_" A_TickCount
+        DownloadBinaryToFile(requestUrl, hudBridgeDmMapFile)
+        if (manual)
+            ShowToast("✓ Карта DM-зоны обновлена", 2000)
+    } catch as err {
+        LogError("DownloadDmMap", "Не удалось скачать карту DM-зоны", err.Message)
+        if (manual)
+            ShowToast("⚠ Не удалось скачать карту DM-зоны", 2200)
+    }
 }
