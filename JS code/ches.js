@@ -5249,7 +5249,7 @@
     /* Редактор бинда */
     if (bindsState.editor) {
       wrap.appendChild(renderBindEditor());
-      contentBodyEl.appendChild(wrap);
+
       return;
     }
 
@@ -6441,8 +6441,17 @@
     wrap.appendChild(actionsCard);
 
     contentBodyEl.appendChild(wrap);
+    refreshUpdates();
+    if (!updatesState.loaded) loadUpdates();
+  }
 
-    loadUpdates();
+  function announceVersionToChat(msg) {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      var sent = (window.ChesHUD && typeof window.ChesHUD.showChat === 'function') ? window.ChesHUD.showChat(msg) : false;
+      if (sent || tries >= 20) clearInterval(timer);
+    }, 500);
   }
 
   function loadUpdates() {
@@ -6465,12 +6474,16 @@
             updatesState.message = d.message || '';
             updatesState.loaded = true;
             refreshUpdates();
-            if (!updatesState.versionAnnounced && window.ChesHUD && typeof window.ChesHUD.showChat === 'function') {
-              updatesState.versionAnnounced = true;
+            if (!updatesState.versionAnnounced) {
+              var chatMsg = null;
               if (updatesState.hasUpdate) {
-                window.ChesHUD.showChat('Доступна новая версия v' + updatesState.latest);
+                chatMsg = 'Доступна новая версия v' + updatesState.latest;
               } else if (updatesState.version) {
-                window.ChesHUD.showChat('Версия v' + updatesState.version);
+                chatMsg = 'Версия v' + updatesState.version;
+              }
+              if (chatMsg) {
+                updatesState.versionAnnounced = true;
+                announceVersionToChat(chatMsg);
               }
             }
           }
@@ -7911,7 +7924,7 @@
 
     showView('Dashboard');
     domReady = true;
-    loadUpdates();
+    checkUpdates();
   }
 
   /* ====================== ХУКИ И ИНИЦИАЛИЗАЦИЯ ====================== */
@@ -8634,7 +8647,6 @@
   var loadAnnounced = false;
   function announceLoaded() {
     if (loadAnnounced) return;
-    // чуть подождать, пока CEF/чат готовы
     var tries = 0;
     var timer = setInterval(function () {
       tries += 1;
