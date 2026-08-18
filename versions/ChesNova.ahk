@@ -40,7 +40,7 @@ if (A_LastError = 183) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.0.2"
+CURRENT_VERSION := "12.0.3"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -464,7 +464,10 @@ ToastGui := ""
 if FileExist(saveFile)
 {
     pmCount := FileRead(saveFile)
-    pmCount += 0
+    if (pmCount = "")
+        pmCount := 0
+    else
+        pmCount += 0
 }
 LoadRecordCache(punishmentsFile, punishmentRecordCache, "LoadPunishmentRecordCache")
 LoadRecordCache(pmLogsFile, pmLogRecordCache, "LoadPmLogRecordCache")
@@ -572,7 +575,7 @@ InitializeBinds()
 MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
 SetTimer(CheckAutoReset, 30000)
-SetTimer(RunHealthCheck, 60000)
+SetTimer(RunHealthCheck, 10000)
 
 UpdatePMDisplay()
 SetTimer(CheckChatlogPathOnStartup, -1500)
@@ -2042,18 +2045,6 @@ SetUpdateCheckFromPanel(valueRaw) {
     }
 }
 
-; Скачать последнюю версию из панели (GET /updates/download → hud_commands.ini)
-DownloadUpdateFromPanel() {
-    try {
-        versionInfo := ParseVersionManifest(DownloadVersionManifest())
-        OpenUpdateDownload(versionInfo["download"])
-        ShowToast("✓ Ссылка на скачивание открыта", 1800)
-    } catch as err {
-        LogError("DownloadUpdateFromPanel", "Ошибка скачивания обновления", err.Message)
-        ShowToast("⚠ Не удалось получить ссылку", 2200)
-    }
-}
-
 ; Установить обновление из панели (GET /updates/install → hud_commands.ini)
 InstallUpdateFromPanel() {
     global CURRENT_VERSION, basePath, backupPath
@@ -2865,10 +2856,6 @@ EnsureHudBridgeScript() {
     "      $iniText = '[Commands]' + [Environment]::NewLine + 'setUpdateCheck=' + $vals['checkOnStartup'] + [Environment]::NewLine`n"
     "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
     "      $json = '{`"ok`":true}'`n"
-    "    } elseif ($requestLine -match 'GET\s+/updates/download') {`n"
-    "      $iniText = '[Commands]' + [Environment]::NewLine + 'downloadUpdate=1' + [Environment]::NewLine`n"
-    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
-    "      $json = '{`"ok`":true}'`n"
     "    } elseif ($requestLine -match 'GET\s+/updates/install') {`n"
     "      $iniText = '[Commands]' + [Environment]::NewLine + 'installUpdate=1' + [Environment]::NewLine`n"
     "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
@@ -3277,9 +3264,6 @@ CheckPendingCommands(*) {
         setUpdateCheck := IniRead(hudBridgeCommandFile, "Commands", "setUpdateCheck", "")
         if (setUpdateCheck != "") {
             SetUpdateCheckFromPanel(setUpdateCheck)
-        }
-        if IniRead(hudBridgeCommandFile, "Commands", "downloadUpdate", "") = "1" {
-            DownloadUpdateFromPanel()
         }
         if IniRead(hudBridgeCommandFile, "Commands", "installUpdate", "") = "1" {
             InstallUpdateFromPanel()
@@ -6519,11 +6503,13 @@ FormatDiagnosticBytes(bytes) {
 }
 SendCloudPing(*) {
     CheckCloudAccess(false, false)
+    WriteCloudState()
     WriteHudBridgeState()
 }
 StartupNetworkInit(*) {
     global checkUpdatesOnStartup, aiEnabled
     CheckCloudAccess(true, true)
+    WriteCloudState()
     if aiEnabled
         FetchAiConfigFromCloud()
     if (checkUpdatesOnStartup)
