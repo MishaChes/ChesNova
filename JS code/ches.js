@@ -37,7 +37,6 @@
   var UPDATES_URL = 'http://127.0.0.1:17890/updates';
   var UPDATES_CHECK_URL = 'http://127.0.0.1:17890/updates/check';
   var UPDATES_SAVE_URL = 'http://127.0.0.1:17890/updates/save';
-  var UPDATES_DOWNLOAD_URL = 'http://127.0.0.1:17890/updates/download';
   var UPDATES_INSTALL_URL = 'http://127.0.0.1:17890/updates/install';
   var NORM_RESET_CONFIRM_URL = 'http://127.0.0.1:17890/reset/confirm';
   var NORM_RESET_CANCEL_URL = 'http://127.0.0.1:17890/reset/cancel';
@@ -138,7 +137,7 @@
     eppSearch: '',
     vehicles: { updated: '', list: [], loaded: false },
     dmMap: { image: '', loaded: false, downloading: false, failed: false },
-    refs: { tabBtns: {}, searchIn: null, body: null, infoEl: null, vehSearchIn: null, vehBody: null, vehInfoEl: null, dmMapBox: null, dmMapBtn: null, cmdSearchIn: null, cmdBody: null, cmdInfoEl: null, eppSearchIn: null, eppBody: null, eppInfoEl: null }
+    refs: { tabBtns: {}, searchIn: null, body: null, infoEl: null, vehSearchIn: null, vehBody: null, vehInfoEl: null, dmMapBox: null, dmMapImg: null, dmMapBtn: null, cmdSearchIn: null, cmdBody: null, cmdInfoEl: null, eppSearchIn: null, eppBody: null, eppInfoEl: null }
   };
 
   /* Справочник ID оружия (Radmir) */
@@ -277,8 +276,8 @@
   var testerState = { enabled: false, version: '', info: '', loaded: false };
   var testerRefs = { toggle: null, statusEl: null, infoEl: null, btnCheck: null, btnDownload: null, btnInstall: null, btnRollback: null, confirm: '' };
 
-  var updatesState = { version: '', latest: '', hasUpdate: false, required: false, changelog: [], download: '', checkOnStartup: true, lastCheck: '', message: '', loaded: false };
-  var updatesRefs = { toggle: null, statusEl: null, checkBtn: null, updateBtn: null, dlBtn: null, installBtn: null, changelogBody: null };
+  var updatesState = { version: '', latest: '', hasUpdate: false, required: false, changelog: [], download: '', checkOnStartup: true, lastCheck: '', message: '', loaded: false, versionAnnounced: false };
+  var updatesRefs = { toggle: null, statusEl: null, checkBtn: null, updateBtn: null, installBtn: null, changelogBody: null };
 
   var helpText = [
     'СТАРТ',
@@ -644,6 +643,28 @@
       }
       50% {
         box-shadow: inset 0 0 0 1px rgba(65, 208, 122, .55), 0 0 0 6px rgba(65, 208, 122, 0);
+      }
+    }
+    /* Вкладка «Обновления» — красная пульсация, пока есть доступное обновление */
+    .ches-nav.update-avail {
+      background: #3a1722;
+      color: #ff8fa8;
+      font-weight: 600;
+      animation: ches-update-pulse 1.2s ease-in-out infinite;
+    }
+    .ches-nav.update-avail:hover {
+      background: #4a1d2b;
+      color: #ffa8bc;
+    }
+    .ches-nav.update-avail .ches-nav-ind {
+      background: #ff5b6b;
+    }
+    @keyframes ches-update-pulse {
+      0%, 100% {
+        box-shadow: inset 0 0 0 1px rgba(255, 91, 107, .55), 0 0 0 0 rgba(255, 91, 107, .5);
+      }
+      50% {
+        box-shadow: inset 0 0 0 1px rgba(255, 91, 107, .55), 0 0 0 6px rgba(255, 91, 107, 0);
       }
     }
     .ches-nav-sep {
@@ -1455,13 +1476,18 @@
       margin-bottom: 12px;
       font-size: 12px;
       color: #7c8899;
+      overflow: auto;
+      max-height: 60vh;
+      border: 1px solid #1c2431;
+      border-radius: 8px;
+      background: #0d1219;
+      position: relative;
     }
     .ches-useful-map-img {
       display: block;
       max-width: 100%;
       max-height: 60vh;
       border-radius: 8px;
-      border: 1px solid #1c2431;
     }
     /* ---------- Вкладка Команды (уровни админки) ---------- */
     .ches-cmd-list {
@@ -6411,12 +6437,6 @@
       installUpdate(installBtn);
     });
     actToolbar.appendChild(installBtn);
-    var dlBtn = el('div', 'ches-updates-btn', 'Скачать последнюю версию');
-    updatesRefs.dlBtn = dlBtn;
-    dlBtn.addEventListener('click', function () {
-      downloadUpdate();
-    });
-    actToolbar.appendChild(dlBtn);
     actionsCard.appendChild(actToolbar);
     wrap.appendChild(actionsCard);
 
@@ -6445,6 +6465,14 @@
             updatesState.message = d.message || '';
             updatesState.loaded = true;
             refreshUpdates();
+            if (!updatesState.versionAnnounced && window.ChesHUD && typeof window.ChesHUD.showChat === 'function') {
+              updatesState.versionAnnounced = true;
+              if (updatesState.hasUpdate) {
+                window.ChesHUD.showChat('Доступна новая версия v' + updatesState.latest);
+              } else if (updatesState.version) {
+                window.ChesHUD.showChat('Версия v' + updatesState.version);
+              }
+            }
           }
         } catch (e) {}
       }
@@ -6467,6 +6495,17 @@
     }
     if (updatesRefs.checkBtn) updatesRefs.checkBtn.textContent = 'Проверить обновления';
     if (updatesRefs.installBtn) updatesRefs.installBtn.textContent = 'Обновить ChesNova';
+    refreshUpdatesBadge();
+  }
+
+  function refreshUpdatesBadge() {
+    var btn = navButtons['Updates'];
+    if (!btn) return;
+    if (updatesState.hasUpdate) {
+      btn.classList.add('update-avail');
+    } else {
+      btn.classList.remove('update-avail');
+    }
   }
 
   function saveUpdatesSettings(enabled) {
@@ -6493,26 +6532,6 @@
     };
     xhr.ontimeout = function () {
       if (btn) btn.textContent = 'Проверить обновления';
-    };
-    xhr.send();
-  }
-
-  function downloadUpdate() {
-    var btn = updatesRefs.dlBtn;
-    if (btn) btn.textContent = 'Скачивание…';
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', UPDATES_DOWNLOAD_URL, true);
-    xhr.timeout = 15000;
-    xhr.onload = function () {
-      setTimeout(function () {
-        if (btn) btn.textContent = 'Скачать последнюю версию';
-      }, 600);
-    };
-    xhr.onerror = function () {
-      if (btn) btn.textContent = 'Скачать последнюю версию';
-    };
-    xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Скачать последнюю версию';
     };
     xhr.send();
   }
@@ -6798,7 +6817,7 @@
 
     var wrap = el('div', 'ches-cloud');
 
-    var statusLabels = { ok: 'Подтверждён', pending: 'Ожидание', blocked: 'Заблокирован' };
+    var statusLabels = { ok: 'Подтверждён', pending: 'Ожидание', blocked: 'Заблокирован', denied: 'Доступ запрещён', offline: 'Нет связи', unknown: 'Ожидание' };
     var statusText = statusLabels[cloudState.status] || 'Ожидание';
 
     /* Карточка: аккаунт администратора */
@@ -6889,7 +6908,7 @@
   }
 
   function refreshCloud() {
-    var statusLabels = { ok: 'Подтверждён', pending: 'Ожидание', blocked: 'Заблокирован' };
+    var statusLabels = { ok: 'Подтверждён', pending: 'Ожидание', blocked: 'Заблокирован', denied: 'Доступ запрещён', offline: 'Нет связи', unknown: 'Ожидание' };
     if (cloudRefs.nickEl) {
       cloudRefs.nickEl.textContent = cloudState.nick ? cloudState.nick : 'Ник не указан';
       cloudRefs.nickEl.className = 'ches-cloud-nick' + (cloudState.nick ? '' : ' empty');
@@ -7639,17 +7658,24 @@
     if (!box) return;
     if (usefulState.dmMap.downloading) {
       box.innerHTML = '';
+      usefulState.refs.dmMapImg = null;
       box.textContent = 'Скачивание…';
       return;
     }
     if (usefulState.dmMap.loaded && usefulState.dmMap.image) {
-      box.innerHTML = '';
-      var img = document.createElement('img');
-      img.className = 'ches-useful-map-img';
-      img.src = usefulState.dmMap.image;
-      img.alt = 'Карта DM-зоны';
-      box.appendChild(img);
+      var img = usefulState.refs.dmMapImg;
+      if (!img || !box.contains(img)) {
+        box.innerHTML = '';
+        img = document.createElement('img');
+        img.className = 'ches-useful-map-img';
+        img.src = usefulState.dmMap.image;
+        img.alt = 'Карта DM-зоны';
+        box.appendChild(img);
+        usefulState.refs.dmMapImg = img;
+      }
     } else {
+      box.innerHTML = '';
+      usefulState.refs.dmMapImg = null;
       box.textContent = usefulState.dmMap.failed ? 'Не удалось получить карту.' : 'Карта не найдена. Нажми «Скачать карту».';
     }
   }
@@ -7741,6 +7767,7 @@
     Object.keys(navButtons).forEach(function (key) {
       var cls = 'ches-nav';
       if (key === 'Useful') cls += ' useful';
+      if (key === 'Updates' && updatesState.hasUpdate) cls += ' update-avail';
       if (key === id) cls += ' active';
       navButtons[key].className = cls;
     });
@@ -7884,6 +7911,7 @@
 
     showView('Dashboard');
     domReady = true;
+    loadUpdates();
   }
 
   /* ====================== ХУКИ И ИНИЦИАЛИЗАЦИЯ ====================== */
@@ -7973,7 +8001,13 @@
     var b = navButtons['Useful'];
     if (!b) return;
     b.classList.toggle('blink', currentView !== 'Useful');
+    refreshUpdatesBadge();
   }, 600);
+
+  /* Периодически проверяем наличие обновлений, чтобы держать бейдж актуальным */
+  setInterval(function () {
+    loadUpdates();
+  }, 60000);
 
   tick();
 })();
@@ -8604,7 +8638,7 @@
     var tries = 0;
     var timer = setInterval(function () {
       tries += 1;
-      if (showChat('\u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D.') || tries >= 20) {
+      if (showChat('\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D...') || tries >= 20) {
         loadAnnounced = true;
         clearInterval(timer);
       }
