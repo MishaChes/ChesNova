@@ -58,8 +58,14 @@
   var AI_CLEAR_URL = 'http://127.0.0.1:17890/ai/clear';
   var VEHICLES_URL = 'http://127.0.0.1:17890/vehicles';
   var VEHICLES_REFRESH_URL = 'http://127.0.0.1:17890/vehicles/refresh';
+  var RULES_CRIME_URL = 'http://127.0.0.1:17890/rules?type=crime';
+  var RULES_GOV_URL = 'http://127.0.0.1:17890/rules?type=gov';
+  var RULES_COMMON_URL = 'http://127.0.0.1:17890/rules?type=common';
   var DM_MAP_URL = 'http://127.0.0.1:17890/useful/map';
   var DM_MAP_DOWNLOAD_URL = 'http://127.0.0.1:17890/useful/map/download';
+  var NOTES_URL = 'http://127.0.0.1:17890/notes';
+  var NOTES_SAVE_URL = 'http://127.0.0.1:17890/notes/save';
+  var OPEN_URL = 'http://127.0.0.1:17890/open';
 
   var domReady = false;
   var hooked = false;
@@ -84,8 +90,8 @@
     autoResetEnabled: false,
     startWithWindows: false,
     resetTime: { hours: '00', minutes: '00' },
-    binds: { panel: 'F10', normReset: 'F9', hideHud: 'F7' },
-    bindEnabled: { panel: false, normReset: false, hideHud: false },
+    binds: { panel: 'F10', normReset: 'F9', hideHud: 'F7', notes: 'F5' },
+    bindEnabled: { panel: false, normReset: false, hideHud: false, notes: false },
     chatlogPath: '',
     gamePath: ''
   };
@@ -134,10 +140,17 @@
     tab: 'weapons',
     search: '',
     cmdSearch: '',
-    eppSearch: '',
     vehicles: { updated: '', list: [], loaded: false },
     dmMap: { image: '', loaded: false, downloading: false, failed: false },
-    refs: { tabBtns: {}, searchIn: null, body: null, infoEl: null, vehSearchIn: null, vehBody: null, vehInfoEl: null, dmMapBox: null, dmMapImg: null, dmMapBtn: null, cmdSearchIn: null, cmdBody: null, cmdInfoEl: null, eppSearchIn: null, eppBody: null, eppInfoEl: null }
+    refs: { tabBtns: {}, searchIn: null, body: null, infoEl: null, vehSearchIn: null, vehBody: null, vehInfoEl: null, dmMapBox: null, dmMapImg: null, dmMapBtn: null, cmdSearchIn: null, cmdBody: null, cmdInfoEl: null }
+  };
+
+  var rulesState = {
+    tab: 'crime',
+    search: {},
+    data: { crime: null, gov: null, common: null },
+    loading: { crime: false, gov: false, common: false },
+    refs: { tabBtns: {}, body: null }
   };
 
   /* Справочник ID оружия (Radmir) */
@@ -243,7 +256,7 @@
   var SCRIPT_INFO = {
     atools: {
       title: 'aTools',
-      body: '\u041e\u0441\u043d\u043e\u0432\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b\n/wh\n/ddl\n/unl\n/trec\n\n\u041f\u043e\u043b\u043d\u0430\u044f \u0438\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u044f \u043d\u0430 \u0444\u043e\u0440\u0443\u043c\u0435'
+      body: '\u041e\u0441\u043d\u043e\u0432\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b\n/wh\n/ddl\n/unl\n/trec\n/fov \u2014 \u0440\u044b\u0431\u0438\u0439 \u0433\u043b\u0430\u0437 (\u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e 70)\n\n\u041f\u043e\u043b\u043d\u0430\u044f \u0438\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u044f \u043d\u0430 \u0444\u043e\u0440\u0443\u043c\u0435'
     },
     onishi: {
       title: 'Onishi',
@@ -409,7 +422,8 @@
   ];
 
   var topList = [
-    { id: 'AI', label: 'AI' },
+    { id: 'Rules', label: 'Правила', cls: 'green' },
+    { id: 'AI', label: 'AI', cls: 'purple' },
     { id: 'Notifications', label: 'Уведомления' },
     { id: 'Settings', label: 'Настройки' }
   ];
@@ -529,6 +543,28 @@
     .ches-top-btn.has-unread:hover {
       background: #4a222c;
       color: #ffb0c0;
+    }
+    .ches-top-btn.green {
+      color: #2ec06e;
+    }
+    .ches-top-btn.green:hover {
+      color: #6fe3a0;
+    }
+    .ches-top-btn.green.active {
+      background: rgba(46, 192, 110, .12);
+      border-color: #2ec06e;
+      color: #6fe3a0;
+    }
+    .ches-top-btn.purple {
+      color: #a371f7;
+    }
+    .ches-top-btn.purple:hover {
+      color: #c39bff;
+    }
+    .ches-top-btn.purple.active {
+      background: rgba(163, 113, 247, .12);
+      border-color: #a371f7;
+      color: #c39bff;
     }
     @keyframes ches-notif-pulse {
       0%, 100% {
@@ -972,6 +1008,15 @@
     .ches-pun-period:active,
     .ches-pun-type:active {
       filter: brightness(1.2);
+    }
+
+    /* ---------- Кнопка: зелёная подсветка "Сохранено" ---------- */
+    .ches-btn-flash {
+      background: #122a1c !important;
+      border-color: #2ec06e !important;
+      color: #2ec06e !important;
+      pointer-events: none;
+      transition: background .2s ease, border-color .2s ease, color .2s ease;
     }
 
     /* ---------- Тумблеры биндов (зелёный вкл / красный выкл) ---------- */
@@ -1470,6 +1515,110 @@
       color: #7c8899;
       line-height: 1.4;
       margin-bottom: 10px;
+    }
+    /* ---------- Правила проекта ---------- */
+    .ches-rules-punish {
+      color: #e5484d;
+      font-weight: 600;
+    }
+    .ches-rules-id {
+      color: #2ec06e;
+      font-weight: 600;
+    }
+    .ches-rules-jump {
+      display: flex;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .ches-rules-jump-btn {
+      height: 30px;
+      line-height: 28px;
+      padding: 0 14px;
+      margin-right: 8px;
+      margin-bottom: 6px;
+      background: #161d29;
+      border: 1px solid #232c3a;
+      color: #aab4c5;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+      transition: transform .06s ease, filter .1s ease, background .15s ease, color .15s ease;
+    }
+    .ches-rules-jump-btn:hover {
+      background: #1e2736;
+      color: #f5f7fb;
+    }
+    .ches-rules-jump-btn:active {
+      transform: scale(0.95);
+      filter: brightness(1.2);
+    }
+    .ches-rules-card.highlight {
+      border-color: #2ec06e;
+      box-shadow: 0 0 0 1px rgba(46,192,110,.4), inset 0 0 16px rgba(46,192,110,.07);
+    }
+    .ches-rules-card {
+      background: #0d1320;
+      border: 1px solid #1c2536;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+    .ches-rules-title {
+      color: #2ec06e;
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .ches-rules-item {
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: #dbe2ec;
+      margin: 7px 0;
+      padding-left: 10px;
+      border-left: 2px solid #2ec06e;
+    }
+    .ches-rules-text {
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: #9aa7ba;
+      margin: 6px 0;
+    }
+    .ches-rules-note {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #f0b429;
+      margin: 4px 0 4px 14px;
+    }
+    .ches-rules-sub {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #9aa7ba;
+      margin: 3px 0 3px 18px;
+    }
+    .ches-rules-subhead {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #65C4FF;
+      margin: 10px 0 4px;
+    }
+    .ches-rules-list-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #65C4FF;
+      margin: 8px 0 4px;
+    }
+    .ches-rules-li {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #9aa7ba;
+      margin: 2px 0 2px 16px;
+    }
+    .ches-rules-status {
+      font-size: 12.5px;
+      color: #5d6879;
+      padding: 16px 2px;
     }
     .ches-useful-map-box {
       max-width: 100%;
@@ -2735,10 +2884,9 @@
       text-decoration: underline;
       cursor: pointer;
       user-select: none;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 260px;
+      display: block;
+      word-break: break-all;
+      overflow-wrap: anywhere;
     }
     .ches-scripts-link:hover {
       color: #5f9cf7;
@@ -2845,8 +2993,6 @@
       transform: translate(-50%, -50%);
       width: 400px;
       max-width: 90%;
-      max-height: 78%;
-      overflow-y: auto;
       background: #121824;
       border: 1px solid #232c3a;
       border-radius: 12px;
@@ -3481,6 +3627,7 @@
     .ches-cloud-input {
       flex: 1;
       height: 32px;
+      line-height: 30px;
       min-width: 0;
       background: #0c1119;
       border: 1px solid #232c3a;
@@ -3666,6 +3813,18 @@
     if (cls) n.className = cls;
     if (text != null) n.textContent = text;
     return n;
+  }
+
+  function flashBtn(btn, text, ms) {
+    if (!btn) return;
+    var origText = btn.textContent;
+    var origClass = btn.className;
+    btn.textContent = text || origText;
+    btn.classList.add('ches-btn-flash');
+    setTimeout(function () {
+      btn.textContent = origText;
+      btn.classList.remove('ches-btn-flash');
+    }, ms || 3000);
   }
 
   function getViewTitle(id) {
@@ -3934,7 +4093,8 @@
     var binds = [
       { ref: 'panel', value: settings.binds.panel, info: 'Открыть/закрыть панель' },
       { ref: 'normReset', value: settings.binds.normReset, info: 'Сброс нормы' },
-      { ref: 'hideHud', value: settings.binds.hideHud, info: 'Скрыть HUD' }
+      { ref: 'hideHud', value: settings.binds.hideHud, info: 'Скрыть HUD' },
+      { ref: 'notes', value: settings.binds.notes, info: 'Заметки' }
     ];
     binds.forEach(function (item) {
       var row = el('div', 'ches-settings-row');
@@ -3953,8 +4113,7 @@
     var saveBtn = el('div', 'ches-settings-save', '\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c');
     saveBtn.addEventListener('click', function () {
       saveSettings();
-      saveBtn.textContent = '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e';
-      setTimeout(function () { saveBtn.textContent = '\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c'; }, 1500);
+      flashBtn(saveBtn, '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e', 3000);
     });
     form.appendChild(saveBtn);
 
@@ -3972,9 +4131,11 @@
     settings.binds.panel = settingsRefs.panel.value.trim() || 'F10';
     settings.binds.normReset = settingsRefs.normReset.value.trim() || 'F9';
     settings.binds.hideHud = settingsRefs.hideHud.value.trim() || 'F7';
+    settings.binds.notes = settingsRefs.notes.value.trim() || 'F5';
     settings.bindEnabled.panel = settingsRefs.panelToggle.classList.contains('on');
     settings.bindEnabled.normReset = settingsRefs.normResetToggle.classList.contains('on');
     settings.bindEnabled.hideHud = settingsRefs.hideHudToggle.classList.contains('on');
+    settings.bindEnabled.notes = settingsRefs.notesToggle.classList.contains('on');
     saveSettingsToBridge();
     saveSettingsPaths();
   }
@@ -4017,9 +4178,11 @@
           if (d.menuKey) settings.binds.panel = String(d.menuKey);
           if (d.resetKey) settings.binds.normReset = String(d.resetKey);
           if (d.aiKey) settings.binds.hideHud = String(d.aiKey);
+          if (d.noteKey) settings.binds.notes = String(d.noteKey);
           if (d.menuKeyEnabled != null) settings.bindEnabled.panel = d.menuKeyEnabled === 1 || d.menuKeyEnabled === '1';
           if (d.resetKeyEnabled != null) settings.bindEnabled.normReset = d.resetKeyEnabled === 1 || d.resetKeyEnabled === '1';
           if (d.aiKeyEnabled != null) settings.bindEnabled.hideHud = d.aiKeyEnabled === 1 || d.aiKeyEnabled === '1';
+          if (d.noteKeyEnabled != null) settings.bindEnabled.notes = d.noteKeyEnabled === 1 || d.noteKeyEnabled === '1';
         } catch (e) {}
       }
       if (cb) cb();
@@ -4040,9 +4203,11 @@
     params.push('menuKey=' + encodeURIComponent(settings.binds.panel));
     params.push('resetKey=' + encodeURIComponent(settings.binds.normReset));
     params.push('aiKey=' + encodeURIComponent(settings.binds.hideHud));
+    params.push('noteKey=' + encodeURIComponent(settings.binds.notes));
     params.push('menuKeyEnabled=' + (settings.bindEnabled.panel ? '1' : '0'));
     params.push('resetKeyEnabled=' + (settings.bindEnabled.normReset ? '1' : '0'));
     params.push('aiKeyEnabled=' + (settings.bindEnabled.hideHud ? '1' : '0'));
+    params.push('noteKeyEnabled=' + (settings.bindEnabled.notes ? '1' : '0'));
     var xhr = new XMLHttpRequest();
     xhr.open('GET', SETTINGS_URL + '?' + params.join('&'), true);
     xhr.timeout = 1500;
@@ -5249,7 +5414,7 @@
     /* Редактор бинда */
     if (bindsState.editor) {
       wrap.appendChild(renderBindEditor());
-
+      contentBodyEl.appendChild(wrap);
       return;
     }
 
@@ -6048,12 +6213,20 @@
       var row = el('div', 'ches-scripts-modal-row');
       if (label) row.appendChild(el('div', 'ches-scripts-modal-label', label));
       if (isLink) {
-        var a = el('div', 'ches-scripts-link', value);
-        a.style.maxWidth = '100%';
-        a.style.whiteSpace = 'normal';
-        a.style.wordBreak = 'break-all';
-        a.addEventListener('click', function () {
-          openScriptTopic(value);
+        var a = document.createElement('a');
+        a.className = 'ches-scripts-link';
+        a.textContent = value;
+        a.href = value;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          try {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', OPEN_URL + '?url=' + encodeURIComponent(value), true);
+            xhr.timeout = 3000;
+            xhr.send();
+          } catch (err) {}
         });
         row.appendChild(a);
       } else {
@@ -6077,19 +6250,19 @@
   function installScript(id, btn) {
     btn.className = 'ches-scripts-btn install';
     btn.textContent = 'Установка…';
+    btn.classList.add('ches-btn-flash');
     var xhr = new XMLHttpRequest();
     xhr.open('GET', SCRIPTS_INSTALL_URL + '?id=' + encodeURIComponent(id), true);
-    /* Мост только ставит команду; сама установка идёт в AHK и может занять несколько секунд */
     xhr.timeout = 8000;
     xhr.onload = function () {
       setTimeout(function () { loadScripts(); }, 2500);
     };
     xhr.onerror = function () {
       btn.textContent = 'Ошибка';
+      btn.classList.remove('ches-btn-flash');
       setTimeout(function () { loadScripts(); }, 2000);
     };
     xhr.ontimeout = function () {
-      /* Таймаут XHR ≠ провал установки: команда могла уйти, ждём статус */
       setTimeout(function () { loadScripts(); }, 3000);
     };
     xhr.send();
@@ -6107,6 +6280,7 @@
     }
     btn.setAttribute('data-arm', '0');
     btn.textContent = 'Удаляю…';
+    btn.classList.add('ches-btn-flash');
     var xhr = new XMLHttpRequest();
     xhr.open('GET', SCRIPTS_DELETE_URL + '?id=' + encodeURIComponent(id), true);
     /* Мост только ставит команду; само удаление идёт в AHK */
@@ -6117,6 +6291,7 @@
       try { ok = xhr.responseText.indexOf('"ok":true') !== -1; } catch (e) {}
       if (!ok) {
         btn.textContent = 'Ошибка моста';
+        btn.classList.remove('ches-btn-flash');
         setTimeout(function () { loadScripts(); }, 2000);
         return;
       }
@@ -6124,9 +6299,12 @@
     };
     xhr.onerror = function () {
       btn.textContent = 'Ошибка';
+      btn.classList.remove('ches-btn-flash');
       setTimeout(function () { loadScripts(); }, 2000);
     };
     xhr.ontimeout = function () {
+      btn.textContent = 'Ошибка';
+      btn.classList.remove('ches-btn-flash');
       setTimeout(function () { loadScripts(); }, 3000);
     };
     xhr.send();
@@ -6281,18 +6459,22 @@
   function checkTestUpdates() {
     if (!testerState.enabled) return;
     var btn = testerRefs.btnCheck;
-    if (btn) btn.textContent = 'Проверяется…';
+    if (btn) { btn.textContent = 'Проверяется…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', TESTER_CHECK_URL, true);
     xhr.timeout = 3000;
     xhr.onload = function () {
-      setTimeout(function () { loadTester(); }, 1500);
+      if (btn) { btn.textContent = 'Проверено'; btn.classList.add('ches-btn-flash'); }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Проверить'; btn.classList.remove('ches-btn-flash'); }
+        loadTester();
+      }, 3000);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Проверить';
+      if (btn) { btn.textContent = 'Проверить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Проверить';
+      if (btn) { btn.textContent = 'Проверить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6300,20 +6482,21 @@
   function downloadTestUpdate() {
     if (!testerState.enabled) return;
     var btn = testerRefs.btnDownload;
-    if (btn) btn.textContent = 'Открываю…';
+    if (btn) { btn.textContent = 'Открываю…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', TESTER_DOWNLOAD_URL, true);
     xhr.timeout = 3000;
     xhr.onload = function () {
+      if (btn) { btn.textContent = 'Открыто'; }
       setTimeout(function () {
-        if (btn) btn.textContent = 'Ссылка';
-      }, 600);
+        if (btn) { btn.textContent = 'Ссылка'; btn.classList.remove('ches-btn-flash'); }
+      }, 3000);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Ссылка';
+      if (btn) { btn.textContent = 'Ссылка'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Ссылка';
+      if (btn) { btn.textContent = 'Ссылка'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6335,17 +6518,22 @@
     }
     testerRefs.confirm = '';
     btn.textContent = 'Установка…';
+    btn.classList.add('ches-btn-flash');
     var xhr = new XMLHttpRequest();
     xhr.open('GET', TESTER_INSTALL_URL, true);
     xhr.timeout = 30000;
     xhr.onload = function () {
-      setTimeout(function () { loadTester(); }, 800);
+      if (btn) { btn.textContent = 'Установлено'; }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Установить Beta test'; btn.classList.remove('ches-btn-flash'); }
+        loadTester();
+      }, 3000);
     };
     xhr.onerror = function () {
-      btn.textContent = 'Установить Beta test';
+      if (btn) { btn.textContent = 'Установить Beta test'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      btn.textContent = 'Установить Beta test';
+      if (btn) { btn.textContent = 'Установить Beta test'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6367,17 +6555,22 @@
     }
     testerRefs.confirm = '';
     btn.textContent = 'Откат…';
+    btn.classList.add('ches-btn-flash');
     var xhr = new XMLHttpRequest();
     xhr.open('GET', TESTER_ROLLBACK_URL, true);
     xhr.timeout = 30000;
     xhr.onload = function () {
-      setTimeout(function () { loadTester(); }, 800);
+      if (btn) { btn.textContent = 'Откачено'; }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Откат на релиз'; btn.classList.remove('ches-btn-flash'); }
+        loadTester();
+      }, 3000);
     };
     xhr.onerror = function () {
-      btn.textContent = 'Откат на релиз';
+      if (btn) { btn.textContent = 'Откат на релиз'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      btn.textContent = 'Откат на релиз';
+      if (btn) { btn.textContent = 'Откат на релиз'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6533,18 +6726,22 @@
 
   function checkUpdates() {
     var btn = updatesRefs.checkBtn;
-    if (btn) btn.textContent = 'Проверяется…';
+    if (btn) { btn.textContent = 'Проверяется…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', UPDATES_CHECK_URL, true);
     xhr.timeout = 15000;
     xhr.onload = function () {
-      setTimeout(function () { loadUpdates(); }, 1500);
+      if (btn) { btn.textContent = 'Проверено'; btn.classList.add('ches-btn-flash'); }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Проверить обновления'; btn.classList.remove('ches-btn-flash'); }
+        loadUpdates();
+      }, 3000);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Проверить обновления';
+      if (btn) { btn.textContent = 'Проверить обновления'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Проверить обновления';
+      if (btn) { btn.textContent = 'Проверить обновления'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6565,6 +6762,7 @@
     }
     updatesRefs.confirm = '';
     btn.textContent = 'Обновление…';
+    btn.classList.add('ches-btn-flash');
     var xhr = new XMLHttpRequest();
     xhr.open('GET', UPDATES_INSTALL_URL, true);
     xhr.timeout = 60000;
@@ -6573,9 +6771,11 @@
     };
     xhr.onerror = function () {
       btn.textContent = 'Обновить ChesNova';
+      btn.classList.remove('ches-btn-flash');
     };
     xhr.ontimeout = function () {
       btn.textContent = 'Обновить ChesNova';
+      btn.classList.remove('ches-btn-flash');
     };
     xhr.send();
   }
@@ -6591,6 +6791,7 @@
     notificationsRefs.refreshBtn = refreshBtn;
     refreshBtn.addEventListener('click', function () {
       loadNotifications();
+      flashBtn(refreshBtn, 'Обновлено', 3000);
     });
     head.appendChild(refreshBtn);
     var readBtn = el('div', 'ches-notif-btn', 'Прочитать все');
@@ -6680,21 +6881,21 @@
 
   function markNotificationsRead() {
     var btn = notificationsRefs.readBtn;
-    if (btn) btn.textContent = 'Читаю…';
+    if (btn) { btn.textContent = 'Читаю…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', NOTIFICATIONS_READ_URL, true);
     xhr.timeout = 1500;
     xhr.onload = function () {
       setTimeout(function () {
-        if (btn) btn.textContent = 'Прочитать все';
+        if (btn) { btn.textContent = 'Прочитать все'; btn.classList.remove('ches-btn-flash'); }
         loadNotifications();
       }, 400);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Прочитать все';
+      if (btn) { btn.textContent = 'Прочитать все'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Прочитать все';
+      if (btn) { btn.textContent = 'Прочитать все'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6729,9 +6930,11 @@
     helpRefs.clearBtn = clearBtn;
     refreshBtn.addEventListener('click', function () {
       loadHelpErrors();
+      flashBtn(refreshBtn, 'Обновлено', 3000);
     });
     openBtn.addEventListener('click', function () {
       openErrorsLog();
+      flashBtn(openBtn, 'Открыто', 3000);
     });
     clearBtn.addEventListener('click', function () {
       clearErrorsLog();
@@ -6814,14 +7017,23 @@
       return;
     }
     helpRefs.confirm = '';
+    if (btn) { btn.textContent = 'Очищаю…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', HELP_CLEAR_URL, true);
     xhr.timeout = 1500;
     xhr.onload = function () {
+      if (btn) { btn.textContent = 'Очищено'; }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Очистить лог'; btn.classList.remove('ches-btn-flash'); }
+      }, 2000);
       setTimeout(function () { loadHelpErrors(); }, 400);
     };
-    xhr.onerror = function () {};
-    xhr.ontimeout = function () {};
+    xhr.onerror = function () {
+      if (btn) { btn.textContent = 'Очистить лог'; btn.classList.remove('ches-btn-flash'); }
+    };
+    xhr.ontimeout = function () {
+      if (btn) { btn.textContent = 'Очистить лог'; btn.classList.remove('ches-btn-flash'); }
+    };
     xhr.send();
   }
 
@@ -6942,18 +7154,22 @@
 
   function cloudCheck() {
     var btn = cloudRefs.checkBtn;
-    if (btn) btn.textContent = 'Проверяется…';
+    if (btn) { btn.textContent = 'Проверяется…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', CLOUD_CHECK_URL, true);
     xhr.timeout = 15000;
     xhr.onload = function () {
-      setTimeout(function () { loadCloud(); }, 800);
+      if (btn) { btn.textContent = 'Проверено'; btn.classList.add('ches-btn-flash'); }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Проверить'; btn.classList.remove('ches-btn-flash'); }
+        loadCloud();
+      }, 3000);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Проверить';
+      if (btn) { btn.textContent = 'Проверить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Проверить';
+      if (btn) { btn.textContent = 'Проверить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -6980,15 +7196,16 @@
     xhr.open('GET', CLOUD_NICK_URL + '?nick=' + encodeURIComponent(nick), true);
     xhr.timeout = 3000;
     xhr.onload = function () {
-      if (btn) btn.textContent = 'Сохранить';
+      if (btn) flashBtn(btn, 'Сохранено', 3000);
       if (cloudRefs.nickWrap) cloudRefs.nickWrap.classList.add('hidden');
-      setTimeout(function () { loadCloud(); }, 600);
+      settings.nick = nick;
+      setTimeout(function () { loadCloud(); }, 2500);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Сохранить';
+      if (btn) { btn.textContent = 'Сохранить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Сохранить';
+      if (btn) { btn.textContent = 'Сохранить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -7030,12 +7247,15 @@
 
   function loadDiagnostics() {
     var btn = diagRefs.refreshBtn;
-    if (btn) btn.textContent = 'Обновление…';
+    if (btn) { btn.textContent = 'Обновление…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', DIAGNOSTICS_URL, true);
     xhr.timeout = 1500;
     xhr.onload = function () {
-      if (btn) btn.textContent = 'Обновить';
+      if (btn) { btn.textContent = 'Обновлено'; }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Обновить'; btn.classList.remove('ches-btn-flash'); }
+      }, 2000);
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           var d = JSON.parse(xhr.responseText);
@@ -7050,10 +7270,10 @@
       }
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Обновить';
+      if (btn) { btn.textContent = 'Обновить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Обновить';
+      if (btn) { btn.textContent = 'Обновить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -7131,19 +7351,22 @@
 
   function refreshVehiclesData() {
     var btn = vehiclesRefs.refreshBtn;
-    if (btn) btn.textContent = 'Обновление…';
+    if (btn) { btn.textContent = 'Обновление…'; btn.classList.add('ches-btn-flash'); }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', VEHICLES_REFRESH_URL, true);
     xhr.timeout = 3000;
     xhr.onload = function () {
-      if (btn) btn.textContent = 'Обновить';
-      setTimeout(loadVehicles, 800);
+      if (btn) { btn.textContent = 'Обновлено'; }
+      setTimeout(function () {
+        if (btn) { btn.textContent = 'Обновить'; btn.classList.remove('ches-btn-flash'); }
+        loadVehicles();
+      }, 2000);
     };
     xhr.onerror = function () {
-      if (btn) btn.textContent = 'Обновить';
+      if (btn) { btn.textContent = 'Обновить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.ontimeout = function () {
-      if (btn) btn.textContent = 'Обновить';
+      if (btn) { btn.textContent = 'Обновить'; btn.classList.remove('ches-btn-flash'); }
     };
     xhr.send();
   }
@@ -7192,6 +7415,347 @@
   }
 
   /* ====================== ПОЛЕЗНОЕ ====================== */
+  /* ====================== ПРАВИЛА ПРОЕКТА ====================== */
+  var RULES_TABS = [
+    { id: 'crime', label: 'Криминал', url: RULES_CRIME_URL },
+    { id: 'gov', label: 'Гос. фракции', url: RULES_GOV_URL },
+    { id: 'common', label: 'Общие', url: RULES_COMMON_URL }
+  ];
+
+  /* Кнопки-якоря по вкладкам: keys — группы слов, все должны найтись в заголовке
+     (внутри группы достаточно одного варианта) */
+  var RULES_JUMP_BUTTONS = {
+    crime: [
+      { label: 'Запрещённые оружия', keys: [['запрещенн'], ['оруж']] },
+      { label: 'Запрещённые скины', keys: [['запрещенн'], ['скин']] }
+    ],
+    gov: [],
+    common: [
+      { label: 'Разрешённый транспорт для ЕПП', keys: [['разрешенн'], ['транспорт', 'епп']] }
+    ]
+  };
+
+  var rulesHlTimer = null;
+  var rulesHlCard = null;
+  var rulesScrollTimer = null;
+
+  function normRuleText(s) {
+    return String(s || '').toLowerCase().replace(/\u0451/g, '\u0435');
+  }
+
+  function ruleTitleMatches(text, groups) {
+    for (var g = 0; g < groups.length; g++) {
+      var ok = false;
+      for (var k = 0; k < groups[g].length; k++) {
+        if (text.indexOf(groups[g][k]) !== -1) { ok = true; break; }
+      }
+      if (!ok) return false;
+    }
+    return true;
+  }
+
+  /* Ищем заголовок секции или списка, чей текст совпал с группами ключей */
+  function findRulesJumpTarget(body, groups) {
+    if (!body || !body.querySelectorAll) return null;
+    var titles = body.querySelectorAll('.ches-rules-title, .ches-rules-list-title');
+    for (var i = 0; i < titles.length; i++) {
+      if (ruleTitleMatches(normRuleText(titles[i].textContent), groups)) {
+        var card = null;
+        var n = titles[i];
+        while (n && n !== body) {
+          if (n.classList && n.classList.contains('ches-rules-card')) { card = n; break; }
+          n = n.parentElement;
+        }
+        return { el: titles[i], card: card };
+      }
+    }
+    return null;
+  }
+
+  /* Ближайший прокручиваемый предок карточки */
+  function findRulesScroller(card) {
+    var n = card ? card.parentElement : contentBodyEl;
+    var guard = 0;
+    while (n && guard < 10) {
+      guard += 1;
+      if (n.scrollHeight > n.clientHeight + 2) return n;
+      n = n.parentElement;
+    }
+    return contentBodyEl ? contentBodyEl.parentElement : null;
+  }
+
+  function animateRulesScroll(elm, to) {
+    if (rulesScrollTimer) {
+      try { clearInterval(rulesScrollTimer); } catch (e) {}
+      rulesScrollTimer = null;
+    }
+    var from = elm.scrollTop || 0;
+    var diff = to - from;
+    if (Math.abs(diff) < 2) return;
+    var steps = Math.max(6, Math.min(20, Math.round(Math.abs(diff) / 40)));
+    var i = 0;
+    rulesScrollTimer = setInterval(function () {
+      i += 1;
+      var t = i / steps;
+      var eased = 1 - (1 - t) * (1 - t);
+      elm.scrollTop = Math.round(from + diff * eased);
+      if (i >= steps) {
+        clearInterval(rulesScrollTimer);
+        rulesScrollTimer = null;
+      }
+    }, 16);
+  }
+
+  function clearRulesCardHighlight() {
+    if (rulesHlCard) {
+      try { rulesHlCard.classList.remove('highlight'); } catch (e) {}
+      rulesHlCard = null;
+    }
+    if (rulesHlTimer) {
+      clearTimeout(rulesHlTimer);
+      rulesHlTimer = null;
+    }
+  }
+
+  function jumpToRulesSection(groups, btn) {
+    var found = findRulesJumpTarget(rulesState.refs.body, groups);
+    if (!found) {
+      /* Секция скрыта фильтром/не загружена — коротко мигнём на кнопке */
+      if (btn && !btn.getAttribute('data-busy')) {
+        btn.setAttribute('data-busy', '1');
+        var orig = btn.textContent;
+        btn.textContent = '\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E';
+        setTimeout(function () {
+          btn.textContent = orig;
+          btn.removeAttribute('data-busy');
+        }, 1000);
+      }
+      return;
+    }
+
+    clearRulesCardHighlight();
+    if (found.card) {
+      try { found.card.classList.add('highlight'); } catch (e) {}
+      rulesHlCard = found.card;
+    }
+
+    try {
+      var scroller = findRulesScroller(found.el);
+      if (scroller && scroller.getBoundingClientRect && found.el.getBoundingClientRect) {
+        var delta = found.el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+        animateRulesScroll(scroller, Math.max(0, (scroller.scrollTop || 0) + delta - 10));
+      } else {
+        try { found.el.scrollIntoView(true); } catch (e) {}
+      }
+    } catch (e) {}
+
+    rulesHlTimer = setTimeout(clearRulesCardHighlight, 1400);
+  }
+
+  function ensureRulesLoaded(tab) {
+    if (rulesState.data[tab] || rulesState.loading[tab]) return;
+    var def = null;
+    RULES_TABS.forEach(function (t) { if (t.id === tab) def = t; });
+    if (!def) return;
+    rulesState.loading[tab] = true;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', def.url, true);
+    xhr.timeout = 3000;
+    xhr.onload = function () {
+      rulesState.loading[tab] = false;
+      try {
+        var d = JSON.parse(xhr.responseText);
+        if (d && d.sections) {
+          rulesState.data[tab] = d;
+        }
+      } catch (e) {}
+      renderRulesContent();
+    };
+    xhr.onerror = function () {
+      rulesState.loading[tab] = false;
+      renderRulesContent();
+    };
+    xhr.ontimeout = function () {
+      rulesState.loading[tab] = false;
+      renderRulesContent();
+    };
+    xhr.send();
+  }
+
+  function ruleItemMatches(item, q) {
+    if (!q) return true;
+    if (item.type === 'list') {
+      if (String(item.title || '').toLowerCase().indexOf(q) !== -1) return true;
+      for (var i = 0; i < item.items.length; i++) {
+        if (item.items[i].toLowerCase().indexOf(q) !== -1) return true;
+      }
+      return false;
+    }
+    return String(item.text || '').toLowerCase().indexOf(q) !== -1;
+  }
+
+  /* Текст после « | » — наказание, красим в красный */
+  function appendRuleText(node, text) {
+    var idx = text.indexOf(' | ');
+    if (idx === -1) {
+      node.textContent = text;
+      return;
+    }
+    node.appendChild(document.createTextNode(text.substring(0, idx)));
+    var span = document.createElement('span');
+    span.className = 'ches-rules-punish';
+    span.textContent = ' | ' + text.substring(idx + 3);
+    node.appendChild(span);
+  }
+
+  function appendRuleItem(container, item) {
+    if (item.type === 'rule') {
+      var node = el('div', 'ches-rules-item');
+      appendRuleText(node, item.text);
+      container.appendChild(node);
+    } else if (item.type === 'note') {
+      container.appendChild(el('div', 'ches-rules-note', item.text));
+    } else if (item.type === 'sub') {
+      var sub = el('div', 'ches-rules-sub');
+      appendRuleText(sub, '\u2022 ' + item.text);
+      container.appendChild(sub);
+    } else if (item.type === 'subhead') {
+      container.appendChild(el('div', 'ches-rules-subhead', item.text));
+    } else if (item.type === 'list') {
+      container.appendChild(el('div', 'ches-rules-list-title', item.title));
+      for (var i = 0; i < item.items.length; i++) {
+        var li = el('div', 'ches-rules-li');
+        appendRulesIdText(li, '\u2022 ' + item.items[i]);
+        container.appendChild(li);
+      }
+    } else {
+      container.appendChild(el('div', 'ches-rules-text', item.text));
+    }
+  }
+
+  /* Подсветка ID зелёным: [ID: 123] у транспорта и «(11, 22)» у скинов */
+  var RULES_ID_RE = /(\[ID:\s*\d+\]|\(\d[\d\s,]*\))/g;
+
+  function appendRulesIdText(node, text) {
+    var last = 0;
+    var m;
+    RULES_ID_RE.lastIndex = 0;
+    while ((m = RULES_ID_RE.exec(text)) !== null) {
+      if (m.index > last) {
+        node.appendChild(document.createTextNode(text.substring(last, m.index)));
+      }
+      node.appendChild(el('span', 'ches-rules-id', m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) {
+      node.appendChild(document.createTextNode(text.substring(last)));
+    }
+  }
+
+  function renderRules() {
+    clearBody();
+
+    var wrap = el('div', 'ches-useful');
+
+    var tabBar = el('div', 'ches-useful-tabs');
+    RULES_TABS.forEach(function (t) {
+      var btn = el('div', 'ches-useful-tab' + (rulesState.tab === t.id ? ' active' : ''), t.label);
+      btn.addEventListener('click', function () {
+        rulesState.tab = t.id;
+        renderRules();
+        ensureRulesLoaded(rulesState.tab);
+      });
+      tabBar.appendChild(btn);
+      rulesState.refs.tabBtns[t.id] = btn;
+    });
+    wrap.appendChild(tabBar);
+
+    var searchBox = el('div', 'ches-useful-search');
+    var input = document.createElement('input');
+    input.className = 'ches-input';
+    input.type = 'text';
+    input.placeholder = ' ';
+    input.value = rulesState.search[rulesState.tab] || '';
+    searchBox.appendChild(input);
+    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск по правилам'));
+    wrap.appendChild(searchBox);
+    rulesState.refs.searchIn = input;
+
+    /* Быстрые кнопки-якоря текущей вкладки */
+    var jumpDefs = RULES_JUMP_BUTTONS[rulesState.tab] || [];
+    if (jumpDefs.length) {
+      var jumpRow = el('div', 'ches-rules-jump');
+      jumpDefs.forEach(function (jd) {
+        var jb = el('div', 'ches-rules-jump-btn', jd.label);
+        jb.addEventListener('click', function () {
+          jumpToRulesSection(jd.keys, jb);
+        });
+        jumpRow.appendChild(jb);
+      });
+      wrap.appendChild(jumpRow);
+    }
+
+    var body = el('div', 'ches-rules-body');
+    rulesState.refs.body = body;
+    wrap.appendChild(body);
+
+    contentBodyEl.appendChild(wrap);
+
+    input.addEventListener('input', function () {
+      rulesState.search[rulesState.tab] = input.value;
+      renderRulesContent();
+    });
+
+    renderRulesContent();
+    ensureRulesLoaded(rulesState.tab);
+  }
+
+  function renderRulesContent() {
+    var body = rulesState.refs.body;
+    if (!body) return;
+    body.innerHTML = '';
+
+    var data = rulesState.data[rulesState.tab];
+    if (!data) {
+      if (rulesState.loading[rulesState.tab]) {
+        body.appendChild(el('div', 'ches-rules-status', 'Загрузка…'));
+      } else {
+        body.appendChild(el('div', 'ches-rules-status', 'Правила не загружены. Проверь интернет — они качаются при запуске ChesNova.'));
+      }
+      return;
+    }
+
+    var q = String(rulesState.search[rulesState.tab] || '').toLowerCase().trim();
+
+    data.sections.forEach(function (sec) {
+      /* Фильтрация: правило видно, если совпало; примечания/подпункты наследуют видимость правила */
+      var visibleItems = [];
+      var lastRuleVisible = false;
+      sec.items.forEach(function (item) {
+        if (!q) {
+          visibleItems.push(item);
+          return;
+        }
+        if (item.type === 'rule') {
+          lastRuleVisible = ruleItemMatches(item, q);
+          if (lastRuleVisible) visibleItems.push(item);
+        } else if (item.type === 'note' || item.type === 'sub') {
+          if (lastRuleVisible || ruleItemMatches(item, q)) visibleItems.push(item);
+        } else {
+          if (ruleItemMatches(item, q)) visibleItems.push(item);
+        }
+      });
+      if (visibleItems.length === 0) return;
+
+      var card = el('div', 'ches-rules-card');
+      card.appendChild(el('div', 'ches-rules-title', sec.title));
+      visibleItems.forEach(function (item) {
+        appendRuleItem(card, item);
+      });
+      body.appendChild(card);
+    });
+  }
+
   function renderUseful() {
     clearBody();
 
@@ -7201,7 +7765,6 @@
       { id: 'weapons', label: 'Оружие' },
       { id: 'commands', label: 'Команды' },
       { id: 'transport', label: 'Транспорт' },
-      { id: 'epp', label: 'ЕПП ТС' },
       { id: 'dmMap', label: 'DM Zona' }
     ];
     var tabBar = el('div', 'ches-useful-tabs');
@@ -7234,7 +7797,6 @@
     body.innerHTML = '';
     if (usefulState.tab === 'weapons') renderUsefulWeapons(body);
     else if (usefulState.tab === 'commands') renderUsefulCommands(body);
-    else if (usefulState.tab === 'epp') renderUsefulEpp(body);
     else if (usefulState.tab === 'dmMap') renderUsefulDmMap(body);
     else renderUsefulTransport(body);
     var scroller = contentBodyEl ? contentBodyEl.parentElement : null;
@@ -7291,91 +7853,6 @@
     }
     if (usefulState.refs.infoEl) {
       usefulState.refs.infoEl.textContent = 'Всего: ' + USEFUL_WEAPONS.length + (q ? ' • найдено: ' + rows.length : '');
-    }
-  }
-
-  /* Справочник спецтранспорта (ЕПП ТС) */
-  var USEFUL_EPP_VEHICLES = [
-    { id: 568, name: 'Bandos (Багги)' },
-    { id: 15239, name: 'Sherp Вездеход' },
-    { id: 15295, name: 'Ford HotRod' },
-    { id: 15297, name: 'Mercedes Br P900 R' },
-    { id: 15294, name: 'Mercedes Br P900 R.HW' },
-    { id: 15616, name: 'Bentley UltraTank' },
-    { id: 15612, name: 'GAZ 52 Тайга' },
-    { id: 15635, name: 'UAZ 452 Концепт Пикап' },
-    { id: 15632, name: 'Toyota LC 300 Safari' },
-    { id: 444, name: 'БРДМ' },
-    { id: 556, name: 'Mercedes Brabus Crawler' },
-    { id: 15660, name: 'Lamborghini Huracan Sterrato' },
-    { id: 15667, name: 'BMW XM OR' },
-    { id: 15668, name: 'BMW M4 G82 Camper' },
-    { id: 15647, name: 'GMC Hummer EV' },
-    { id: 15681, name: 'ZIL 131 600' },
-    { id: 557, name: 'Mercedes Brabus XLP 900 6x6' },
-    { id: 15688, name: 'Porsche Gemballa Marsien' },
-    { id: 572, name: 'Mercedes Brabus Iseki 26' },
-    { id: 15177, name: 'Hummer H1' },
-    { id: 17404, name: 'Audi R8 Titan' },
-    { id: 17405, name: 'GAZ 24-95 Кочевник' },
-    { id: 17409, name: 'Lamborghini Aventador Pickup' },
-    { id: 15083, name: 'GAZ 66' },
-    { id: 17445, name: 'Mercedes G-EVO' },
-    { id: 438, name: 'Porsche Cayenne 957 Rally' },
-    { id: 15232, name: 'Mercedes Unimog U5023' },
-    { id: 15631, name: 'UAZ 452 Концепт' },
-    { id: 15195, name: 'UAZ 469 Разбойник' },
-    { id: 15104, name: 'Tesla Cybertruck' }
-  ];
-
-  function renderUsefulEpp(body) {
-    var searchBox = el('div', 'ches-useful-search');
-    var input = document.createElement('input');
-    input.className = 'ches-input';
-    input.type = 'text';
-    input.placeholder = ' ';
-    input.value = usefulState.eppSearch;
-    searchBox.appendChild(input);
-    searchBox.appendChild(el('div', 'ches-input__placeholder', 'Поиск: ID или название'));
-    body.appendChild(searchBox);
-    usefulState.refs.eppSearchIn = input;
-
-    var infoEl = el('div', 'ches-useful-info', '');
-    body.appendChild(infoEl);
-    usefulState.refs.eppInfoEl = infoEl;
-
-    var grid = el('div', 'ches-useful-grid');
-    usefulState.refs.eppBody = grid;
-    body.appendChild(grid);
-
-    input.addEventListener('input', applyUsefulEppFilter);
-    applyUsefulEppFilter();
-  }
-
-  function applyUsefulEppFilter() {
-    var grid = usefulState.refs.eppBody;
-    if (!grid) return;
-    var q = (usefulState.refs.eppSearchIn ? usefulState.refs.eppSearchIn.value : '').toLowerCase().trim();
-    usefulState.eppSearch = q;
-    var qid = parseInt(q, 10);
-    var rows = USEFUL_EPP_VEHICLES.filter(function (v) {
-      if (!q) return true;
-      if (!isNaN(qid) && v.id === qid) return true;
-      return String(v.name || '').toLowerCase().indexOf(q) !== -1;
-    });
-    grid.innerHTML = '';
-    if (rows.length === 0) {
-      grid.appendChild(el('div', 'ches-useful-empty', 'Ничего не найдено'));
-    } else {
-      rows.forEach(function (v) {
-        var row = el('div', 'ches-useful-row');
-        row.appendChild(el('div', 'ches-useful-id', 'ID ' + v.id));
-        row.appendChild(el('div', 'ches-useful-name', v.name));
-        grid.appendChild(row);
-      });
-    }
-    if (usefulState.refs.eppInfoEl) {
-      usefulState.refs.eppInfoEl.textContent = 'Всего: ' + USEFUL_EPP_VEHICLES.length + (q ? ' • найдено: ' + rows.length : '');
     }
   }
 
@@ -7473,7 +7950,6 @@
         { cmd: '/acarpass', desc: 'посмотреть информацию о машине' },
         { cmd: '/alist', desc: 'список нарушений игрока' },
         { cmd: '/alock', desc: 'открыть автомобиль' },
-        { cmd: '/fban', desc: 'блокировка аккаунта и всех аккаунтов на данном IP' },
         { cmd: '/fine_park', desc: 'отправить машину на штрафстоянку' },
         { cmd: '/hpall', desc: 'выдать ХП в указанном радиусе' },
         { cmd: '/mp_end', desc: 'завершить МП' },
@@ -7785,7 +8261,12 @@
       navButtons[key].className = cls;
     });
     Object.keys(topButtons).forEach(function (key) {
-      topButtons[key].className = 'ches-top-btn' + (key === id ? ' active' : '');
+      var tcls = 'ches-top-btn';
+      topList.forEach(function (it) {
+        if (it.id === key && it.cls) tcls += ' ' + it.cls;
+      });
+      if (key === id) tcls += ' active';
+      topButtons[key].className = tcls;
     });
     updateNotifBadge();
 
@@ -7807,6 +8288,7 @@
     else if (id === 'Cloud') renderCloud();
     else if (id === 'Diagnostics') renderDiagnostics();
     else if (id === 'Useful') renderUseful();
+    else if (id === 'Rules') renderRules();
     else renderEmpty();
   }
 
@@ -7870,7 +8352,7 @@
     var topBtns = el('div', 'ches-top-btns');
 
     topList.forEach(function (item) {
-      var btn = el('div', 'ches-top-btn', item.label);
+      var btn = el('div', 'ches-top-btn' + (item.cls ? ' ' + item.cls : ''), item.label);
       btn.addEventListener('click', function () { showView(item.id); });
       topBtns.appendChild(btn);
       topButtons[item.id] = btn;
@@ -8043,6 +8525,11 @@
   var resetConfirmShown = false;
   var resetConfirmSuppressUntil = 0;
   var lastPanelToggle = 0;
+  var lastNoteToggle = 0;
+
+  var notesPanelEl = null;
+  var notesPanelVisible = false;
+  var notesPanelText = '';
 
   var hudEl = null;
   var hudDotEl = null;
@@ -8131,7 +8618,24 @@
       '#ches-notice{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%) translateY(8px);z-index:100002;display:none;flex-direction:column;align-items:center;text-align:center;max-width:min(420px,calc(100vw - 32px));background:rgba(11,14,20,.95);border:1px solid #2B3443;border-radius:14px;padding:18px 26px;color:#F5F7FB;font:12px/1.4 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 12px 32px rgba(0,0,0,.45);backdrop-filter:blur(8px);opacity:0;transition:opacity .22s ease,transform .22s ease}',
       '#ches-notice.ches-notice-on{display:flex;opacity:1;transform:translate(-50%,-50%) translateY(0)}',
       '#ches-notice .ches-notice-badge{font-weight:700;font-size:11px;letter-spacing:.5px;color:#3DD97A;text-transform:uppercase;margin-bottom:8px}',
-      '#ches-notice .ches-notice-text{color:#F5F7FB;font-size:13px;font-weight:500;line-height:1.5;word-break:break-word}'
+      '#ches-notice .ches-notice-text{color:#F5F7FB;font-size:13px;font-weight:500;line-height:1.5;word-break:break-word}',
+      /* Заметки — в дизайне главного меню ChesNova */
+      '#ches-notes-panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:100005;display:none;flex-direction:column;width:480px;max-width:calc(100vw - 32px);background:#0a0e14;border:1px solid #232c3a;border-radius:12px;color:#f5f7fb;font-family:"Open Sans",Arial,sans-serif;box-shadow:0 0 40px 10px rgba(0,0,0,.6);overflow:hidden}',
+      '#ches-notes-panel.ches-notes-on{display:flex}',
+      '#ches-notes-panel .ches-notes-top{height:44px;background:#10161f;border-bottom:1px solid #232c3a;display:flex;align-items:center;padding:0 16px;flex-shrink:0}',
+      '#ches-notes-panel .ches-notes-title{font-size:14px;font-weight:700;letter-spacing:.4px;color:#f5f7fb;flex:1}',
+      '#ches-notes-panel .ches-notes-x{width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:#161d29;color:#aab4c5;border-radius:6px;cursor:pointer;user-select:none;border:1px solid #232c3a;font-weight:700;font-size:17px}',
+      '#ches-notes-panel .ches-notes-x:hover{background:#3a1e2c;color:#ff6b8c;border-color:#ff6b8c}',
+      '#ches-notes-panel .ches-notes-body{display:flex;flex-direction:column;padding:16px}',
+      '#ches-notes-panel textarea{width:100%;height:260px;background:#121824;border:1px solid #232c3a;border-radius:10px;padding:12px 14px;color:#f5f7fb;font:14px/1.6 "Open Sans","Segoe UI",Arial,sans-serif;resize:none;outline:none;box-sizing:border-box}',
+      '#ches-notes-panel textarea:focus{border-color:#3b82f6}',
+      '#ches-notes-panel .ches-notes-row{display:flex;margin-top:14px;justify-content:flex-end}',
+      '#ches-notes-panel .ches-notes-btn{height:36px;line-height:34px;padding:0 18px;margin-left:12px;text-align:center;border-radius:8px;border:1px solid #232c3a;background:#161d29;color:#aab4c5;font-size:13px;font-weight:600;cursor:pointer;user-select:none;transition:background .18s ease,color .18s ease,border-color .18s ease,transform .1s ease,filter .18s ease;box-sizing:border-box}',
+      '#ches-notes-panel .ches-notes-btn:hover{background:#1e2736;color:#f5f7fb}',
+      '#ches-notes-panel .ches-notes-btn:active{transform:scale(.95);filter:brightness(1.25)}',
+      '#ches-notes-panel .ches-notes-btn.primary{background:#122a1c;border-color:#2ec06e;color:#2ec06e}',
+      '#ches-notes-panel .ches-notes-btn.primary:hover{background:#1a3a28}',
+      '#ches-notes-panel .ches-notes-btn.ches-btn-flash{background:#122a1c!important;border-color:#3DD97A!important;color:#3DD97A!important}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -8534,6 +9038,17 @@
         }
       }
     }
+    if (data.noteToggle != null) {
+      var nt = parseInt(data.noteToggle, 10);
+      if (!isNaN(nt) && nt > 0) {
+        if (lastNoteToggle === 0) {
+          lastNoteToggle = nt;
+        } else if (nt !== lastNoteToggle) {
+          lastNoteToggle = nt;
+          toggleNotesPanel();
+        }
+      }
+    }
     if (data.confirmReset != null) {
       var needConfirm = data.confirmReset === 1 || data.confirmReset === '1' || data.confirmReset === true;
       var suppressed = Date.now() < resetConfirmSuppressUntil;
@@ -8629,6 +9144,93 @@
       xhr.send();
     } catch (e) {
       pollBusy = false;
+    }
+  }
+
+  /* Курсор и фокус ввода как у главного меню: игра не реагирует на клавиши */
+  var notesSaveTimer = null;
+
+  function notesCursor(on) {
+    try {
+      if (window.setCursorStatus) window.setCursorStatus('ChesNotes', !!on);
+      if (window.setInputFocus) window.setInputFocus(!!on);
+      window.isBluredInput = !on;
+    } catch (e) {}
+  }
+
+  function saveNotesText(asAsync) {
+    if (!notesPanelEl) return;
+    try {
+      var val = notesPanelEl.querySelector('textarea').value;
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', NOTES_SAVE_URL + '?text=' + encodeURIComponent(val), !!asAsync);
+      if (asAsync) xhr.timeout = 3000;
+      xhr.send();
+    } catch (e) {}
+  }
+
+  function hideNotesPanel() {
+    if (!notesPanelVisible) return;
+    notesPanelVisible = false;
+    // Синхронная досохранка перед закрытием — текст не теряется даже при выходе из игры.
+    saveNotesText(false);
+    if (notesPanelEl) notesPanelEl.classList.remove('ches-notes-on');
+    try { notesPanelEl.querySelector('textarea').blur(); } catch (e) {}
+    setTimeout(function () { notesCursor(false); }, 40);
+  }
+
+  function toggleNotesPanel() {
+    notesPanelVisible = !notesPanelVisible;
+    if (!notesPanelEl) {
+      notesPanelEl = document.createElement('div');
+      notesPanelEl.id = 'ches-notes-panel';
+      notesPanelEl.innerHTML =
+        '<div class="ches-notes-top">' +
+        '<div class="ches-notes-title">\u0417\u0430\u043c\u0435\u0442\u043a\u0438</div>' +
+        '<div class="ches-notes-x" id="ches-notes-x">\u00d7</div>' +
+        '</div>' +
+        '<div class="ches-notes-body">' +
+        '<textarea placeholder="\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0442\u0435\u043a\u0441\u0442..." spellcheck="false"></textarea>' +
+        '<div class="ches-notes-row">' +
+        '<div class="ches-notes-btn" id="ches-notes-close">\u0417\u0430\u043a\u0440\u044b\u0442\u044c</div>' +
+        '<div class="ches-notes-btn primary" id="ches-notes-save">\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c</div>' +
+        '</div></div>';
+      document.body.appendChild(notesPanelEl);
+      var ta = notesPanelEl.querySelector('textarea');
+      notesPanelEl.querySelector('#ches-notes-x').addEventListener('click', hideNotesPanel);
+      notesPanelEl.querySelector('#ches-notes-close').addEventListener('click', hideNotesPanel);
+      var saveBtn = notesPanelEl.querySelector('#ches-notes-save');
+      saveBtn.addEventListener('click', function () {
+        // Как в обычном меню: кнопка просто зеленеет на время сохранения.
+        saveBtn.classList.add('ches-btn-flash');
+        saveNotesText(true);
+        setTimeout(hideNotesPanel, 600);
+      });
+      // Автосохранение через секунду после последнего ввода — защита от вылета игры.
+      ta.addEventListener('input', function () {
+        if (notesSaveTimer) clearTimeout(notesSaveTimer);
+        notesSaveTimer = setTimeout(function () {
+          notesSaveTimer = null;
+          if (notesPanelVisible) saveNotesText(true);
+        }, 1000);
+      });
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', NOTES_URL, true);
+      xhr.timeout = 3000;
+      xhr.onload = function () {
+        try {
+          var d = JSON.parse(xhr.responseText);
+          if (d.text != null) { ta.value = d.text; notesPanelText = d.text; }
+        } catch (e) {}
+      };
+      xhr.send();
+    }
+    if (notesPanelVisible) {
+      notesPanelEl.classList.add('ches-notes-on');
+      notesCursor(true);
+      setTimeout(function () { notesPanelEl.querySelector('textarea').focus(); }, 40);
+    } else {
+      hideNotesPanel();
     }
   }
 
