@@ -25,6 +25,9 @@ if (A_LastError = 183) {
     ExitApp()
 }
 
+; Любая неперехваченная ошибка — обычное окно с описанием (и запись в errors.log).
+OnError(ChesNova_ShowErrorBox)
+
 ; ============================================================
 ; ChesNova
 ; AutoHotkey v2 script
@@ -40,7 +43,7 @@ if (A_LastError = 183) {
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.0.2"
+CURRENT_VERSION := "12.1.0"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -66,6 +69,7 @@ bindCategoriesFile := dataPath "\bind_categories.csv"
 notificationsCacheFile := dataPath "\notifications.json"
 notificationsStateFile := dataPath "\notifications_state.csv"
 notificationsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/notifications.json"
+notesFile := dataPath "\notes.json"
 DirCreate(bindsDir)
 aiHistoryFile := dataPath "\ai_history.json"
 errorsLogFile := logPath "\errors.log"
@@ -79,6 +83,7 @@ hudBridgePid := 0
 scriptDeleteRetry := Map()
 hudBridgeVisible := 1
 panelToggleSeq := 0
+noteToggleSeq := 0
 pendingNormResetConfirm := 0
 hudBridgeSettingsFile := dataPath "\hud_settings_state.json"
 hudBridgePendingSettingsFile := dataPath "\hud_settings_pending.ini"
@@ -106,6 +111,9 @@ hudBridgeAiFile := dataPath "\hud_ai_state.json"
 hudBridgeAiQuestionFile := dataPath "\hud_ai_question.tmp"
 hudBridgeVehiclesFile := dataPath "\vehicles.json"
 hudBridgeDmMapFile := dataPath "\hud_dm_map.jpg"
+hudBridgeRulesCrimeFile := dataPath "\rules_crime.json"
+hudBridgeRulesGovFile := dataPath "\rules_gov.json"
+hudBridgeRulesCommonFile := dataPath "\rules_common.json"
 ; AI-ответ для in-game панели (ches.js), ~10 сек
 aiHudId := 0
 aiHudQuestion := ""
@@ -152,9 +160,11 @@ lastResetDate := ""
 menuKey := "F10"
 resetKey := "F9"
 aiKey := "F7"
+noteKey := "F5"
 menuKeyEnabled := 1
 resetKeyEnabled := 1
 aiKeyEnabled := 1
+noteKeyEnabled := 1
 aiEnabled := 0  ; по умолчанию выкл. (РФ/блокировки API — без сетевых запросов AI)
 geminiApiKey := ""
 geminiModel := "gemini-3.6-flash"
@@ -210,9 +220,11 @@ if FileExist(settingsFile)
         menuKey := IniRead(settingsFile, "Keys", "menuKey", "F10")
         resetKey := IniRead(settingsFile, "Keys", "resetKey", "F9")
         aiKey := IniRead(settingsFile, "Keys", "aiKey", "F7")
+        noteKey := IniRead(settingsFile, "Keys", "noteKey", "F5")
         menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
         resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
         aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 1)
+        noteKeyEnabled := IniRead(settingsFile, "Keys", "noteKeyEnabled", 1)
         aiEnabled := IniRead(settingsFile, "AI", "aiEnabled", 0)
         geminiApiKey := IniRead(settingsFile, "AI", "geminiApiKey", "")
         geminiModel := IniRead(settingsFile, "AI", "geminiModel", "gemini-3.6-flash")
@@ -288,12 +300,16 @@ if (aiQuotaDate != FormatTime(, "yyyyMMdd")) {
 cloudAccessState := "unknown"
 cloudAccessMessage := "Ожидает проверки"
 cloudLastCheck := ""
-accessUrl := "https://script.google.com/macros/s/AKfycbx1qWofvCKam_l4JGZKXegu6wvYXXD_GOBlhh_v4QjPq0Un65ngTeaf3zR95m7seodwMw/exec"
+; Supabase (замена Google Apps Script): проверка доступа, отчёт о запуске, AI-ключи и квота.
+supabaseUrl := "https://sqpshbbsecfiltoconre.supabase.co"
+supabaseRest := supabaseUrl "/rest/v1"
+supabaseApiKey := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNxcHNoYmJzZWNmaWx0b2NvbnJlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzQyNzk0NywiZXhwIjoyMTAzMDAzOTQ3fQ.-dcLsZnTbAtX_tA3wNLTP7oDSYW1l6O_ugL65m26f8w"
 EnsureNickBeforeCloudAccess()
 SetTimer(SendCloudPing, 3600000)
 SetTimer(FetchAiConfigFromCloud, 1800000)
 SetTimer(StartupNetworkInit, -300)
 SetTimer(UpdateVehiclesData, -25000)
+SetTimer(UpdateRulesData, -28000)
 SetTimer(DownloadDmMap, -30000)
 versionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/versions/version.json"
 testVersionInfoUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/Test.json"
@@ -301,6 +317,9 @@ stableChesJsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS
 testChesJsUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ches.js"
 testAhkUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk"
 vehiclesUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/JS%20code/vehicles.json"
+rulesCrimeUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Info/rules_crime.json"
+rulesGovUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Info/rules_gov.json"
+rulesCommonUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Info/rules_common.json"
 dmMapUrl := "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/map.jpg"
 notifications := []
 notificationStates := Map()
@@ -464,7 +483,10 @@ ToastGui := ""
 if FileExist(saveFile)
 {
     pmCount := FileRead(saveFile)
-    pmCount += 0
+    if (pmCount = "")
+        pmCount := 0
+    else
+        pmCount += 0
 }
 LoadRecordCache(punishmentsFile, punishmentRecordCache, "LoadPunishmentRecordCache")
 LoadRecordCache(pmLogsFile, pmLogRecordCache, "LoadPmLogRecordCache")
@@ -572,7 +594,7 @@ InitializeBinds()
 MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
 SetTimer(CheckAutoReset, 30000)
-SetTimer(RunHealthCheck, 60000)
+SetTimer(RunHealthCheck, 10000)
 
 UpdatePMDisplay()
 SetTimer(CheckChatlogPathOnStartup, -1500)
@@ -920,7 +942,7 @@ UpdateCloudHudDot() {
 ; 🌐 HTTP bridge → CEF HUD
 ; =========================
 WriteHudBridgeState(*) {
-    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, nick, pmCount, norm, healthState, healthMessage
+    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, noteToggleSeq, nick, pmCount, norm, healthState, healthMessage
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
     global scriptNoticeId, scriptNoticeText, scriptNoticeExpireTick
     global logFile, scriptsGamePath
@@ -937,6 +959,7 @@ WriteHudBridgeState(*) {
             . '"hudVisible":' (hudBridgeVisible ? 1 : 0) ','
             . '"confirmReset":' (pendingNormResetConfirm ? 1 : 0) ','
             . '"panelToggle":' Integer(panelToggleSeq) ','
+            . '"noteToggle":' Integer(noteToggleSeq) ','
             . '"daysOff":' CountDaysOffCurrentMonth() ','
             . '"chatlogOk":' ((logFile != "" && FileExist(logFile)) ? 1 : 0) ','
             . '"gameOk":' ((scriptsGamePath != "" && IsValidGameRoot(scriptsGamePath)) ? 1 : 0) ','
@@ -1027,7 +1050,9 @@ WriteSettingsState(*) {
             . '"aiKey":"' JsonEscape(aiKey) '",'
             . '"menuKeyEnabled":' (menuKeyEnabled ? 1 : 0) ','
             . '"resetKeyEnabled":' (resetKeyEnabled ? 1 : 0) ','
-            . '"aiKeyEnabled":' (aiKeyEnabled ? 1 : 0)
+            . '"aiKeyEnabled":' (aiKeyEnabled ? 1 : 0) ','
+            . '"noteKey":"' JsonEscape(noteKey) '",'
+            . '"noteKeyEnabled":' (noteKeyEnabled ? 1 : 0)
             . "}"
         f := FileOpen(hudBridgeSettingsFile, "w", "UTF-8")
         f.Write(json)
@@ -2042,18 +2067,6 @@ SetUpdateCheckFromPanel(valueRaw) {
     }
 }
 
-; Скачать последнюю версию из панели (GET /updates/download → hud_commands.ini)
-DownloadUpdateFromPanel() {
-    try {
-        versionInfo := ParseVersionManifest(DownloadVersionManifest())
-        OpenUpdateDownload(versionInfo["download"])
-        ShowToast("✓ Ссылка на скачивание открыта", 1800)
-    } catch as err {
-        LogError("DownloadUpdateFromPanel", "Ошибка скачивания обновления", err.Message)
-        ShowToast("⚠ Не удалось получить ссылку", 2200)
-    }
-}
-
 ; Установить обновление из панели (GET /updates/install → hud_commands.ini)
 InstallUpdateFromPanel() {
     global CURRENT_VERSION, basePath, backupPath
@@ -2566,6 +2579,10 @@ EnsureHudBridgeScript() {
         "$aiQuestionFile = $args[18]`n"
         "$vehiclesFile = $args[19]`n"
         "$dmMapFile = $args[20]`n"
+        "$notesFile = $args[21]`n"
+        "$rulesCrimeFile = $args[22]`n"
+        "$rulesGovFile = $args[23]`n"
+        "$rulesCommonFile = $args[24]`n"
         "$ip = [System.Net.IPAddress]::Loopback`n"
         "$listener = [System.Net.Sockets.TcpListener]::new($ip, $port)`n"
         "try { $listener.Start() } catch { exit 1 }`n"
@@ -2865,10 +2882,6 @@ EnsureHudBridgeScript() {
     "      $iniText = '[Commands]' + [Environment]::NewLine + 'setUpdateCheck=' + $vals['checkOnStartup'] + [Environment]::NewLine`n"
     "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
     "      $json = '{`"ok`":true}'`n"
-    "    } elseif ($requestLine -match 'GET\s+/updates/download') {`n"
-    "      $iniText = '[Commands]' + [Environment]::NewLine + 'downloadUpdate=1' + [Environment]::NewLine`n"
-    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
-    "      $json = '{`"ok`":true}'`n"
     "    } elseif ($requestLine -match 'GET\s+/updates/install') {`n"
     "      $iniText = '[Commands]' + [Environment]::NewLine + 'installUpdate=1' + [Environment]::NewLine`n"
     "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
@@ -3006,7 +3019,51 @@ EnsureHudBridgeScript() {
         "          }`n"
         "        } catch {}`n"
         "      }`n"
-        "    } elseif ($requestLine -match 'GET\s+/vehicles') {`n"
+        "    } elseif ($requestLine -match 'GET\s+/notes/save\?([^\s]+)') {`n"
+        "      $q = $Matches[1]`n"
+        "      $parts = $q -split '&'`n"
+        "      foreach ($pair in $parts) {`n"
+        "        $kv = $pair -split '=', 2`n"
+        "        if ($kv.Count -eq 2) {`n"
+        "          $k = [System.Uri]::UnescapeDataString($kv[0])`n"
+        "          $v = [System.Uri]::UnescapeDataString($kv[1])`n"
+        "          if ($k -eq 'text') {`n"
+        "            try { [System.IO.File]::WriteAllText($notesFile, $v, [System.Text.Encoding]::UTF8) } catch {}`n"
+        "          }`n"
+        "        }`n"
+        "      }`n"
+        "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/notes') {`n"
+        "      $json = '{`"ok`":true,`"text`":`"`"}'`n"
+        "      if (Test-Path -LiteralPath $notesFile) {`n"
+        "        try { $notesText = [System.IO.File]::ReadAllText($notesFile, [System.Text.Encoding]::UTF8) } catch { $notesText = '' }`n"
+        "        $notesText = $notesText.Replace('\\', '\\\\').Replace('`"', '\`"').Replace([char]13, '\r').Replace([char]10, '\n')`n"
+        "        $json = '{`"ok`":true,`"text`":`"' + $notesText + '`"}'`n"
+        "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/open\?([^\s]+)') {`n"
+    "      $q = $Matches[1]`n"
+    "      $parts = $q -split '&'`n"
+    "      foreach ($pair in $parts) {`n"
+    "        $kv = $pair -split '=', 2`n"
+    "        if ($kv.Count -eq 2) {`n"
+    "          $k = [System.Uri]::UnescapeDataString($kv[0])`n"
+    "          $v = [System.Uri]::UnescapeDataString($kv[1])`n"
+    "          if ($k -eq 'url' -and $v -match '^https?://') {`n"
+    "            try { Start-Process $v } catch {}`n"
+    "          }`n"
+    "        }`n"
+    "      }`n"
+    "      $json = '{`"ok`":true}'`n"
+        "    } elseif ($requestLine -match 'GET\s+/rules\?type=([a-z]+)') {`n"
+    "      $rf = $null`n"
+    "      if ($Matches[1] -eq 'crime') { $rf = $rulesCrimeFile }`n"
+    "      elseif ($Matches[1] -eq 'gov') { $rf = $rulesGovFile }`n"
+    "      elseif ($Matches[1] -eq 'common') { $rf = $rulesCommonFile }`n"
+    "      $json = '{`"ok`":false}'`n"
+    "      if ($rf -and (Test-Path -LiteralPath $rf)) {`n"
+    "        try { $json = [System.IO.File]::ReadAllText($rf, [System.Text.Encoding]::UTF8) } catch {}`n"
+    "      }`n"
+    "    } elseif ($requestLine -match 'GET\s+/vehicles') {`n"
         "      $json = '{`"ok`":true,`"updated`":`"`",`"vehicles`":[]}'`n"
         "      if (Test-Path -LiteralPath $vehiclesFile) {`n"
         "        try { $json = [System.IO.File]::ReadAllText($vehiclesFile, [System.Text.Encoding]::UTF8) } catch {`n"
@@ -3096,7 +3153,8 @@ StartHudHttpBridge(*) {
             . hudBridgeUpdatesFile '" "' hudBridgeNotificationsFile '" "' hudBridgeCloudFile '" "'
             . hudBridgeHelpFile '" "' hudBridgeDiagnosticsFile '" "'
             . hudBridgeAiFile '" "' hudBridgeAiQuestionFile '" "' hudBridgeVehiclesFile '" "'
-            . hudBridgeDmMapFile '"'
+            . hudBridgeDmMapFile '" "' notesFile '" "'
+            . hudBridgeRulesCrimeFile '" "' hudBridgeRulesGovFile '" "' hudBridgeRulesCommonFile '"'
         Run(cmd, , "Hide", &pid)
         hudBridgePid := pid
         try {
@@ -3278,9 +3336,6 @@ CheckPendingCommands(*) {
         if (setUpdateCheck != "") {
             SetUpdateCheckFromPanel(setUpdateCheck)
         }
-        if IniRead(hudBridgeCommandFile, "Commands", "downloadUpdate", "") = "1" {
-            DownloadUpdateFromPanel()
-        }
         if IniRead(hudBridgeCommandFile, "Commands", "installUpdate", "") = "1" {
             InstallUpdateFromPanel()
         }
@@ -3340,7 +3395,7 @@ CheckPendingCommands(*) {
 CheckPendingSettings(*) {
     global hudBridgePendingSettingsFile, settingsFile
     global nick, userNick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
-    global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled
+    global menuKey, resetKey, aiKey, noteKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, noteKeyEnabled
 
     if !FileExist(hudBridgePendingSettingsFile)
         return
@@ -3355,9 +3410,11 @@ CheckPendingSettings(*) {
         newMenuKey := IniRead(hudBridgePendingSettingsFile, "Settings", "menuKey", "")
         newResetKey := IniRead(hudBridgePendingSettingsFile, "Settings", "resetKey", "")
         newAiKey := IniRead(hudBridgePendingSettingsFile, "Settings", "aiKey", "")
+        newNoteKey := IniRead(hudBridgePendingSettingsFile, "Settings", "noteKey", "")
         newMenuKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "menuKeyEnabled", "")
         newResetKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "resetKeyEnabled", "")
         newAiKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "aiKeyEnabled", "")
+        newNoteKeyEnabled := IniRead(hudBridgePendingSettingsFile, "Settings", "noteKeyEnabled", "")
     } catch as err {
         return
     }
@@ -3434,6 +3491,12 @@ CheckPendingSettings(*) {
                 changed := true
             }
         }
+        if (newNoteKey != "") {
+            if (newNoteKey != noteKey) {
+                noteKey := newNoteKey
+                changed := true
+            }
+        }
         if (newMenuKeyEnabled != "" && RegExMatch(newMenuKeyEnabled, "^\d+$")) {
             newMke := Integer(newMenuKeyEnabled)
             if (newMke != menuKeyEnabled) {
@@ -3455,6 +3518,13 @@ CheckPendingSettings(*) {
                 changed := true
             }
         }
+        if (newNoteKeyEnabled != "" && RegExMatch(newNoteKeyEnabled, "^\d+$")) {
+            newNke := Integer(newNoteKeyEnabled)
+            if (newNke != noteKeyEnabled) {
+                noteKeyEnabled := newNke
+                changed := true
+            }
+        }
     } catch as err {
         LogError("CheckPendingSettings", "Не удалось разобрать настройки из панели", err.Message)
     }
@@ -3471,9 +3541,11 @@ CheckPendingSettings(*) {
             IniWrite(menuKey, settingsFile, "Keys", "menuKey")
             IniWrite(resetKey, settingsFile, "Keys", "resetKey")
             IniWrite(aiKey, settingsFile, "Keys", "aiKey")
+            IniWrite(noteKey, settingsFile, "Keys", "noteKey")
             IniWrite(menuKeyEnabled, settingsFile, "Keys", "menuKeyEnabled")
             IniWrite(resetKeyEnabled, settingsFile, "Keys", "resetKeyEnabled")
             IniWrite(aiKeyEnabled, settingsFile, "Keys", "aiKeyEnabled")
+            IniWrite(noteKeyEnabled, settingsFile, "Keys", "noteKeyEnabled")
         } catch as err {
             LogError("CheckPendingSettings", "Ошибка записи settings.ini", err.Message)
         }
@@ -6519,11 +6591,13 @@ FormatDiagnosticBytes(bytes) {
 }
 SendCloudPing(*) {
     CheckCloudAccess(false, false)
+    WriteCloudState()
     WriteHudBridgeState()
 }
 StartupNetworkInit(*) {
     global checkUpdatesOnStartup, aiEnabled
     CheckCloudAccess(true, true)
+    WriteCloudState()
     if aiEnabled
         FetchAiConfigFromCloud()
     if (checkUpdatesOnStartup)
@@ -6666,7 +6740,7 @@ SafeInteger(value, default := 0) {
 }
 
 FetchAiConfigFromCloud(*) {
-    global nick, accessUrl, appVersion, settingsFile, aiEnabled
+    global nick, appVersion, settingsFile, aiEnabled
     global geminiApiKey, deepseekApiKey, groqApiKey, geminiModel, deepseekModel, groqModel
     global aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiConfigLoaded
     global AiLimitCtrl
@@ -6676,42 +6750,57 @@ FetchAiConfigFromCloud(*) {
     if (Trim(nick) = "" || nick = "Nick_Name")
         return false
 
-    url := accessUrl "?nick=" UriEncode(nick)
-        . "&version=" UriEncode(appVersion)
-        . "&action=ai_config"
-        . "&used=" aiDailyUsed
-        . "&day=" FormatTime(, "yyyy-MM-dd")
+    keysFound := 0
+
+    ; 1) API-ключи провайдеров из таблицы ai_keys (enabled = true).
     try {
-        result := HttpGetTextAsync(url)
-        if (result["status"] != 200)
-            return false
-        response := Trim(result["text"])
+        res := SupaGet("/ai_keys?enabled=eq.true&select=provider,api_key")
+        if (res["status"] = 200) {
+            text := Trim(res["text"])
+            pos := 1
+            loop {
+                found := RegExMatch(text, '\{[^{}]*\}', &mObj, pos)
+                if !found
+                    break
+                objText := mObj[0]
+                prov := JsonUnquote(JsonGetField(objText, "provider"))
+                keyVal := JsonUnquote(JsonGetField(objText, "api_key"))
+                if (prov = "gemini")
+                    geminiApiKey := Trim(keyVal)
+                else if (prov = "deepseek")
+                    deepseekApiKey := Trim(keyVal)
+                else if (prov = "groq")
+                    groqApiKey := Trim(keyVal)
+                pos := found + mObj.Len[0]
+            }
+            keysFound := 1
+        }
     } catch as err {
-        LogError("FetchAiConfigFromCloud", "Сеть", err.Message)
-        return false
+        LogError("FetchAiConfigFromCloud", "Не удалось получить ai_keys", err.Message)
     }
 
-    parts := StrSplit(response, "|")
-    if (parts.Length < 5 || parts[1] != "OK")
+    ; 2) Квота администратора из строки admins.
+    quotaMerged := false
+    try {
+        res := SupaGet("/admins?nick=eq." UriEncode(nick) "&select=ai_limit,ai_used,ai_day")
+        if (res["status"] = 200 && Trim(res["text"]) != "" && Trim(res["text"]) != "[]") {
+            objText := res["text"]
+            cloudLimit := SafeInteger(JsonUnquote(JsonGetField(objText, "ai_limit")))
+            todayIso := FormatTime(, "yyyy-MM-dd")
+            dayRaw := JsonUnquote(JsonGetField(objText, "ai_day"))
+            serverUsed := SafeInteger(JsonUnquote(JsonGetField(objText, "ai_used")))
+            usedToday := (SubStr(dayRaw, 1, 10) = todayIso) ? serverUsed : 0
+            remaining := (cloudLimit > 0) ? Max(0, cloudLimit - usedToday) : 0
+            MergeAiQuotaFromCloud(cloudLimit, usedToday, remaining)
+            quotaMerged := true
+        }
+    } catch as err {
+        LogError("FetchAiConfigFromCloud", "Не удалось получить квоту", err.Message)
+    }
+
+    if (!keysFound && !quotaMerged)
         return false
 
-    ; Форматы (с конца: limit|used|remaining):
-    ; 7+: OK|gemini|deepseek|groq|limit|used|remaining
-    ; 6:  OK|gemini|deepseek|limit|used|remaining
-    ; 5:  OK|gemini|limit|used|remaining
-    if (parts.Length >= 7) {
-        geminiApiKey := Trim(parts[2])
-        deepseekApiKey := Trim(parts[3])
-        groqApiKey := Trim(parts[4])
-        MergeAiQuotaFromCloud(SafeInteger(parts[5]), SafeInteger(parts[6]), SafeInteger(parts[7]))
-    } else if (parts.Length >= 6) {
-        geminiApiKey := Trim(parts[2])
-        deepseekApiKey := Trim(parts[3])
-        MergeAiQuotaFromCloud(SafeInteger(parts[4]), SafeInteger(parts[5]), SafeInteger(parts[6]))
-    } else {
-        geminiApiKey := Trim(parts[2])
-        MergeAiQuotaFromCloud(SafeInteger(parts[3]), SafeInteger(parts[4]), SafeInteger(parts[5]))
-    }
     aiConfigLoaded := true
 
     if (geminiModel = "" || geminiModel = "gemini-1.5-flash" || geminiModel = "gemini-2.5-flash")
@@ -6738,7 +6827,7 @@ FetchAiConfigFromCloud(*) {
 }
 
 ConsumeAiQuotaFromCloud() {
-    global nick, accessUrl, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate, aiEnabled
+    global nick, aiDailyLimit, aiDailyUsed, aiDailyRemaining, aiQuotaDate, aiEnabled
 
     if !aiEnabled
         return Map("ok", false, "reason", "AI отключён в настройках")
@@ -6752,43 +6841,56 @@ ConsumeAiQuotaFromCloud() {
         return Map("ok", false, "reason", "Лимит на сегодня исчерпан (" aiDailyUsed "/" aiDailyLimit ")")
     }
 
-    ; Перед списанием отправляем локальный used — сервер возьмёт max(sheet, client)
-    url := accessUrl "?nick=" UriEncode(nick)
-        . "&action=ai_use"
-        . "&used=" aiDailyUsed
-        . "&day=" FormatTime(, "yyyy-MM-dd")
+    todayIso := FormatTime(, "yyyy-MM-dd")
+
+    ; Читаем серверное состояние квоты из строки admins.
+    srvLimit := 0
+    srvUsed := 0
+    srvDay := ""
     try {
-        result := HttpGetTextAsync(url)
-        if (result["status"] != 200)
-            return Map("ok", false, "reason", "HTTP " result["status"])
-        response := Trim(result["text"])
+        res := SupaGet("/admins?nick=eq." UriEncode(nick) "&select=ai_limit,ai_used,ai_day")
+        if (res["status"] != 200)
+            return Map("ok", false, "reason", "Supabase HTTP " res["status"])
+        if (Trim(res["text"]) = "" || Trim(res["text"]) = "[]")
+            return Map("ok", false, "reason", "Ник не найден в базе")
+        srvLimit := SafeInteger(JsonUnquote(JsonGetField(res["text"], "ai_limit")))
+        srvUsed := SafeInteger(JsonUnquote(JsonGetField(res["text"], "ai_used")))
+        srvDay := SubStr(JsonUnquote(JsonGetField(res["text"], "ai_day")), 1, 10)
     } catch as err {
         return Map("ok", false, "reason", err.Message)
     }
 
-    parts := StrSplit(response, "|")
-    if (parts.Length < 4)
-        return Map("ok", false, "reason", "Некорректный ответ Cloud")
+    ; Эффективные значения: сервер приоритетен, локальный used учитываем максимумом за сегодня.
+    effLimit := (srvLimit > 0) ? srvLimit : aiDailyLimit
+    effUsed := (srvDay = todayIso) ? Max(srvUsed, aiDailyUsed) : aiDailyUsed
 
-    if (parts[1] = "LIMIT") {
-        cloudLimit := SafeInteger(parts[2])
-        cloudUsed := SafeInteger(parts[3])
-        cloudRemaining := SafeInteger(parts[4])
-        if (cloudLimit > 0)
-            aiDailyLimit := cloudLimit
-        ; Если Cloud «залип» на LIMIT, но локально ещё есть запас — считаем локально
-        if (aiQuotaDate = today && aiDailyLimit > 0 && aiDailyUsed < aiDailyLimit) {
-            ApplySuccessfulAiUse(aiDailyLimit, aiDailyUsed + 1, aiDailyLimit - aiDailyUsed - 1)
+    if (effLimit > 0 && effUsed >= effLimit) {
+        MergeAiQuotaFromCloud(effLimit, effUsed, 0)
+        RefreshAiLimitUi()
+        return Map("ok", false, "reason", "Лимит на сегодня исчерпан (" effUsed "/" effLimit ")")
+    }
+
+    newUsed := effUsed + 1
+    patchOk := false
+    try {
+        patched := SupaPatch("/admins?nick=eq." UriEncode(nick),
+            '{"ai_used":' newUsed ',"ai_day":"' todayIso '"}')
+        if (patched["status"] >= 200 && patched["status"] < 300)
+            patchOk := true
+    } catch {
+        patchOk := false
+    }
+
+    if !patchOk {
+        ; Сеть моргнула при списании: если локально запас есть — считаем локально.
+        if (effLimit <= 0 || aiDailyUsed < effLimit) {
+            ApplySuccessfulAiUse(effLimit, aiDailyUsed + 1, Max(0, effLimit - aiDailyUsed - 1))
             return Map("ok", true, "reason", "")
         }
-        MergeAiQuotaFromCloud(cloudLimit, cloudUsed, cloudRemaining)
-        RefreshAiLimitUi()
-        return Map("ok", false, "reason", "Лимит на сегодня исчерпан (" aiDailyUsed "/" aiDailyLimit ")")
+        return Map("ok", false, "reason", "Не удалось обновить квоту в Cloud")
     }
-    if (parts[1] != "OK")
-        return Map("ok", false, "reason", response)
 
-    ApplySuccessfulAiUse(SafeInteger(parts[2]), SafeInteger(parts[3]), SafeInteger(parts[4]))
+    ApplySuccessfulAiUse(effLimit, newUsed, Max(0, effLimit - newUsed))
     return Map("ok", true, "reason", "")
 }
 
@@ -6849,6 +6951,12 @@ ToggleGameHud(*) {
         ShowToast("HUD: показан", 1200)
     else
         ShowToast("HUD: скрыт", 1200)
+}
+
+ToggleNotes(*) {
+    global noteToggleSeq
+    noteToggleSeq += 1
+    WriteHudBridgeState()
 }
 
 ; Хоткей сброса нормы → запрос подтверждения в игровой панели (CEF)
@@ -6992,6 +7100,63 @@ HttpPostJson(url, jsonBody, apiKey := "", authMode := "google", resolveMs := 150
     http.Send(jsonBody)
     HttpWaitAsync(http, resolveMs + connectMs + sendMs + receiveMs + 5000)
     return Map("status", http.Status, "text", HttpResponseTextUtf8(http))
+}
+
+; ============================================================
+; ☁️ SUPABASE REST (замена Google Apps Script)
+; ============================================================
+
+SupaGet(path) {
+    global supabaseRest, supabaseApiKey
+    http := ComObject("WinHttp.WinHttpRequest.5.1")
+    http.Open("GET", supabaseRest path, true)
+    try http.SetTimeouts(15000, 15000, 30000, 45000)
+    http.SetRequestHeader("apikey", supabaseApiKey)
+    http.SetRequestHeader("Authorization", "Bearer " supabaseApiKey)
+    http.SetRequestHeader("Cache-Control", "no-cache")
+    http.Send()
+    HttpWaitAsync(http, 110000)
+    return Map("status", http.Status, "text", HttpResponseTextUtf8(http))
+}
+
+; Прямой глагол PATCH (проверено: Supabase/PostgREST + WinHttpRequest корректно обновляют строки).
+SupaPatch(path, jsonBody) {
+    global supabaseRest, supabaseApiKey
+    http := ComObject("WinHttp.WinHttpRequest.5.1")
+    http.Open("PATCH", supabaseRest path, true)
+    try http.SetTimeouts(15000, 15000, 30000, 45000)
+    http.SetRequestHeader("apikey", supabaseApiKey)
+    http.SetRequestHeader("Authorization", "Bearer " supabaseApiKey)
+    http.SetRequestHeader("Content-Type", "application/json; charset=utf-8")
+    http.SetRequestHeader("Prefer", "return=minimal")
+    http.Send(jsonBody)
+    HttpWaitAsync(http, 110000)
+    return Map("status", http.Status, "text", HttpResponseTextUtf8(http))
+}
+
+; Достать значение поля из JSON-текста: строка в кавычках / true / false / null / число.
+JsonGetField(jsonText, key) {
+    m := ""
+    rx := '"' key '"\s*:\s*("(?:[^"\\]|\\.)*"|true|false|null|-?\d+(?:\.\d+)?)'
+    if RegExMatch(jsonText, rx, &m)
+        return m[1]
+    return ""
+}
+
+; Убрать кавычки и базовые escape-последовательности.
+JsonUnquote(val) {
+    val := Trim(val)
+    if (val = "" || val = "null")
+        return ""
+    if (SubStr(val, 1, 1) != '"')
+        return val
+    inner := SubStr(val, 2, StrLen(val) - 2)
+    inner := StrReplace(inner, '\"', '"')
+    inner := StrReplace(inner, '\\', '\')
+    inner := StrReplace(inner, '\n', '`n')
+    inner := StrReplace(inner, '\r', '`r')
+    inner := StrReplace(inner, '\/', '/')
+    return inner
 }
 
 
@@ -7184,7 +7349,7 @@ ExtractOpenAiText(responseText) {
 
 ; Hotkeys: HUD (aiKey), ручной сброс нормы (resetKey), хотстринг /ai.
 RegisterHotkeys() {
-    global aiKey, aiKeyEnabled, resetKey, resetKeyEnabled, menuKey, menuKeyEnabled, RegisteredStandardHotkeys
+    global aiKey, aiKeyEnabled, resetKey, resetKeyEnabled, menuKey, menuKeyEnabled, noteKey, noteKeyEnabled, RegisteredStandardHotkeys
 
     for _, key in RegisteredStandardHotkeys {
         try Hotkey(key, "Off")
@@ -7213,6 +7378,14 @@ RegisterHotkeys() {
             RegisteredStandardHotkeys.Push(resetKey)
         } catch as err {
             LogError("RegisterHotkeys", "Не удалось зарегистрировать resetKey: " resetKey, err.Message)
+        }
+    }
+    if noteKeyEnabled {
+        try {
+            Hotkey(noteKey, ToggleNotes, "On")
+            RegisteredStandardHotkeys.Push(noteKey)
+        } catch as err {
+            LogError("RegisterHotkeys", "Не удалось зарегистрировать noteKey: " noteKey, err.Message)
         }
     }
     RegisterAiChatHotstring()
@@ -7309,6 +7482,18 @@ LogError(source, message, extra := "") {
     } catch {
         ; Логгер не должен вызывать сам себя при ошибке записи errors.log.
     }
+}
+
+; Окно при фатальной ошибке: скрипт не смог запуститься / упал во время работы.
+ChesNova_ShowErrorBox(err, *) {
+    loc := ""
+    try loc := "`nФайл: " err.File "`nСтрока: " err.Line
+    LogError("Ошибка выполнения", err.Message, Trim(loc, "`n"))
+    MsgBox("ChesNova не смогла запуститься и будет закрыта.`n`n"
+        . "Ошибка: " err.Message . loc "`n`n"
+        . "Подробности: Documents\ChesNova\logs\errors.log",
+        "ChesNova — Ошибка", "Icon2")
+    ExitApp(1)
 }
 
 RotateErrorsLogIfNeeded() {
@@ -7540,7 +7725,7 @@ HttpGetText(url, resolveMs := 15000, connectMs := 15000, sendMs := 30000, receiv
 FormatHttpError(err) {
     msg := err.Message
     if InStr(msg, "0x80072EE2") || InStr(msg, "истекло") || InStr(msg, "timed out") || InStr(msg, "timeout")
-        return "Сервер Cloud не ответил вовремя (таймаут).`nПроверьте интернет или повторите через минуту.`n`nGoogle Apps Script иногда «просыпается» 10–30 сек."
+        return "Сервер Cloud не ответил вовремя (таймаут).`nПроверьте интернет или повторите через минуту."
     if InStr(msg, "0x80072EFD") || InStr(msg, "0x80072EE7")
         return "Нет связи с интернетом или DNS не резолвит адрес.`nПроверьте сеть / VPN / антивирус."
     if InStr(msg, "0x80072F7D") || InStr(msg, "0x80072F8F")
@@ -7549,71 +7734,90 @@ FormatHttpError(err) {
 }
 
 CheckCloudAccess(exitOnDenied := true, promptOnDenied := true) {
-    global nick, accessUrl, cloudAccessState, cloudAccessMessage, cloudLastCheck, appVersion
+    global nick, cloudAccessState, cloudAccessMessage, cloudLastCheck, appVersion
+    global supabaseRest
 
-    loop {
-        url := accessUrl "?nick=" UriEncode(nick) "&version=" UriEncode(appVersion)
-        response := ""
-        lastErr := ""
-
-        ; До 2 попыток: cold start Google Script часто рвёт первый запрос.
-        loop 2 {
-            try {
-                result := HttpGetText(url)
-                if (result["status"] != 200)
-                    throw Error("HTTP " result["status"])
-                response := result["text"]
-                lastErr := ""
-                break
-            } catch as err {
-                lastErr := err
-                if (A_Index < 2)
-                    Sleep(1200)
-            }
-        }
-
-        if (lastErr != "") {
-            cloudAccessState := "offline"
-            cloudAccessMessage := "Нет связи с Cloud"
-            cloudLastCheck := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
-
-            if (promptOnDenied)
-                MsgBox("Не удалось проверить доступ.`n`n" FormatHttpError(lastErr), "ChesNova", "Iconx")
-
-            ; Сетевой сбой ≠ отказ в доступе: не закрываем программу.
-            return false
-        }
-
-        cloudLastCheck := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
-
-        if (response = "OK") {
-            cloudAccessState := "ok"
-            cloudAccessMessage := "Доступ подтверждён"
-            return true
-        }
-
-        if (response = "BLOCK") {
-            cloudAccessState := "blocked"
-            cloudAccessMessage := "Доступ заблокирован"
-
-            if (promptOnDenied)
-                MsgBox("Доступ заблокирован.", "ChesNova", "Iconx")
-
-            if (exitOnDenied)
-                ExitApp()
-
-            return false
-        }
-
+    if (Trim(nick) = "" || nick = "Nick_Name") {
         cloudAccessState := "denied"
-        cloudAccessMessage := "Ник не найден: " nick
-
-        if (!promptOnDenied)
-            return false
-
-        LogError("CheckCloudAccess", "Ник не найден в базе доступа: " nick)
+        cloudAccessMessage := "Ник не задан"
+        if (promptOnDenied)
+            MsgBox("Задайте ник в панели (Cloud).", "ChesNova", "Iconx")
         return false
     }
+
+    response := ""
+    lastErr := ""
+
+    ; До 2 попыток: сеть может моргнуть при старте.
+    loop 2 {
+        try {
+            result := SupaGet("/admins?nick=eq." UriEncode(nick) "&select=nick,status")
+            if (result["status"] != 200)
+                throw Error("Supabase HTTP " result["status"])
+            response := Trim(result["text"])
+            lastErr := ""
+            break
+        } catch as err {
+            lastErr := err
+            if (A_Index < 2)
+                Sleep(1200)
+        }
+    }
+
+    if (lastErr != "") {
+        cloudAccessState := "offline"
+        cloudAccessMessage := "Нет связи с Cloud"
+        cloudLastCheck := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+
+        if (promptOnDenied)
+            MsgBox("Не удалось проверить доступ.`n`n" FormatHttpError(lastErr), "ChesNova", "Iconx")
+
+        ; Сетевой сбой ≠ отказ в доступе: не закрываем программу.
+        return false
+    }
+
+    cloudLastCheck := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+
+    if (response = "" || response = "[]") {
+        cloudAccessState := "denied"
+        cloudAccessMessage := "Ник не найден: " nick
+        LogError("CheckCloudAccess", "Ник не найден в базе доступа: " nick)
+
+        if (promptOnDenied && exitOnDenied)
+            MsgBox("Ник «" nick "» не найден в базе доступа.", "ChesNova", "Iconx")
+        if (exitOnDenied)
+            ExitApp()
+
+        return false
+    }
+
+    statusRaw := JsonUnquote(JsonGetField(response, "status"))
+    if (statusRaw = "false") {
+        cloudAccessState := "blocked"
+        cloudAccessMessage := "Доступ заблокирован"
+
+        if (promptOnDenied)
+            MsgBox("Доступ заблокирован.", "ChesNova", "Iconx")
+
+        if (exitOnDenied)
+            ExitApp()
+
+        return false
+    }
+
+    cloudAccessState := "ok"
+    cloudAccessMessage := "Доступ подтверждён"
+
+    ; Отчёт о запуске: last_launch + version (не влияет на результат проверки).
+    try {
+        stamp := FormatTime(A_NowUTC, "yyyy-MM-dd'T'HH:mm:ss") "Z"
+        SupaPatch("/admins?nick=eq." UriEncode(nick),
+            '{"last_launch":"' stamp '","version":"' appVersion '"}')
+    } catch as err {
+        LogError("CheckCloudAccess", "Не удалось отправить отчёт о запуске", err.Message)
+    }
+
+    return true
 }
 
 UriEncode(str) {
@@ -7703,6 +7907,44 @@ UpdateVehiclesData(manual := false) {
         LogError("UpdateVehiclesData", "Не удалось обновить список транспорта", err.Message)
         if (manual)
             ShowToast("⚠ Не удалось обновить список транспорта", 2200)
+    }
+}
+
+; Скачать JSON правил (Info/*.json на GitHub) в локальные файлы для панели.
+UpdateRulesData(manual := false) {
+    global rulesCrimeUrl, rulesGovUrl, rulesCommonUrl
+    global hudBridgeRulesCrimeFile, hudBridgeRulesGovFile, hudBridgeRulesCommonFile
+
+    pairs := [
+        [rulesCrimeUrl, hudBridgeRulesCrimeFile, "crime"],
+        [rulesGovUrl, hudBridgeRulesGovFile, "gov"],
+        [rulesCommonUrl, hudBridgeRulesCommonFile, "common"]
+    ]
+    failed := 0
+    for pair in pairs {
+        try {
+            requestUrl := pair[1] "?nocache=" A_Now "_" A_TickCount
+            result := HttpGetText(requestUrl)
+            if (result["status"] != 200)
+                throw Error("HTTP " result["status"])
+            text := Trim(result["text"])
+            if (text = "" || !InStr(text, "sections"))
+                throw Error("Пустой ответ")
+            try {
+                f := FileOpen(pair[2], "w", "UTF-8-RAW")
+                f.Write(text)
+                f.Close()
+            }
+        } catch as err {
+            failed += 1
+            LogError("UpdateRulesData", "Не удалось скачать правила (" pair[3] ")", err.Message)
+        }
+    }
+    if (manual) {
+        if (failed = 0)
+            ShowToast("✓ Правила обновлены", 2000)
+        else
+            ShowToast("⚠ Правила: не удалось обновить " failed " из 3", 2400)
     }
 }
 
