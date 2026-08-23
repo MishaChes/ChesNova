@@ -810,6 +810,12 @@ IsChesNovaHudInstalled(gamePath := "") {
     return FileExist(paths["loader"]) && FileExist(paths["loaderJson"]) && FileExist(paths["ches"])
 }
 
+; Добавляет уникальный query-параметр, чтобы Download() (WinINet) не отдавал файл из кэша Windows
+BustUrl(url) {
+    sep := InStr(url, "?") ? "&" : "?"
+    return url sep "_cb=" A_TickCount
+}
+
 ; Скачивает loader-js.asi + loader-js.json в корень игры и ches.js в uiresources\scripts.
 ; createOnlyMissing=true — не перезаписывать существующие файлы,
 ; кроме тех, у которых alwaysUpdate=true (ches.js, loader-js.json — всегда после рестарта/обновы).
@@ -866,7 +872,8 @@ EnsureChesNovaHudFiles(silent := true, createOnlyMissing := false) {
         }
         tempFile := downloadsPath "\ChesNova_hud_" A_TickCount "_" file["name"] ".tmp"
         try {
-            Download(file["url"], tempFile)
+            ; BustUrl: Download() идёт через WinINet и может отдать файл из кэша Windows
+            Download(BustUrl(file["url"]), tempFile)
             if !FileExist(tempFile) || FileGetSize(tempFile) = 0
                 throw Error("Пустой файл после загрузки: " file["name"])
             ; атомарнее: удалить старый → перенести
@@ -2089,7 +2096,7 @@ InstallUpdateFromPanel() {
         if FileExist(newScript)
             FileDelete(newScript)
 
-        Download(updateUrl, newScript)
+        Download(BustUrl(updateUrl), newScript)
         if !FileExist(newScript) || FileGetSize(newScript) = 0
             throw Error("Загруженный файл пустой.")
 
@@ -2216,7 +2223,7 @@ InstallScriptPackageFromPanel(packageId) {
     try {
         for index, file in package["files"] {
             tempFile := downloadsPath "\ChesNova_" package["id"] "_" A_TickCount "_" index ".tmp"
-            Download(file["url"], tempFile)
+            Download(BustUrl(file["url"]), tempFile)
             downloadedFiles.Push(Map("temp", tempFile, "file", file))
         }
     } catch as err {
@@ -6363,7 +6370,7 @@ InstallTestUpdateFromPanel() {
         if FileExist(newScript)
             FileDelete(newScript)
 
-        Download(downloadUrl, newScript)
+        Download(BustUrl(downloadUrl), newScript)
         if !FileExist(newScript) || FileGetSize(newScript) = 0
             throw Error("Загруженный test-файл пустой.")
 
@@ -6418,7 +6425,7 @@ RollbackToStableReleaseFromPanel() {
         if FileExist(newScript)
             FileDelete(newScript)
 
-        Download(installUrl, newScript)
+        Download(BustUrl(installUrl), newScript)
         if !FileExist(newScript) || FileGetSize(newScript) = 0
             throw Error("Загруженный релизный файл пустой.`nURL: " installUrl)
 
