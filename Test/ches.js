@@ -94,6 +94,7 @@
   var settings = {
     nick: '',
     norm: '',
+    zNorm: '',
     autoResetEnabled: false,
     startWithWindows: false,
     resetTime: { hours: '00', minutes: '00' },
@@ -125,7 +126,7 @@
 
 
   var dashState = {
-    admin: { nick: '—', norm: '—', daysOff: '—' },
+    admin: { nick: '—', normPm: '—', normZ: '—', daysOff: '—', adminLevel: 0, adminLevelText: '—' },
     systems: { chatlog: '—', root: '—', hud: '—' }
   };
   var dashRefs = { info: {}, sys: {}, stats: {} };
@@ -144,7 +145,7 @@
   };
 
   var usefulState = {
-    tab: 'weapons',
+    tab: 'chesnova',
     search: '',
     cmdSearch: '',
     vehicles: { updated: '', list: [], loaded: false },
@@ -237,8 +238,9 @@
   var pmLogState = { entries: [], loaded: false };
   var pmLogRefs = { log: null, search: null };
 
-  var normState = { rows: [], loaded: false, selectedDate: null, editing: false };
-  var normRefs = { body: null, editBtn: null };
+  var normState = { rows: [], loaded: false, selectedDate: null, editing: false, tab: 'admin' };
+  var normRefs = { body: null, editBtn: null, tabBtns: {} };
+  var normHubTab = 'admin'; /* admin | support | daysoff */
 
   var daysMonths = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   var daysOffState = { monthIndex: 7, year: '2026', count: 0, rows: [], loaded: false, selected: null };
@@ -257,8 +259,8 @@
     { id: 's5', name: 'Скрипт 5', url: 'https://example.com/script5' },
     { id: 's6', name: 'Скрипт 6', url: 'https://example.com/script6' }
   ];
-  var scriptsState = { status: null, gamePath: '', gameOk: false, packages: [], loaded: false };
-  var scriptsRefs = { list: null, modal: null, modalBox: null };
+  var scriptsState = { status: null, gamePath: '', gameOk: false, packages: [], loaded: false, tab: 'classic' };
+  var scriptsRefs = { list: null, modal: null, modalBox: null, tabBtns: {} };
   /* Тексты «Инфо» по id пакета (ссылка берётся из topic с бэкенда) */
   var SCRIPT_INFO = {
     atools: {
@@ -288,6 +290,14 @@
     tracer: {
       title: '\u0422\u0440\u0430\u0441\u0435\u0440\u0430',
       body: '\u041e\u0442\u043e\u0431\u0440\u0430\u0436\u0430\u0435\u0442 \u0442\u0440\u0430\u0441\u0435\u0440 \u043f\u0443\u043b\u044c'
+    },
+    lua_dl: {
+      title: 'dl.lua',
+      body: '\u0410\u0432\u0442\u043e\u0440: Misha_Ches\n\u041a\u0430\u0441\u0442\u043e\u043c\u043d\u044b\u0439 /dl'
+    },
+    lua_tp: {
+      title: 'tp.lua',
+      body: '\u0410\u0432\u0442\u043e\u0440: Misha_Ches\n\u0422\u0435\u043b\u0435\u043f\u043e\u0440\u0442\u0430\u0446\u0438\u044f \u043f\u043e \u043a\u043e\u043b\u0435\u0441\u0438\u043a\u0443 \u043c\u044b\u0448\u0438\n\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 \u043a\u043e\u043b\u0435\u0441\u0438\u043a\u043e \u043c\u044b\u0448\u0438\n\u041f\u041a\u041c / \u041b\u041a\u041c\n\u0424\u0443\u043d\u043a\u0446\u0438\u043e\u043d\u0430\u043b \u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d \u0441 3/4 \u0443\u0440\u043e\u0432\u043d\u044f \u0430\u0434\u043c\u0438\u043d\u043a\u0438\n\u0434\u043b\u044f 3 \u0443\u0440\u043e\u0432\u043d\u044f \u0435\u0441\u0442\u044c \u0432\u043e\u0437\u043c\u043e\u0436\u043d\u043e\u0441\u0442\u044c \u0441\u0430\u0434\u0438\u0442\u044c\u0441\u044f \u0432 \u0422\u0421\n\u0434\u043b\u044f 4 \u0443\u0440\u043e\u0432\u043d\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u0442\u0435\u043b\u0435\u043f\u043e\u0440\u0442\u0430\u0446\u0438\u044f \u043f\u043e \u043c\u0435\u0442\u043a\u0435'
     }
   };
 
@@ -418,26 +428,20 @@
 
   var mainNav = [
     { id: 'Dashboard', label: 'Главная' },
-    { id: 'Punishments', label: 'Наказания' },
-    { id: 'PMLogs', label: 'PM логи' },
-    { id: 'NormHistory', label: 'Норма' },
-    { id: 'DaysOff', label: 'Отгулы' },
+    { id: 'NormHub', label: 'Норма' },
+    { id: 'LogsHub', label: 'Логи' },
     { id: 'Binds', label: 'Бинды' },
     { id: 'Scripts', label: 'Скрипты' },
-    { id: 'Useful', label: 'Полезное' }
+    { id: 'AI', label: 'AI' },
+    { id: 'RefHub', label: 'Справочник' }
   ];
 
   var bottomNav = [
-    { id: 'Tester', label: 'Тестировщик' },
-    { id: 'Updates', label: 'Обновления' },
-    { id: 'Help', label: 'Помощь' },
-    { id: 'Cloud', label: 'Cloud' },
+    { id: 'UpdatesHub', label: 'Обновления' },
     { id: 'Diagnostics', label: 'Диагностика' }
   ];
 
   var topList = [
-    { id: 'Rules', label: 'Правила', cls: 'green' },
-    { id: 'AI', label: 'AI', cls: 'purple' },
     { id: 'Notifications', label: 'Уведомления' },
     { id: 'Settings', label: 'Настройки' }
   ];
@@ -2021,6 +2025,10 @@
       background: #161d29;
       border-bottom: 1px solid #232c3a;
       padding: 10px 14px;
+      gap: 6px;
+    }
+    .ches-norm-row.ches-norm-head {
+      gap: 6px;
     }
     .ches-norm-head .ches-norm-cell {
       color: #7c8899;
@@ -2077,11 +2085,12 @@
       white-space: nowrap;
     }
     .ches-norm-date {
-      width: 200px;
+      width: 110px;
       flex-shrink: 0;
+      margin-right: 0;
     }
     .ches-norm-pm {
-      width: 120px;
+      width: 72px;
       flex-shrink: 0;
     }
     .ches-norm-norm {
@@ -4023,22 +4032,37 @@
 
     var form = el('div', 'ches-settings');
 
-    /* Блок 1 — ник (только просмотр) и норма */
-    var block1 = makeSettingsBlock('Пользователь');
+    /* Cloud — в самом верху настроек */
+    var cloudBlock = makeSettingsBlock('Cloud');
+    var cloudWrap = el('div', 'ches-cloud');
+    cloudWrap.id = 'ches-settings-cloud-slot';
+    cloudBlock.appendChild(cloudWrap);
+    form.appendChild(cloudBlock);
+    /* Рендерим cloud UI внутрь слота */
+    try {
+      var savedBody = contentBodyEl;
+      var temp = el('div');
+      contentBodyEl = temp;
+      renderCloud();
+      while (temp.firstChild) cloudWrap.appendChild(temp.firstChild);
+      contentBodyEl = savedBody;
+    } catch (e) {}
+
+    /* Блок 1 — норма PM и норма Z */
+    var block1 = makeSettingsBlock('Нормы');
     var row1 = el('div', 'ches-settings-row');
 
-    var nickField = makeSettingsField('Ник');
-    var nickVal = el('div', 'ches-settings-nickval' + (settings.nick ? '' : ' empty'),
-      settings.nick ? settings.nick : 'Не указан (Cloud)');
-    settingsRefs.nickDisplay = nickVal;
-    nickField.appendChild(nickVal);
-    row1.appendChild(nickField);
-
-    var normField = makeSettingsField('Норма');
-    var normIn = makeOnishiInput({ width: '220px', value: settings.norm, placeholder: '250' });
+    var normField = makeSettingsField('Норма PM');
+    var normIn = makeOnishiInput({ width: '160px', value: settings.norm, placeholder: '250' });
     settingsRefs.norm = normIn.input;
     normField.appendChild(normIn.box);
     row1.appendChild(normField);
+
+    var zNormField = makeSettingsField('Норма Z');
+    var zNormIn = makeOnishiInput({ width: '160px', value: settings.zNorm, placeholder: '50' });
+    settingsRefs.zNorm = zNormIn.input;
+    zNormField.appendChild(zNormIn.box);
+    row1.appendChild(zNormField);
 
     block1.appendChild(row1);
     form.appendChild(block1);
@@ -4136,6 +4160,7 @@
 
   function saveSettings() {
     settings.norm = settingsRefs.norm.value.trim();
+    if (settingsRefs.zNorm) settings.zNorm = settingsRefs.zNorm.value.trim();
     settings.autoResetEnabled = settingsRefs.autoReset.classList.contains('on');
     settings.startWithWindows = settingsRefs.startWithWindows
       ? settingsRefs.startWithWindows.classList.contains('on')
@@ -4185,6 +4210,7 @@
           if (d.logFile != null) settings.chatlogPath = String(d.logFile);
           if (d.gamePath != null) settings.gamePath = String(d.gamePath);
           if (d.norm != null) settings.norm = String(d.norm);
+          if (d.zNorm != null) settings.zNorm = String(d.zNorm);
           if (d.autoReset != null) settings.autoResetEnabled = d.autoReset === 1 || d.autoReset === '1';
           if (d.startWithWindows != null) settings.startWithWindows = d.startWithWindows === 1 || d.startWithWindows === '1' || d.startWithWindows === true;
           if (d.hours != null) settings.resetTime.hours = pad2(d.hours);
@@ -4210,6 +4236,7 @@
   function saveSettingsToBridge() {
     var params = [];
     params.push('norm=' + encodeURIComponent(settings.norm));
+    params.push('zNorm=' + encodeURIComponent(settings.zNorm || '0'));
     params.push('autoReset=' + (settings.autoResetEnabled ? '1' : '0'));
     params.push('startWithWindows=' + (settings.startWithWindows ? '1' : '0'));
     params.push('hours=' + encodeURIComponent(settings.resetTime.hours));
@@ -4488,13 +4515,19 @@
     infoPane.appendChild(el('div', 'ches-dash-pane-title', 'Информация'));
     var infoRows = [
       { key: 'nick', label: 'Ник администратора', value: dashState.admin.nick },
-      { key: 'norm', label: 'Норма админа', value: dashState.admin.norm },
+      { key: 'adminLevel', label: 'Уровень админки', value: dashState.admin.adminLevelText },
+      { key: 'normPm', label: 'Норма PM', value: dashState.admin.normPm },
+      { key: 'normZ', label: 'Норма Z', value: dashState.admin.normZ },
       { key: 'daysOff', label: 'Отгулы', value: dashState.admin.daysOff }
     ];
     infoRows.forEach(function (r) {
       var row = el('div', 'ches-dash-row');
       row.appendChild(el('div', 'ches-dash-row-label', r.label));
       var val = el('div', 'ches-dash-row-value', r.value);
+      if (r.key === 'adminLevel') {
+        var col = adminLevelColor(dashState.admin.adminLevel);
+        if (col) { val.style.color = col; val.style.fontWeight = '700'; }
+      }
       row.appendChild(val);
       dashRefs.info[r.key] = val;
       infoPane.appendChild(row);
@@ -4681,11 +4714,33 @@
     }
   }
 
+  function adminLevelLabel(level) {
+    var n = parseInt(level, 10) || 0;
+    if (n === 1) return '1 уровень';
+    if (n === 2) return '2 уровень';
+    if (n === 3) return '3 уровень';
+    if (n === 4) return '4 уровень';
+    return '—';
+  }
+  function adminLevelColor(level) {
+    var n = parseInt(level, 10) || 0;
+    if (n === 1) return '#41D07A';
+    if (n === 2) return '#22d3ee';
+    if (n === 3) return '#f6a623';
+    if (n === 4) return '#ff5b6b';
+    return '';
+  }
   function applyDashState(d) {
     if (!d || typeof d !== 'object') return;
     if (d.nick != null) dashState.admin.nick = String(d.nick);
-    if (d.norm != null) dashState.admin.norm = String(d.norm);
+    if (d.norm != null) dashState.admin.normPm = String(d.norm);
+    if (d.zNorm != null) dashState.admin.normZ = String(d.zNorm);
     if (d.daysOff != null) dashState.admin.daysOff = String(d.daysOff);
+    if (d.adminLevel != null) {
+      var lv = parseInt(d.adminLevel, 10) || 0;
+      dashState.admin.adminLevel = lv;
+      dashState.admin.adminLevelText = adminLevelLabel(lv);
+    }
     if (d.chatlogOk != null) dashState.systems.chatlog = d.chatlogOk === 1 || d.chatlogOk === '1' ? 'ok' : 'off';
     if (d.gameOk != null) dashState.systems.root = d.gameOk === 1 || d.gameOk === '1' ? 'ok' : 'off';
     if (d.hudVisible != null) dashState.systems.hud = d.hudVisible === 1 || d.hudVisible === '1' ? 'ok' : 'off';
@@ -4695,8 +4750,15 @@
   function updateDashboardDom() {
     if (!contentBodyEl || currentView !== 'Dashboard') return;
     if (dashRefs.info.nick) dashRefs.info.nick.textContent = dashState.admin.nick;
-    if (dashRefs.info.norm) dashRefs.info.norm.textContent = dashState.admin.norm;
+    if (dashRefs.info.normPm) dashRefs.info.normPm.textContent = dashState.admin.normPm;
+    if (dashRefs.info.normZ) dashRefs.info.normZ.textContent = dashState.admin.normZ;
     if (dashRefs.info.daysOff) dashRefs.info.daysOff.textContent = dashState.admin.daysOff;
+    if (dashRefs.info.adminLevel) {
+      dashRefs.info.adminLevel.textContent = dashState.admin.adminLevelText;
+      var col = adminLevelColor(dashState.admin.adminLevel);
+      dashRefs.info.adminLevel.style.color = col || '';
+      dashRefs.info.adminLevel.style.fontWeight = col ? '700' : '';
+    }
     Object.keys(dashRefs.sys).forEach(function (key) {
       var dot = dashRefs.sys[key];
       if (!dot) return;
@@ -4999,6 +5061,7 @@
       if (!rec) return;
       normState.editing = true;
       normRefs.body.innerHTML = '';
+      var isSupportEdit = (normState.tab === 'support');
       var row = el('div', 'ches-norm-head ches-norm-row ches-norm-edit');
       row.appendChild(el('div', 'ches-norm-cell ches-norm-date', rec.date || '—'));
       var pmInput = el('input', 'ches-norm-input');
@@ -5008,6 +5071,16 @@
       var pmCell = el('div', 'ches-norm-cell ches-norm-pm');
       pmCell.appendChild(pmInput);
       row.appendChild(pmCell);
+      var zInput = null;
+      if (isSupportEdit) {
+        zInput = el('input', 'ches-norm-input');
+        zInput.type = 'text';
+        zInput.value = String(rec.z != null ? rec.z : '0');
+        zInput.placeholder = 'Z';
+        var zCell = el('div', 'ches-norm-cell ches-norm-pm');
+        zCell.appendChild(zInput);
+        row.appendChild(zCell);
+      }
       var normInput = el('input', 'ches-norm-input');
       normInput.type = 'text';
       normInput.value = String(rec.norm != null ? rec.norm : '');
@@ -5019,7 +5092,7 @@
       var saveBtn = el('div', 'ches-norm-btn edit', 'Сохранить');
       saveBtn.addEventListener('click', function () {
         normState.editing = false;
-        saveNormEdit(rec.raw, pmInput.value, normInput.value);
+        saveNormEdit(rec.raw, pmInput.value, normInput.value, zInput ? zInput.value : null);
       });
       statusCell.appendChild(saveBtn);
       row.appendChild(statusCell);
@@ -5030,13 +5103,22 @@
 
     var panel = el('div', 'ches-norm-panel');
 
+    var isSupport = (normState.tab === 'support');
     var head = el('div', 'ches-norm-head');
-    var cols = [
-      { cls: 'ches-norm-date', label: 'Дата' },
-      { cls: 'ches-norm-pm', label: 'PM' },
-      { cls: 'ches-norm-norm', label: 'Норма' },
-      { cls: 'ches-norm-status', label: 'Статус' }
-    ];
+    var cols = isSupport
+      ? [
+          { cls: 'ches-norm-date', label: 'Дата' },
+          { cls: 'ches-norm-pm', label: 'PM' },
+          { cls: 'ches-norm-pm', label: 'Z' },
+          { cls: 'ches-norm-norm', label: 'Норма' },
+          { cls: 'ches-norm-status', label: 'Статус' }
+        ]
+      : [
+          { cls: 'ches-norm-date', label: 'Дата' },
+          { cls: 'ches-norm-pm', label: 'PM' },
+          { cls: 'ches-norm-norm', label: 'Норма' },
+          { cls: 'ches-norm-status', label: 'Статус' }
+        ];
     cols.forEach(function (c) {
       head.appendChild(el('div', 'ches-norm-cell ' + c.cls, c.label));
     });
@@ -5052,16 +5134,18 @@
     loadNorm();
   }
 
-  function saveNormEdit(origDate, pmRaw, normRaw) {
+  function saveNormEdit(origDate, pmRaw, normRaw, zRaw) {
     var pm = String(pmRaw || '').trim();
     var norm = String(normRaw || '').trim();
+    var z = (zRaw == null) ? '' : String(zRaw).trim();
     if (pm === '' || norm === '') return;
     var xhr = new XMLHttpRequest();
     xhr.open('GET', NORM_SAVE_URL
       + '?orig=' + encodeURIComponent(origDate)
       + '&date=' + encodeURIComponent(origDate)
       + '&pm=' + encodeURIComponent(pm)
-      + '&norm=' + encodeURIComponent(norm), true);
+      + '&norm=' + encodeURIComponent(norm)
+      + (z !== '' ? '&z=' + encodeURIComponent(z) : ''), true);
     xhr.timeout = 1500;
     xhr.onload = function () {
       setTimeout(function () { loadNorm(); }, 600);
@@ -5107,16 +5191,26 @@
       return;
     }
 
+    var isSupport = (normState.tab === 'support');
     normState.rows.forEach(function (r) {
       var row = el('div', 'ches-norm-head ches-norm-row' + (normState.selectedDate === r.raw ? ' selected' : ''));
       row.appendChild(el('div', 'ches-norm-cell ches-norm-date', r.date || '—'));
       row.appendChild(el('div', 'ches-norm-cell ches-norm-pm', String(r.pm != null ? r.pm : '—')));
+      if (isSupport) {
+        row.appendChild(el('div', 'ches-norm-cell ches-norm-pm', String(r.z != null ? r.z : '0')));
+      }
       row.appendChild(el('div', 'ches-norm-cell ches-norm-norm', String(r.norm != null ? r.norm : '—')));
       var pm = Number(r.pm) || 0;
+      var z = Number(r.z) || 0;
       var norm = Number(r.norm) || 0;
       var statusText, statusCls;
       if (norm <= 0) { statusText = '—'; statusCls = 'off'; }
-      else if (pm >= norm) { statusText = 'Выполнена'; statusCls = 'ok'; }
+      else if (isSupport) {
+        // Support: норма по Z (zNorm), fallback по PM если zNorm нет
+        var target = Number(settings.zNorm) || norm;
+        if (z >= target || pm >= norm) { statusText = 'Выполнена'; statusCls = 'ok'; }
+        else { statusText = 'Не выполнена'; statusCls = 'fail'; }
+      } else if (pm >= norm) { statusText = 'Выполнена'; statusCls = 'ok'; }
       else { statusText = 'Не выполнена'; statusCls = 'fail'; }
       var statusEl = el('div', 'ches-norm-cell ches-norm-status ' + statusCls, statusText);
       row.appendChild(statusEl);
@@ -6115,8 +6209,30 @@
 
     var wrap = el('div', 'ches-scripts');
 
-    /* Предупреждение в самом начале вкладки */
-    wrap.appendChild(el('div', 'ches-scripts-hint', 'После удаления скриптов рекомендуем провести проверку файлов игры'));
+    var tabBar = el('div', 'ches-useful-tabs');
+    scriptsRefs.tabBtns = {};
+    [
+      { id: 'classic', label: 'Классические' },
+      { id: 'lua', label: 'Lua' }
+    ].forEach(function (t) {
+      var btn = el('div', 'ches-useful-tab' + (scriptsState.tab === t.id ? ' active' : ''), t.label);
+      btn.addEventListener('click', function () {
+        scriptsState.tab = t.id;
+        Object.keys(scriptsRefs.tabBtns).forEach(function (k) {
+          scriptsRefs.tabBtns[k].className = 'ches-useful-tab' + (k === t.id ? ' active' : '');
+        });
+        refreshScripts();
+      });
+      tabBar.appendChild(btn);
+      scriptsRefs.tabBtns[t.id] = btn;
+    });
+    wrap.appendChild(tabBar);
+
+    /* Предупреждение */
+    var hint = scriptsState.tab === 'lua'
+      ? 'После удаления Lua-скриптов обязательно проведите проверку файлов игры'
+      : 'После удаления скриптов рекомендуем провести проверку файлов игры';
+    wrap.appendChild(el('div', 'ches-scripts-hint', hint));
 
     /* Список пакетов */
     var list = el('div', 'ches-scripts-list');
@@ -6157,7 +6273,17 @@
       scriptsRefs.list.appendChild(el('div', 'ches-scripts-empty', 'Загрузка…'));
       return;
     }
-    scriptsState.packages.forEach(function (p) {
+    var filtered = scriptsState.packages.filter(function (p) {
+      var kind = (p.kind || p.type || 'classic').toLowerCase();
+      if (scriptsState.tab === 'lua') return kind === 'lua';
+      return kind !== 'lua';
+    });
+    if (!filtered.length) {
+      scriptsRefs.list.appendChild(el('div', 'ches-scripts-empty',
+        scriptsState.tab === 'lua' ? 'Lua-скрипты не найдены' : 'Нет классических скриптов'));
+      return;
+    }
+    filtered.forEach(function (p) {
       var item = el('div', 'ches-scripts-item');
       var info = el('div', 'ches-scripts-info');
       info.appendChild(el('div', 'ches-scripts-name', p.title || ''));
@@ -7776,6 +7902,7 @@
     var wrap = el('div', 'ches-useful');
 
     var tabs = [
+      { id: 'chesnova', label: 'ChesNova' },
       { id: 'weapons', label: 'Оружие' },
       { id: 'commands', label: 'Команды' },
       { id: 'transport', label: 'Транспорт' },
@@ -7809,7 +7936,8 @@
     var body = usefulState.refs.body;
     if (!body) return;
     body.innerHTML = '';
-    if (usefulState.tab === 'weapons') renderUsefulWeapons(body);
+    if (usefulState.tab === 'chesnova') renderUsefulChesNova(body);
+    else if (usefulState.tab === 'weapons') renderUsefulWeapons(body);
     else if (usefulState.tab === 'commands') renderUsefulCommands(body);
     else if (usefulState.tab === 'dmMap') renderUsefulDmMap(body);
     else renderUsefulTransport(body);
@@ -7817,7 +7945,28 @@
     if (scroller) scroller.scrollTop = 0;
   }
 
-  function renderUsefulWeapons(body) {
+  function renderUsefulChesNova(body) {
+    var cmds = [
+      { cmd: '/ches', desc: 'открыть / закрыть панель ChesNova' },
+      { cmd: '/hud', desc: 'показать / скрыть счётчик в игре' },
+      { cmd: '/norma', desc: 'сбросить норму (PM и Z) с подтверждением' },
+      { cmd: '/in', desc: 'открыть / закрыть заметки' },
+      { cmd: '/z N', desc: 'взятие обращения (засчитывается автоматически)' },
+      { cmd: '/ai вопрос', desc: 'спросить AI прямо из чата' },
+      { cmd: 'Esc', desc: 'закрыть панель' }
+    ];
+    body.appendChild(el('div', 'ches-useful-cap', 'Команды программы ChesNova'));
+    var grid = el('div', 'ches-useful-grid');
+    cmds.forEach(function (c) {
+      var row = el('div', 'ches-useful-row');
+      row.appendChild(el('div', 'ches-useful-id', c.cmd));
+      row.appendChild(el('div', 'ches-useful-name', c.desc));
+      grid.appendChild(row);
+    });
+    body.appendChild(grid);
+  }
+
+    function renderUsefulWeapons(body) {
     var searchBox = el('div', 'ches-useful-search');
     var input = document.createElement('input');
     input.className = 'ches-input';
@@ -8269,8 +8418,8 @@
 
     Object.keys(navButtons).forEach(function (key) {
       var cls = 'ches-nav';
-      if (key === 'Useful') cls += ' useful';
-      if (key === 'Updates' && updatesState.hasUpdate) cls += ' update-avail';
+      if (key === 'RefHub') cls += ' useful';
+      if (key === 'UpdatesHub' && updatesState.hasUpdate) cls += ' update-avail';
       if (key === id) cls += ' active';
       navButtons[key].className = cls;
     });
@@ -8290,6 +8439,10 @@
     else if (id === 'Notifications') renderNotifications();
     else if (id === 'AI') renderAI();
     else if (id === 'Dashboard') renderDashboard();
+    else if (id === 'NormHub') renderNormHub();
+    else if (id === 'LogsHub') renderLogsHub();
+    else if (id === 'RefHub') renderRefHub();
+    else if (id === 'UpdatesHub') renderUpdatesHub();
     else if (id === 'Punishments') renderPunishments();
     else if (id === 'PMLogs') renderPMLogs();
     else if (id === 'NormHistory') renderNorm();
@@ -8304,6 +8457,113 @@
     else if (id === 'Useful') renderUseful();
     else if (id === 'Rules') renderRules();
     else renderEmpty();
+  }
+
+  var logsHubTab = 'punishments';
+  var refHubTab = 'useful';
+  var updatesHubTab = 'updates';
+
+  function makeInnerTabs(items, activeId, onPick) {
+    var bar = el('div', 'ches-useful-tabs');
+    var map = {};
+    items.forEach(function (t) {
+      var btn = el('div', 'ches-useful-tab' + (activeId === t.id ? ' active' : ''), t.label);
+      btn.addEventListener('click', function () {
+        Object.keys(map).forEach(function (k) {
+          map[k].className = 'ches-useful-tab' + (k === t.id ? ' active' : '');
+        });
+        onPick(t.id);
+      });
+      bar.appendChild(btn);
+      map[t.id] = btn;
+    });
+    return bar;
+  }
+
+  function renderNormHub() {
+    clearBody();
+    var wrap = el('div');
+    var tabs = [
+      { id: 'admin', label: 'Admin' },
+      { id: 'support', label: 'Support' },
+      { id: 'daysoff', label: 'Отгулы' }
+    ];
+    wrap.appendChild(makeInnerTabs(tabs, normHubTab, function (id) {
+      normHubTab = id;
+      renderNormHub();
+    }));
+    var body = el('div');
+    wrap.appendChild(body);
+    contentBodyEl.appendChild(wrap);
+    var saved = contentBodyEl;
+    contentBodyEl = body;
+    if (normHubTab === 'daysoff') renderDaysOff();
+    else {
+      normState.tab = normHubTab;
+      renderNorm();
+    }
+    contentBodyEl = saved;
+    // move children of body into wrap after body (body already in wrap)
+  }
+
+  function renderLogsHub() {
+    clearBody();
+    var wrap = el('div');
+    wrap.appendChild(makeInnerTabs([
+      { id: 'punishments', label: 'Наказания' },
+      { id: 'pmlogs', label: 'PM логи' }
+    ], logsHubTab, function (id) {
+      logsHubTab = id;
+      renderLogsHub();
+    }));
+    var body = el('div');
+    wrap.appendChild(body);
+    contentBodyEl.appendChild(wrap);
+    var saved = contentBodyEl;
+    contentBodyEl = body;
+    if (logsHubTab === 'pmlogs') renderPMLogs();
+    else renderPunishments();
+    contentBodyEl = saved;
+  }
+
+  function renderRefHub() {
+    clearBody();
+    var wrap = el('div');
+    wrap.appendChild(makeInnerTabs([
+      { id: 'useful', label: 'Полезное' },
+      { id: 'rules', label: 'Правила' }
+    ], refHubTab, function (id) {
+      refHubTab = id;
+      renderRefHub();
+    }));
+    var body = el('div');
+    wrap.appendChild(body);
+    contentBodyEl.appendChild(wrap);
+    var saved = contentBodyEl;
+    contentBodyEl = body;
+    if (refHubTab === 'rules') renderRules();
+    else renderUseful();
+    contentBodyEl = saved;
+  }
+
+  function renderUpdatesHub() {
+    clearBody();
+    var wrap = el('div');
+    wrap.appendChild(makeInnerTabs([
+      { id: 'updates', label: 'Обновления' },
+      { id: 'tester', label: 'Тестировщик' }
+    ], updatesHubTab, function (id) {
+      updatesHubTab = id;
+      renderUpdatesHub();
+    }));
+    var body = el('div');
+    wrap.appendChild(body);
+    contentBodyEl.appendChild(wrap);
+    var saved = contentBodyEl;
+    contentBodyEl = body;
+    if (updatesHubTab === 'tester') renderTester();
+    else renderUpdates();
+    contentBodyEl = saved;
   }
 
   /* ====================== ПОКАЗ / СКРЫТИЕ ====================== */
@@ -8355,8 +8615,20 @@
   function detectAdminLoginFromChat(text) {
     if (/вошли\s+как\s+администратор/i.test(text)) {
       setAdminUnlocked(true);
+      var lvl = 0;
+      if (/первого\s+уровня/i.test(text)) lvl = 1;
+      else if (/второго\s+уровня/i.test(text)) lvl = 2;
+      else if (/третьего\s+уровня/i.test(text)) lvl = 3;
+      else if (/четвертого\s+уровня|четвёртого\s+уровня/i.test(text)) lvl = 4;
+      if (lvl > 0) {
+        dashState.admin.adminLevel = lvl;
+        dashState.admin.adminLevelText = adminLevelLabel(lvl);
+        try { updateDashboardDom(); } catch (e) {}
+      }
     } else if (/Подключились/i.test(text) && /Присоединение\s+к\s+игре/i.test(text)) {
       setAdminUnlocked(false);
+      dashState.admin.adminLevel = 0;
+      dashState.admin.adminLevelText = '—';
     }
   }
 
@@ -8451,6 +8723,17 @@
       topBtns.appendChild(btn);
       topButtons[item.id] = btn;
     });
+
+    var helpBtn = el('div', 'ches-top-btn', '?');
+    helpBtn.style.color = '#f6a623';
+    helpBtn.style.borderColor = 'rgba(246,166,35,.45)';
+    helpBtn.style.minWidth = '28px';
+    helpBtn.style.padding = '0 10px';
+    helpBtn.style.fontWeight = '700';
+    helpBtn.title = 'Помощь';
+    helpBtn.addEventListener('click', function () { showView('Help'); });
+    topBtns.appendChild(helpBtn);
+    topButtons['Help'] = helpBtn;
 
     var closeBtn = el('div', 'ches-top-close');
     closeBtn.addEventListener('click', hide);
@@ -8601,23 +8884,23 @@
   setInterval(function () {
     if (!isAdminUnlocked()) return;
     if (currentView === 'Dashboard') pollDashboard();
-    if (currentView === 'Punishments') loadPunishments();
-    if (currentView === 'PMLogs') loadPmLogs();
-    if (currentView === 'NormHistory') loadNorm();
-    if (currentView === 'DaysOff') loadDaysOff();
+    if (currentView === 'Punishments' || (currentView === 'LogsHub' && logsHubTab === 'punishments')) loadPunishments();
+    if (currentView === 'PMLogs' || (currentView === 'LogsHub' && logsHubTab === 'pmlogs')) loadPmLogs();
+    if (currentView === 'NormHistory' || (currentView === 'NormHub' && (normHubTab === 'admin' || normHubTab === 'support'))) loadNorm();
+    if (currentView === 'DaysOff' || (currentView === 'NormHub' && normHubTab === 'daysoff')) loadDaysOff();
     if (currentView === 'Scripts') loadScripts();
-    if (currentView === 'Tester') loadTester();
+    if (currentView === 'Tester' || (currentView === 'UpdatesHub' && updatesHubTab === 'tester')) loadTester();
     if (currentView === 'AI') loadAi();
-    if (currentView === 'Cloud') loadCloud();
+    if (currentView === 'Cloud' || currentView === 'Settings') loadCloud();
     pollNotifications();
   }, 2000);
 
   /* «Полезное» пульсирует, пока вкладка не открыта */
   setInterval(function () {
     if (!isAdminUnlocked()) return;
-    var b = navButtons['Useful'];
+    var b = navButtons['RefHub'];
     if (!b) return;
-    b.classList.toggle('blink', currentView !== 'Useful');
+    b.classList.toggle('blink', currentView !== 'RefHub');
     refreshUpdatesBadge();
   }, 600);
 
@@ -8682,6 +8965,7 @@
   var pmCount = 0;
   var zCount = 0;
   var normValue = 0;
+  var zNormValue = 0;
   var multValue = 0;
   var healthState = 'ok';
   var pollBusy = false;
@@ -8710,6 +8994,7 @@
       '#ches-hud .ches-hud-mult{color:#3B82F6;font-weight:700;font-size:12px;letter-spacing:.3px;flex-shrink:0}',
       '#ches-hud .ches-hud-mult.ches-hud-mult-off{display:none}',
       '#ches-hud .ches-hud-z{color:#22C55E;font-weight:700;font-size:12px;flex-shrink:0}',
+      '#ches-hud .ches-hud-z-row{margin-top:2px}',
       /* AI panel — левый нижний угол */
       '#ches-ai{position:fixed;bottom:16px;left:16px;z-index:100000;width:min(360px,calc(100vw - 32px));max-height:42vh;display:none;flex-direction:column;background:rgba(11,14,20,.94);border:1px solid #2B3443;border-radius:12px;padding:12px 14px;color:#F5F7FB;font:12px/1.4 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 10px 28px rgba(0,0,0,.4);backdrop-filter:blur(8px);opacity:0;transform:translateY(8px);transition:opacity .22s ease,transform .22s ease}',
       '#ches-ai.ches-ai-visible{display:flex;opacity:1;transform:translateY(0)}',
@@ -8860,9 +9145,9 @@
       '<div class="ches-hud-nick">—</div>',
       '<div class="ches-hud-pm-row">',
       '  <span class="ches-hud-pm">PM: —</span>',
-      '  <span class="ches-hud-z">Z: —</span>',
       '  <span class="ches-hud-mult ches-hud-mult-off"></span>',
-      '</div>'
+      '</div>',
+      '<div class="ches-hud-z-row"><span class="ches-hud-z">Z: —</span></div>'
     ].join('');
     document.body.appendChild(hudEl);
 
@@ -9075,7 +9360,16 @@
     }
     if (hudNickEl) hudNickEl.textContent = settings.nick || '—';
     if (hudPmEl) hudPmEl.textContent = 'PM: ' + (pmCount != null ? pmCount : '—');
-    if (hudZEl) hudZEl.textContent = 'Z: ' + (zCount != null ? zCount : 0);
+    if (hudZEl) {
+      hudZEl.textContent = 'Z: ' + (zCount != null ? zCount : 0);
+      var zn = parseInt(zNormValue, 10) || 0;
+      var zc = parseInt(zCount, 10) || 0;
+      if (zn > 0 && zc >= zn) {
+        hudZEl.style.color = '#41D07A';
+      } else {
+        hudZEl.style.color = '#22C55E';
+      }
+    }
     if (hudMultEl) {
       var m = multValue;
       if (m == null || isNaN(m)) m = 0;
@@ -9252,6 +9546,10 @@
     if (data.norm != null) {
       var nv = parseInt(data.norm, 10);
       if (!isNaN(nv)) normValue = nv;
+    }
+    if (data.zNorm != null) {
+      var znv = parseInt(data.zNorm, 10);
+      if (!isNaN(znv)) zNormValue = znv;
     }
     if (data.mult != null) {
       var mv = parseInt(data.mult, 10);
