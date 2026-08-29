@@ -43,7 +43,7 @@ OnError(ChesNova_ShowErrorBox)
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.1.2"
+CURRENT_VERSION := "12.1.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
