@@ -1,8 +1,8 @@
 {
-  "latest": "12.1.0",
+  "latest": "12.1.1",
   "download": "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Test/ChesNova.ahk",
   "changelog": [
-    "Тестовая сборка 12.1.0",
+    "Тестовая сборка 12.1.1",
     "--",
     "--",
     "--"
