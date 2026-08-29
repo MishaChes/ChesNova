@@ -1,5 +1,5 @@
 ﻿script_name("Teleport")
-script_authors("FYP", "we_sux team")
+script_authors("Misha_Ches")
 script_version_number(3)
 script_dependencies("SAMPFUNCS")
 script_description("Клик-клик — телепорт!")
