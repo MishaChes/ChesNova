@@ -43,7 +43,7 @@ OnError(ChesNova_ShowErrorBox)
 ; 📁 APP DATA
 ; =========================
 appName := "ChesNova"
-CURRENT_VERSION := "12.1.0"
+CURRENT_VERSION := "12.1.1"
 appVersion := "v" CURRENT_VERSION
 basePath := A_MyDocuments "\" appName
 dataPath := basePath "\data"
@@ -58,6 +58,7 @@ DirCreate(backupPath)
 ; 📁 FILES
 ; =========================
 saveFile := dataPath "\pm_count.txt"
+zCountFile := dataPath "\z_count.txt"
 settingsFile := basePath "\settings.ini"
 historyFile := dataPath "\pm_history.csv"
 punishmentsFile := dataPath "\punishments_history.csv"
@@ -85,6 +86,9 @@ hudBridgeVisible := 1
 panelToggleSeq := 0
 noteToggleSeq := 0
 pendingNormResetConfirm := 0
+hudAdminConnected := 0
+hudAdminUnlocked := 0
+lastAdminLogSize := 0
 hudBridgeSettingsFile := dataPath "\hud_settings_state.json"
 hudBridgePendingSettingsFile := dataPath "\hud_settings_pending.ini"
 hudBridgePunishmentsFile := dataPath "\hud_punishments_state.json"
@@ -141,6 +145,8 @@ try {
 ; =========================
 nick := "Nick_Name"
 norm := 250
+zNorm := 50
+adminLevel := 0
 autoResetEnabled := 0
 bindsEnabled := 0
 checkUpdatesOnStartup := 1
@@ -161,10 +167,10 @@ menuKey := "F10"
 resetKey := "F9"
 aiKey := "F7"
 noteKey := "F5"
-menuKeyEnabled := 1
-resetKeyEnabled := 1
-aiKeyEnabled := 1
-noteKeyEnabled := 1
+menuKeyEnabled := 0
+resetKeyEnabled := 0
+aiKeyEnabled := 0
+noteKeyEnabled := 0
 aiEnabled := 0  ; по умолчанию выкл. (РФ/блокировки API — без сетевых запросов AI)
 geminiApiKey := ""
 geminiModel := "gemini-3.6-flash"
@@ -215,16 +221,17 @@ if FileExist(settingsFile)
     try {
         nick := IniRead(settingsFile, "Main", "nick", nick)
         norm := IniRead(settingsFile, "Main", "norm", norm)
+        zNorm := IniRead(settingsFile, "Main", "zNorm", zNorm)
         logFile := IniRead(settingsFile, "Main", "logFile", logFile)
         scriptsGamePath := IniRead(settingsFile, "Scripts", "gamePath", scriptsGamePath)
         menuKey := IniRead(settingsFile, "Keys", "menuKey", "F10")
         resetKey := IniRead(settingsFile, "Keys", "resetKey", "F9")
         aiKey := IniRead(settingsFile, "Keys", "aiKey", "F7")
         noteKey := IniRead(settingsFile, "Keys", "noteKey", "F5")
-        menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 1)
-        resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 1)
-        aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 1)
-        noteKeyEnabled := IniRead(settingsFile, "Keys", "noteKeyEnabled", 1)
+        menuKeyEnabled := IniRead(settingsFile, "Keys", "menuKeyEnabled", 0)
+        resetKeyEnabled := IniRead(settingsFile, "Keys", "resetKeyEnabled", 0)
+        aiKeyEnabled := IniRead(settingsFile, "Keys", "aiKeyEnabled", 0)
+        noteKeyEnabled := IniRead(settingsFile, "Keys", "noteKeyEnabled", 0)
         aiEnabled := IniRead(settingsFile, "AI", "aiEnabled", 0)
         geminiApiKey := IniRead(settingsFile, "AI", "geminiApiKey", "")
         geminiModel := IniRead(settingsFile, "AI", "geminiModel", "gemini-3.6-flash")
@@ -261,6 +268,7 @@ if FileExist(settingsFile)
 nick := Trim(nick)
 userNick := nick
 norm += 0
+zNorm += 0
 autoResetEnabled += 0
 bindsEnabled += 0
 checkUpdatesOnStartup += 0
@@ -331,6 +339,18 @@ SetTimer(CheckNotifications, 600000)
 ; 🧮 VARIABLES
 ; =========================
 pmCount := 0
+zCount := 0
+zAwaitAnswer := 0
+zEnterDeadline := 0
+zEnterPending := 0
+zEnterPendingDeadline := 0
+zEnterProbeMs := 2000
+zClaimActive := 0
+zClaimTicket := ""
+zClaimStartTick := 0
+zClaimDeadline := 0
+zClaimWindowMs := 3000
+zEnterWindowMs := 300000
 lastSize := 0
 isFirstRun := true
 beepPlayed := false
@@ -488,6 +508,14 @@ if FileExist(saveFile)
     else
         pmCount += 0
 }
+if FileExist(zCountFile)
+{
+    loadedZ := FileRead(zCountFile)
+    if (loadedZ = "")
+        zCount := 0
+    else
+        zCount += 0
+}
 LoadRecordCache(punishmentsFile, punishmentRecordCache, "LoadPunishmentRecordCache")
 LoadRecordCache(pmLogsFile, pmLogRecordCache, "LoadPmLogRecordCache")
 punishmentTotals := LoadPunishmentTotals()
@@ -593,6 +621,7 @@ RegisterHotkeys()
 InitializeBinds()
 MaybeRotateDaysOffMonthly()
 SetTimer(CheckLog, 1000)
+SetTimer(CheckAdminLoginState, 1000)
 SetTimer(CheckAutoReset, 30000)
 SetTimer(RunHealthCheck, 10000)
 
@@ -949,7 +978,9 @@ UpdateCloudHudDot() {
 ; 🌐 HTTP bridge → CEF HUD
 ; =========================
 WriteHudBridgeState(*) {
-    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, noteToggleSeq, nick, pmCount, norm, healthState, healthMessage
+    global hudBridgeStateFile, hudBridgePosFile, hudBridgeVisible, pendingNormResetConfirm, panelToggleSeq, noteToggleSeq, nick, pmCount, norm, zNorm, adminLevel, healthState, healthMessage
+    global hudAdminConnected, hudAdminUnlocked
+    global zCount, zClaimActive, zAwaitAnswer, zEnterPending
     global aiHudId, aiHudQuestion, aiHudAnswer, aiHudIsError, aiHudExpireTick, aiHudThinking
     global scriptNoticeId, scriptNoticeText, scriptNoticeExpireTick
     global logFile, scriptsGamePath
@@ -960,10 +991,18 @@ WriteHudBridgeState(*) {
             . '"nick":"' JsonEscape(nick) '",'
             . '"pm":' Integer(pmCount) ','
             . '"norm":' Integer(norm) ','
+            . '"zNorm":' Integer(zNorm) ','
+            . '"adminLevel":' Integer(adminLevel) ','
             . '"mult":' Integer(mult) ','
             . '"health":"' JsonEscape(healthState) '",'
             . '"message":"' JsonEscape(healthMessage) '",'
-            . '"hudVisible":' (hudBridgeVisible ? 1 : 0) ','
+            . '"hudVisible":' ((hudAdminUnlocked ? hudBridgeVisible : 0) ? 1 : 0) ','
+            . '"adminConnected":' (hudAdminConnected ? 1 : 0) ','
+            . '"adminUnlocked":' (hudAdminUnlocked ? 1 : 0) ','
+            . '"zCount":' Integer(zCount) ','
+            . '"zAwaitAnswer":' (zAwaitAnswer ? 1 : 0) ','
+            . '"zPending":' (zClaimActive ? 1 : 0) ','
+            . '"zEnterPending":' (zEnterPending ? 1 : 0) ','
             . '"confirmReset":' (pendingNormResetConfirm ? 1 : 0) ','
             . '"panelToggle":' Integer(panelToggleSeq) ','
             . '"noteToggle":' Integer(noteToggleSeq) ','
@@ -1038,7 +1077,7 @@ WriteHudBridgeState(*) {
 
 ; Текущие настройки для панели (GET /settings) — пишется при старте, сохранении и раз в сек
 WriteSettingsState(*) {
-    global hudBridgeSettingsFile, nick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
+    global hudBridgeSettingsFile, nick, norm, zNorm, autoResetEnabled, resetHour, resetMinute, startWithWindows
     global menuKey, resetKey, aiKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled
     global logFile, scriptsGamePath
 
@@ -1048,6 +1087,7 @@ WriteSettingsState(*) {
             . '"logFile":"' JsonEscape(logFile) '",'
             . '"gamePath":"' JsonEscape(scriptsGamePath) '",'
             . '"norm":' Integer(norm) ','
+            . '"zNorm":' Integer(zNorm) ','
             . '"autoReset":' (autoResetEnabled ? 1 : 0) ','
             . '"startWithWindows":' (startWithWindows ? 1 : 0) ','
             . '"hours":"' Format("{:02}", resetHour) '",'
@@ -1462,12 +1502,16 @@ WriteNormHistoryState(*) {
 
             pm := part[2] + 0
             normVal := part[3] + 0
+            zVal := 0
+            if (part.Length >= 4)
+                zVal := part[4] + 0
 
             rec := '{'
                 . '"date":"' JsonEscape(displayDate) '",'
                 . '"raw":"' JsonEscape(date) '",'
                 . '"pm":' Integer(pm) ','
-                . '"norm":' Integer(normVal)
+                . '"norm":' Integer(normVal) ','
+                . '"z":' Integer(zVal)
                 . '}'
             records.Push(rec)
         }
@@ -1634,8 +1678,10 @@ WriteScriptsState(*) {
             desc := package.Has("description") ? package["description"] : ""
             authors := package.Has("authors") ? package["authors"] : package["author"]
             activation := package.Has("activationCommands") ? package["activationCommands"] : ""
+            kind := package.Has("kind") ? package["kind"] : "classic"
             packages .= '{'
                 . '"id":"' JsonEscape(package["id"]) '",'
+                . '"kind":"' JsonEscape(kind) '",'
                 . '"title":"' JsonEscape(package["displayTitle"]) '",'
                 . '"author":"' JsonEscape(package["author"]) '",'
                 . '"authors":"' JsonEscape(authors) '",'
@@ -2638,10 +2684,11 @@ EnsureHudBridgeScript() {
         "        $kv = $pair -split '=', 2`n"
         "        if ($kv.Count -eq 2) { $vals[$kv[0]] = [System.Uri]::UnescapeDataString($kv[1]) }`n"
         "      }`n"
-        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveNorm=1' + [Environment]::NewLine + 'normOrigDate=' + $vals['orig'] + [Environment]::NewLine + 'normDate=' + $vals['date'] + [Environment]::NewLine + 'normPm=' + $vals['pm'] + [Environment]::NewLine + 'normValue=' + $vals['norm'] + [Environment]::NewLine`n"
+        "      $zPart = if ($vals.ContainsKey('z')) { [Environment]::NewLine + 'normZ=' + $vals['z'] } else { '' }`n"
+        "      $iniText = '[Commands]' + [Environment]::NewLine + 'saveNorm=1' + [Environment]::NewLine + 'normOrigDate=' + $vals['orig'] + [Environment]::NewLine + 'normDate=' + $vals['date'] + [Environment]::NewLine + 'normPm=' + $vals['pm'] + [Environment]::NewLine + 'normValue=' + $vals['norm'] + $zPart + [Environment]::NewLine`n"
         "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
         "      $json = '{`"ok`":true}'`n"
-        "    } elseif ($requestLine -match 'GET\s+/norm') {`n"
+        "    } elseif ($requestLine -match 'GET\s+/norm(\?[^\s]+)?\s') {`n"
         "      $json = '{`"ok`":true,`"records`":[]}'`n"
         "      if (Test-Path -LiteralPath $normFile) {`n"
         "        try { $json = [System.IO.File]::ReadAllText($normFile, [System.Text.Encoding]::Unicode) } catch {}`n"
@@ -3070,14 +3117,34 @@ EnsureHudBridgeScript() {
     "      if ($rf -and (Test-Path -LiteralPath $rf)) {`n"
     "        try { $json = [System.IO.File]::ReadAllText($rf, [System.Text.Encoding]::UTF8) } catch {}`n"
     "      }`n"
-    "    } elseif ($requestLine -match 'GET\s+/vehicles') {`n"
+"    } elseif ($requestLine -match 'GET\s+/vehicles') {`n"
         "      $json = '{`"ok`":true,`"updated`":`"`",`"vehicles`":[]}'`n"
         "      if (Test-Path -LiteralPath $vehiclesFile) {`n"
         "        try { $json = [System.IO.File]::ReadAllText($vehiclesFile, [System.Text.Encoding]::UTF8) } catch {`n"
         "          try { $json = [System.IO.File]::ReadAllText($vehiclesFile, [System.Text.Encoding]::Unicode) } catch {}`n"
         "        }`n"
         "      }`n"
-        "    } else {`n"
+    "    } elseif ($requestLine -match 'GET\s+/hud/toggle') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'toggleHud=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/z/saw\?t=([^&]+)') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'zSaw=' + $Matches[1] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/z/claim\?t=(\d+)') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'zClaim=1' + [Environment]::NewLine + 'zClaimTicket=' + $Matches[1] + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/z/answer') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'zAnswer=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } elseif ($requestLine -match 'GET\s+/norma/ask') {`n"
+    "      $iniText = '[Commands]' + [Environment]::NewLine + 'promptNormReset=1' + [Environment]::NewLine`n"
+    "      try { [System.IO.File]::WriteAllText($cmdFile, $iniText, [System.Text.Encoding]::Unicode) } catch {}`n"
+    "      $json = '{`"ok`":true}'`n"
+    "    } else {`n"
         "      $json = '{`"nick`":`"`",`"pm`":0,`"health`":`"ok`",`"message`":`"`",`"hud`":null}'`n"
         "      if (Test-Path -LiteralPath $stateFile) {`n"
         "        try { $json = [System.IO.File]::ReadAllText($stateFile, [System.Text.Encoding]::Unicode) } catch {}`n"
@@ -3203,13 +3270,19 @@ CheckPendingReset(*) {
 }
 
 CheckPendingCommands(*) {
-    global hudBridgeCommandFile
+    global hudBridgeCommandFile, dataPath
 
     try {
         if !FileExist(hudBridgeCommandFile)
             return
         if IniRead(hudBridgeCommandFile, "Commands", "clearPmLogs", "") = "1" {
             ClearPmLogsFromPanel()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "toggleHud", "") = "1" {
+            ToggleGameHud()
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "promptNormReset", "") = "1" {
+            PromptManualNormReset()
         }
         setBindsEnabled := IniRead(hudBridgeCommandFile, "Commands", "setBindsEnabled", "")
         if (setBindsEnabled != "") {
@@ -3220,8 +3293,9 @@ CheckPendingCommands(*) {
             newDate := Trim(IniRead(hudBridgeCommandFile, "Commands", "normDate", ""))
             newPmRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "normPm", ""))
             newNormRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "normValue", ""))
+            newZRaw := Trim(IniRead(hudBridgeCommandFile, "Commands", "normZ", ""))
             if (origDate != "" && newDate != "" && newPmRaw != "" && newNormRaw != "") {
-                SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw)
+                SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw, newZRaw)
             }
         }
         if IniRead(hudBridgeCommandFile, "Commands", "addDayOff", "") = "1" {
@@ -3388,6 +3462,18 @@ CheckPendingCommands(*) {
         if IniRead(hudBridgeCommandFile, "Commands", "askAi", "") = "1" {
             AskAiFromPanel()
         }
+        if IniRead(hudBridgeCommandFile, "Commands", "zSaw", "") != "" {
+            zSawText := Trim(IniRead(hudBridgeCommandFile, "Commands", "zSaw", ""))
+            zSawStamp := FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+            TryFileAppend(zSawStamp " " zSawText "`n", dataPath "\z_saw.log", "CheckPendingCommands", "Ошибка записи z_saw.log")
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "zClaim", "") = "1" {
+            zClaimTicketParam := Trim(IniRead(hudBridgeCommandFile, "Commands", "zClaimTicket", ""))
+            ArmZClaim(zClaimTicketParam)
+        }
+        if IniRead(hudBridgeCommandFile, "Commands", "zAnswer", "") = "1" {
+            CompleteZClaim()
+        }
     } catch as err {
         LogError("CheckPendingCommands", "Не удалось разобрать команды из панели", err.Message)
     }
@@ -3401,7 +3487,7 @@ CheckPendingCommands(*) {
 ; Применение настроек, присланных панелью (GET /settings?k=v → hud_settings_pending.ini)
 CheckPendingSettings(*) {
     global hudBridgePendingSettingsFile, settingsFile
-    global nick, userNick, norm, autoResetEnabled, resetHour, resetMinute, startWithWindows
+    global nick, userNick, norm, zNorm, autoResetEnabled, resetHour, resetMinute, startWithWindows
     global menuKey, resetKey, aiKey, noteKey, menuKeyEnabled, resetKeyEnabled, aiKeyEnabled, noteKeyEnabled
 
     if !FileExist(hudBridgePendingSettingsFile)
@@ -3410,6 +3496,7 @@ CheckPendingSettings(*) {
     try {
         newNick := IniRead(hudBridgePendingSettingsFile, "Settings", "nick", "")
         newNorm := IniRead(hudBridgePendingSettingsFile, "Settings", "norm", "")
+        newZNorm := IniRead(hudBridgePendingSettingsFile, "Settings", "zNorm", "")
         newAutoReset := IniRead(hudBridgePendingSettingsFile, "Settings", "autoReset", "")
         newStartWithWindows := IniRead(hudBridgePendingSettingsFile, "Settings", "startWithWindows", "")
         newHours := IniRead(hudBridgePendingSettingsFile, "Settings", "hours", "")
@@ -3440,6 +3527,13 @@ CheckPendingSettings(*) {
             newNormVal := Integer(newNorm)
             if (newNormVal != norm) {
                 norm := newNormVal
+                changed := true
+            }
+        }
+        if (newZNorm != "" && RegExMatch(newZNorm, "^\d+$")) {
+            newZNormVal := Integer(newZNorm)
+            if (newZNormVal != zNorm) {
+                zNorm := newZNormVal
                 changed := true
             }
         }
@@ -3541,6 +3635,7 @@ CheckPendingSettings(*) {
         try {
             IniWrite(nick, settingsFile, "Main", "nick")
             IniWrite(norm, settingsFile, "Main", "norm")
+            IniWrite(zNorm, settingsFile, "Main", "zNorm")
             IniWrite(autoResetEnabled, settingsFile, "Main", "autoResetEnabled")
             IniWrite(startWithWindows, settingsFile, "Launcher", "startWithWindows")
             IniWrite(resetHour, settingsFile, "Main", "resetHour")
@@ -4051,7 +4146,7 @@ GetHistorySaveDate() {
 }
 
 SaveDayStats() {
-    global pmCount, norm, historyFile
+    global pmCount, norm, zCount, historyFile
     historyDate := GetHistorySaveDate()
 
     ; Защита от записи одной и той же даты несколько раз
@@ -4063,7 +4158,7 @@ SaveDayStats() {
         }
     }
 
-    if !TryFileAppend(historyDate "," pmCount "," norm "`n", historyFile, "SaveDayStats", "Ошибка записи истории нормы")
+    if !TryFileAppend(historyDate "," pmCount "," norm "," zCount "`n", historyFile, "SaveDayStats", "Ошибка записи истории нормы")
         ShowToast("⚠ Не удалось сохранить историю нормы", 2200)
 }
 
@@ -5588,11 +5683,200 @@ CheckLog(*) {
 }
 
 ; =========================
+; 👮 ВХОД С АДМИНКОЙ (chatlog)
+;  Сканируем только НОВЫЕ строки chatlog (вне CheckLog — тот зависит от Cloud и ника).
+;  «[HH:MM:SS] Подключились. Присоединение к игре...» → новый вход в игру: HUD запирается.
+;  «[HH:MM:SS] Вы вошли как администратор N уровня»   → админ распознан: HUD открывается.
+;  Состояние уходит в hud_state.json (adminConnected/adminUnlocked), чес.js читает его при поллинге.
+; =========================
+CheckAdminLoginState(*) {
+    global logFile, lastAdminLogSize, hudAdminConnected, hudAdminUnlocked
+    global zClaimActive, zClaimDeadline
+    global zEnterPending, zEnterPendingDeadline
+
+    ; Окно ожидания приёма истекло без ошибки → обращение принято, ждём ответ агента.
+    if (zClaimActive && A_TickCount >= zClaimDeadline)
+        AcceptZClaim()
+
+    if (logFile = "" || !FileExist(logFile))
+        return
+    try currentSize := FileGetSize(logFile)
+    catch as err {
+        LogError("CheckAdminLoginState", "Не удалось получить размер chatlog.txt", err.Message)
+        return
+    }
+    if (lastAdminLogSize = 0) {
+        ; Пропускаем уже существующий хвост файла — интересны только новые входы
+        lastAdminLogSize := currentSize
+        return
+    }
+    if (currentSize < lastAdminLogSize)
+        lastAdminLogSize := 0
+    if (currentSize = 0) {
+        lastAdminLogSize := 0
+        return
+    }
+    if (currentSize <= lastAdminLogSize)
+        return
+
+    try file := FileOpen(logFile, "r")
+    catch as err {
+        LogError("CheckAdminLoginState", "Не удалось открыть chatlog.txt", err.Message)
+        return
+    }
+    stateChanged := false
+    try {
+        file.Seek(lastAdminLogSize, 0)
+        while (!file.AtEOF) {
+            line := file.ReadLine()
+            if (!line)
+                continue
+            ; Новый вход в игру → запираем HUD (ждём сообщение админа)
+            if (InStr(line, "Подключились") && InStr(line, "Присоединение к игре")) {
+                if (!hudAdminConnected || hudAdminUnlocked) {
+                    hudAdminConnected := 1
+                    hudAdminUnlocked := 0
+                    global adminLevel
+                    adminLevel := 0
+                    stateChanged := true
+                }
+                continue
+            }
+            ; Распознан вход с админкой → открываем HUD + уровень
+            if (InStr(line, "вошли как администратор")) {
+                if (!hudAdminUnlocked) {
+                    hudAdminConnected := 1
+                    hudAdminUnlocked := 1
+                    stateChanged := true
+                }
+                global adminLevel
+                if (InStr(line, "первого уровня"))
+                    adminLevel := 1
+                else if (InStr(line, "второго уровня"))
+                    adminLevel := 2
+                else if (InStr(line, "третьего уровня"))
+                    adminLevel := 3
+                else if (InStr(line, "четвертого уровня") || InStr(line, "четвёртого уровня"))
+                    adminLevel := 4
+                stateChanged := true
+            }
+            ; Зетка: во время окна ожидания появилась ошибка приёма → обращение не засчитываем
+            if (zClaimActive && RegExMatch(line, "i)(обращение не существует|уже занимается|используйте: /z)"))
+                CancelZClaim()
+            ; Зетка: Enter пустого поля → «Вы не ввели сообщение» → +1 не даём,
+            ; но ожидание НЕ сбрасываем: ждём следующий Enter (без ошибки в чате).
+            if (zEnterPending && InStr(line, "Вы не ввели сообщение")) {
+                zEnterPending := 0
+                zEnterPendingDeadline := 0
+                WriteHudBridgeState()
+            }
+        }
+        lastAdminLogSize := file.Pos
+        file.Close()
+    } catch as err {
+        try file.Close()
+        LogError("CheckAdminLoginState", "Ошибка чтения chatlog.txt", err.Message)
+        return
+    }
+
+    ; Enter прошёл без ошибки («Вы не ввели сообщение» не появилось) → засчитываем.
+    if (zEnterPending && A_TickCount > zEnterPendingDeadline) {
+        zEnterPending := 0
+        zEnterPendingDeadline := 0
+        CompleteZClaim()
+    }
+
+    if (stateChanged)
+        WriteHudBridgeState()
+}
+
+; =========================
+; 🎫 ЗЕТКИ АГЕНТА ПОДДЕРЖКИ (chatlog)
+;  Агент пишет в чат «/z <номер обращения>» — чес.js перехватывает и шлёт
+;  команду zClaim в мост. Приём считается успешным, если в течение ~3 секунд
+;  в chatlog НЕ появилась ошибка («обращение не существует» / «уже занимается»
+;  / «Используйте: /z [id запроса]»).
+;  Зетку засчитываем следующим «чистым» ENTER после принятия (бинди-текст
+;  «Приятной игры <3» — тоже считается): если после ENTER в chatlog появилось
+;  «Вы не ввели сообщение» — +1 не даём и продолжаем ждать следующий ENTER.
+; =========================
+ArmZClaim(ticket) {
+    global zClaimActive, zClaimTicket, zClaimStartTick, zClaimDeadline, zClaimWindowMs
+    global zAwaitAnswer, zEnterDeadline, zEnterPending, zEnterPendingDeadline
+    zAwaitAnswer := 0
+    zEnterDeadline := 0
+    zEnterPending := 0
+    zEnterPendingDeadline := 0
+    zClaimActive := 1
+    zClaimTicket := ticket
+    zClaimStartTick := A_TickCount
+    zClaimDeadline := zClaimStartTick + zClaimWindowMs
+}
+
+CancelZClaim() {
+    global zClaimActive, zClaimTicket, zAwaitAnswer, zEnterDeadline, zEnterPending, zEnterPendingDeadline
+    zClaimActive := 0
+    zClaimTicket := ""
+    zAwaitAnswer := 0
+    zEnterDeadline := 0
+    zEnterPending := 0
+    zEnterPendingDeadline := 0
+}
+
+; Обращение принято без ошибки → переходим в стадию «ждём ответ агента» (без +1).
+AcceptZClaim() {
+    global zClaimActive, zClaimTicket, zAwaitAnswer, zEnterDeadline, zEnterWindowMs
+    zClaimActive := 0
+    zAwaitAnswer := 1
+    zEnterDeadline := A_TickCount + zEnterWindowMs
+    WriteHudBridgeState()
+}
+
+; Агент нажал ENTER после принятия обращения → +1 зетка.
+CompleteZClaim() {
+    global zClaimActive, zClaimTicket, zCount, zCountFile, zAwaitAnswer, zEnterDeadline, zEnterPending, zEnterPendingDeadline
+    if (!zAwaitAnswer)
+        return
+    zAwaitAnswer := 0
+    zEnterDeadline := 0
+    zEnterPending := 0
+    zEnterPendingDeadline := 0
+    zClaimActive := 0
+    doneTicket := zClaimTicket
+    zClaimTicket := ""
+    zCount += 1
+    TryFileDelete(zCountFile, "CompleteZClaim", "Ошибка удаления z_count.txt перед записью")
+    if (!TryFileAppend(zCount, zCountFile, "CompleteZClaim", "Ошибка записи z_count.txt"))
+        ShowToast("⚠ Не удалось сохранить счётчик Z", 2200)
+    WriteHudBridgeState()
+    ShowToast("Z +1 (обращение #" doneTicket ")", 1500)
+}
+
+; ENTER после принятия обращения = момент ответа. Но сразу не считаем:
+; в течение zEnterProbeMs смотрим chatlog — если там «Вы не ввели сообщение»,
+; Enter был пустым → ждём следующего Enter (завершение в CheckAdminLoginState).
+ZAnswerEnter(*) {
+    global zAwaitAnswer, zEnterDeadline, zEnterPending, zEnterPendingDeadline, zEnterProbeMs
+    if (!zAwaitAnswer)
+        return
+    if (zEnterDeadline && A_TickCount > zEnterDeadline) {
+        CancelZClaim()
+        return
+    }
+    if (zEnterPending)
+        return
+    zEnterPending := 1
+    zEnterPendingDeadline := A_TickCount + zEnterProbeMs
+}
+
+; =========================
 ; ⏰ AUTO RESET
 ; =========================
 CheckAutoReset(*) {
     global autoResetEnabled, resetHour, resetMinute, lastResetDate
     global pmCount, beepPlayed, saveFile, settingsFile, dotRed, StatusDotCtrl, PMCountTextCtrl
+    global zCount, zCountFile
+    global zClaimActive, zAwaitAnswer, zEnterDeadline, zEnterPending, zEnterPendingDeadline
     if (!autoResetEnabled)
         return
 
@@ -5608,6 +5892,13 @@ CheckAutoReset(*) {
     SaveDayStats()
     pmCount := 0
     TryFileDelete(saveFile, "CheckAutoReset", "Ошибка удаления pm_count.txt при автосбросе")
+    zCount := 0
+    TryFileDelete(zCountFile, "CheckAutoReset", "Ошибка удаления z_count.txt при автосбросе")
+    zClaimActive := 0
+    zAwaitAnswer := 0
+    zEnterDeadline := 0
+    zEnterPending := 0
+    zEnterPendingDeadline := 0
     lastResetDate := nowDate
     if !TryIniWrite(lastResetDate, settingsFile, "Main", "lastResetDate", "CheckAutoReset")
         ShowToast("⚠ Не удалось сохранить дату автосброса", 2200)
@@ -5732,6 +6023,34 @@ GetScriptPackages() {
             "files", [
                 Map("name", "BulletTrace.asi", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/BulletTrace.asi", "relativePath", "BulletTrace.asi"),
                 Map("name", "BulletTrace.json", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/files/BulletTrace.json", "relativePath", "BulletTrace.json")
+            ],
+            "activationCommands", ""
+        ),
+        Map(
+            "id", "lua_dl",
+            "kind", "lua",
+            "displayTitle", "dl.lua",
+            "author", "Misha_Ches",
+            "title", "dl.lua",
+            "description", "Автор: Misha_Ches`nКастомный /dl",
+            "authors", "Misha_Ches",
+            "topic", "",
+            "files", [
+                Map("name", "dl.lua", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Lua/moonloader/dl.lua", "relativePath", "moonloader\dl.lua")
+            ],
+            "activationCommands", "/dl"
+        ),
+        Map(
+            "id", "lua_tp",
+            "kind", "lua",
+            "displayTitle", "tp.lua",
+            "author", "Misha_Ches",
+            "title", "tp.lua",
+            "description", "Автор: Misha_Ches`nТелепортация по колесику мыши`nИспользуйте колесико мыши`nПКМ / ЛКМ`nФункционал доступен с 3/4 уровня админки`nдля 3 уровня есть возможность садиться в ТС`nдля 4 уровня доступна телепортация по метке",
+            "authors", "Misha_Ches",
+            "topic", "",
+            "files", [
+                Map("name", "tp.lua", "url", "https://raw.githubusercontent.com/MishaChes/ChesNova/main/Lua/moonloader/tp.lua", "relativePath", "moonloader\tp.lua")
             ],
             "activationCommands", ""
         )
@@ -6170,7 +6489,7 @@ GetScriptPackageInstallStatus(package) {
 }
 
 
-SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw) {
+SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw, newZRaw := "") {
     global historyFile
 
     newDate := NormalizeDayOffDate(newDate)
@@ -6179,11 +6498,16 @@ SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw) {
 
     newPm := Trim(newPmRaw)
     newNorm := Trim(newNormRaw)
+    newZ := Trim(newZRaw)
     if (newPm = "" || newNorm = "")
         return
 
     newPm += 0
     newNorm += 0
+    if (newZ = "")
+        newZ := 0
+    else
+        newZ += 0
     existingRecords := ReadNormHistoryRecords("SaveNormHistoryFromPanel")
     dateExists := false
 
@@ -6203,7 +6527,7 @@ SaveNormHistoryFromPanel(origDate, newDate, newPmRaw, newNormRaw) {
         newRecords.Push(record)
     }
 
-    newRecords.Push(Map("date", newDate, "pm", newPm, "norm", newNorm))
+    newRecords.Push(Map("date", newDate, "pm", newPm, "norm", newNorm, "z", newZ))
     if WriteNormHistoryRecords(newRecords) {
         WriteNormHistoryState()
         ShowToast("✓ Запись нормы сохранена", 1800)
@@ -6219,8 +6543,12 @@ ReadNormHistoryRecords(source := "ReadNormHistoryRecords") {
 
     for _, line in ReadFileLines(historyFile, source) {
         part := StrSplit(line, ",")
-        if (part.Length >= 3 && NormalizeDayOffDate(part[1]) != "")
-            records.Push(Map("date", part[1], "pm", part[2] + 0, "norm", part[3] + 0))
+        if (part.Length >= 3 && NormalizeDayOffDate(part[1]) != "") {
+            zVal := 0
+            if (part.Length >= 4)
+                zVal := part[4] + 0
+            records.Push(Map("date", part[1], "pm", part[2] + 0, "norm", part[3] + 0, "z", zVal))
+        }
     }
 
     return records
@@ -6260,8 +6588,10 @@ DedupeNormHistoryRecords(records) {
 
 BuildNormHistoryLines(records) {
     lines := []
-    for _, record in records
-        lines.Push(record["date"] "," record["pm"] "," record["norm"])
+    for _, record in records {
+        zVal := record.Has("z") ? record["z"] : 0
+        lines.Push(record["date"] "," record["pm"] "," record["norm"] "," zVal)
+    }
     return lines
 }
 
@@ -6634,9 +6964,9 @@ GetCloudLocalDataSummary() {
 }
 
 GetCloudLocalDataDetails() {
-    global punishmentsFile, daysOffFile, pmCount, norm
+    global punishmentsFile, daysOffFile, pmCount, norm, zCount
 
-    return "Наказания: " CountFileRecords(punishmentsFile) "  •  Отгулы: " CountFileRecords(daysOffFile) "  •  Сегодня: " pmCount "/" norm
+    return "Наказания: " CountFileRecords(punishmentsFile) "  •  Отгулы: " CountFileRecords(daysOffFile) "  •  Сегодня: " pmCount "/" norm "  •  Z: " zCount
 }
 
 CountFileRecords(filePath) {
@@ -6982,11 +7312,20 @@ CancelPendingNormReset() {
 DoManualNormReset() {
     global pmCount, beepPlayed, saveFile, settingsFile, lastResetDate
     global StatusDotCtrl, PMCountTextCtrl, dotRed, pendingNormResetConfirm
+    global zCount, zCountFile
+    global zClaimActive, zAwaitAnswer, zEnterDeadline, zEnterPending, zEnterPendingDeadline
 
     pendingNormResetConfirm := 0
     SaveDayStats()
     pmCount := 0
     TryFileDelete(saveFile, "DoManualNormReset", "Ошибка удаления pm_count.txt")
+    zCount := 0
+    TryFileDelete(zCountFile, "DoManualNormReset", "Ошибка удаления z_count.txt")
+    zClaimActive := 0
+    zAwaitAnswer := 0
+    zEnterDeadline := 0
+    zEnterPending := 0
+    zEnterPendingDeadline := 0
     lastResetDate := FormatTime(A_Now, "yyyyMMdd")
     TryIniWrite(lastResetDate, settingsFile, "Main", "lastResetDate", "DoManualNormReset")
     if IsObject(PMCountTextCtrl)
@@ -7394,6 +7733,14 @@ RegisterHotkeys() {
         } catch as err {
             LogError("RegisterHotkeys", "Не удалось зарегистрировать noteKey: " noteKey, err.Message)
         }
+    }
+    try {
+        Hotkey("~Enter", ZAnswerEnter, "On")
+        RegisteredStandardHotkeys.Push("~Enter")
+        Hotkey("~NumpadEnter", ZAnswerEnter, "On")
+        RegisteredStandardHotkeys.Push("~NumpadEnter")
+    } catch as err {
+        LogError("RegisterHotkeys", "Не удалось зарегистрировать Enter-хук зеток", err.Message)
     }
     RegisterAiChatHotstring()
 }
