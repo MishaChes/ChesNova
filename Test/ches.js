@@ -65,9 +65,15 @@
   var DM_MAP_DOWNLOAD_URL = 'http://127.0.0.1:17890/useful/map/download';
   var NOTES_URL = 'http://127.0.0.1:17890/notes';
   var NOTES_SAVE_URL = 'http://127.0.0.1:17890/notes/save';
+  var HUD_TOGGLE_URL = 'http://127.0.0.1:17890/hud/toggle';
+  var NORMA_ASK_URL = 'http://127.0.0.1:17890/norma/ask';
+  var Z_CLAIM_URL = 'http://127.0.0.1:17890/z/claim?t=';
+  var Z_SAW_URL = 'http://127.0.0.1:17890/z/saw?t=';
   var OPEN_URL = 'http://127.0.0.1:17890/open';
 
   var domReady = false;
+  window.__chesZAwaitAnswer = false;
+  var lastZDebug = 0;
   var hooked = false;
   var initialized = false;
   var visible = false;
@@ -83,6 +89,7 @@
   var resetConfirmEl = null;
   var resetConfirmTextEl = null;
   var resetConfirmShown = false;
+  var pendingShortcut = null;
 
   var settings = {
     nick: '',
@@ -311,8 +318,15 @@
     '/ches — открыть или закрыть панель.',
     'Esc — закрыть панель.',
     '',
-    'F7 (по умолчанию) — показать / скрыть счётчик в игре.',
-    'Клавишу можно сменить в «Настройках».',
+    'Команды в чате:',
+    '  /ches  — открыть / закрыть панель.',
+    '  /hud   — показать / скрыть счётчик в игре.',
+    '  /norma — сбросить норму (с подтверждением).',
+    '  /in    — открыть / закрыть заметки.',
+    '  /z N   — взятие обращения (считается автоматически).',
+    '',
+    'Горячие клавиши по умолчанию выключены.',
+    'Их можно включить в «Настройках».',
     '',
     'Сброс PM — автосброс по времени в «Настройках».',
     '',
@@ -8294,6 +8308,7 @@
 
   /* ====================== ПОКАЗ / СКРЫТИЕ ====================== */
   function show() {
+    if (!isAdminUnlocked()) return;
     if (!container || visible) return;
     visible = true;
     container.style.display = '';
@@ -8324,6 +8339,85 @@
   function toggle() {
     if (visible) hide();
     else show();
+  }
+
+  /* Админ-замок: пока в чате не появилось «Вы вошли как администратор», панель спит.
+     Открывает/закрывает строка входа в игру «Подключились. Присоединение к игре...». */
+  function isAdminUnlocked() {
+    return !!(window.ChesNovaGate && window.ChesNovaGate.unlocked);
+  }
+
+  function setAdminUnlocked(v) {
+    if (!window.ChesNovaGate) window.ChesNovaGate = { unlocked: false };
+    window.ChesNovaGate.unlocked = !!v;
+  }
+
+  function detectAdminLoginFromChat(text) {
+    if (/вошли\s+как\s+администратор/i.test(text)) {
+      setAdminUnlocked(true);
+    } else if (/Подключились/i.test(text) && /Присоединение\s+к\s+игре/i.test(text)) {
+      setAdminUnlocked(false);
+    }
+  }
+
+  /* Команду ввели до того, как замок успел открыться (детект админки ~1с):
+     не теряем её — дожидаемся разблокировки (макс 3 сек) и выполняем. */
+  function scheduleShortcutWhenUnlocked(cmd) {
+    if (pendingShortcut) return;
+    pendingShortcut = cmd;
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts += 1;
+      if (isAdminUnlocked()) {
+        clearInterval(timer);
+        pendingShortcut = null;
+        handleGameShortcut(cmd);
+      } else if (attempts >= 12) {
+        clearInterval(timer);
+        pendingShortcut = null;
+      }
+    }, 250);
+  }
+
+  /* Команды из чата: перехват до отправки, чтобы сервер не получил команду.
+     Возвращает true, если команда наша. */
+  function fireGet(url) {
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.timeout = 3000;
+      xhr.send();
+    } catch (e) {}
+  }
+
+  function handleGameShortcut(cmd) {
+    if (!isAdminUnlocked()) {
+      if (cmd === '/ches' || cmd === '/hud' || cmd === '/norma' || cmd === '/in') {
+        scheduleShortcutWhenUnlocked(cmd);
+        return true;
+      }
+      return false;
+    }
+    if (cmd === '/ches') {
+      toggle();
+      return true;
+    }
+    if (cmd === '/hud') {
+      fireGet(HUD_TOGGLE_URL);
+      return true;
+    }
+    if (cmd === '/norma') {
+      fireGet(NORMA_ASK_URL);
+      return true;
+    }
+    if (cmd === '/in') {
+      try {
+        if (window.ChesHUD && typeof window.ChesHUD.toggleNotes === 'function')
+          window.ChesHUD.toggleNotes();
+      } catch (e) {}
+      return true;
+    }
+    return false;
   }
 
   /* ====================== ПОСТРОЕНИЕ DOM ====================== */
@@ -8417,9 +8511,24 @@
       window.sendChatInput = new Proxy(orig, {
         apply: function (target, thisArg, args) {
           var text = args[0];
-          if (typeof text === 'string' && text.split(' ')[0].toLowerCase() === '/ches') {
-            toggle();
-            return;
+          if (typeof text === 'string' && text.length > 0) {
+            var nowDbg = Date.now();
+            if (nowDbg - lastZDebug >= 300) {
+              lastZDebug = nowDbg;
+              try { fireGet(Z_SAW_URL + encodeURIComponent(text.slice(0, 100))); } catch (e) {}
+            }
+            var first = text.split(' ')[0].toLowerCase();
+            var zNum = text.match(/^\/z\s+(\d+)/i);
+            if (zNum && first === '/z') {
+              /* Агент поддержки берёт обращение: команда уходит на сервер,
+                 а AHK параллельно засекает окно ожидания ошибки приёма.
+                 Засчёт зетки — следующим нажатием ENTER (хук в AHK). */
+              try { fireGet(Z_CLAIM_URL + encodeURIComponent(zNum[1])); } catch (e) {}
+            } else if (first.charAt(0) === '/') {
+              if (handleGameShortcut(first)) {
+                return;
+              }
+            }
           }
           return Reflect.apply(target, thisArg, args);
         }
@@ -8437,16 +8546,27 @@
       initialized = true;
       if (!domReady) createDom();
       if (window.OUtils && window.OUtils.registerCommand) {
-        window.OUtils.registerCommand('/ches', function () { toggle(); }, 0, true);
+        window.OUtils.registerCommand('/ches', function () { if (isAdminUnlocked()) toggle(); }, 0, true);
+        window.OUtils.registerCommand('/hud', function () { if (isAdminUnlocked()) fireGet(HUD_TOGGLE_URL); }, 0, true);
+        window.OUtils.registerCommand('/norma', function () { if (isAdminUnlocked()) fireGet(NORMA_ASK_URL); }, 0, true);
+        window.OUtils.registerCommand('/in', function () {
+          if (!isAdminUnlocked()) return;
+          try {
+            if (window.ChesHUD && typeof window.ChesHUD.toggleNotes === 'function')
+              window.ChesHUD.toggleNotes();
+          } catch (e) {}
+        }, 0, true);
       }
       if (window.OUtils && typeof window.OUtils.addListenerToChat === 'function' && !window.__chesPanelChatListener) {
         window.__chesPanelChatListener = true;
         try {
           window.OUtils.addListenerToChat(function (ev) {
             var text = ev && ev[0];
-            if (typeof text === 'string' && text.split(' ')[0].toLowerCase() === '/ches') {
-              toggle();
-              return false;
+            if (typeof text === 'string') {
+              if (handleGameShortcut(text.split(' ')[0].toLowerCase())) {
+                return false;
+              }
+              detectAdminLoginFromChat(text);
             }
           });
         } catch (e) {
@@ -8479,6 +8599,7 @@
   };
 
   setInterval(function () {
+    if (!isAdminUnlocked()) return;
     if (currentView === 'Dashboard') pollDashboard();
     if (currentView === 'Punishments') loadPunishments();
     if (currentView === 'PMLogs') loadPmLogs();
@@ -8493,6 +8614,7 @@
 
   /* «Полезное» пульсирует, пока вкладка не открыта */
   setInterval(function () {
+    if (!isAdminUnlocked()) return;
     var b = navButtons['Useful'];
     if (!b) return;
     b.classList.toggle('blink', currentView !== 'Useful');
@@ -8501,7 +8623,7 @@
 
   /* Периодически проверяем наличие обновлений, чтобы держать бейдж актуальным */
   setInterval(function () {
-    loadUpdates();
+    if (isAdminUnlocked()) loadUpdates();
   }, 60000);
 
   tick();
@@ -8535,6 +8657,7 @@
   var hudDotEl = null;
   var hudNickEl = null;
   var hudPmEl = null;
+  var hudZEl = null;
   var hudMultEl = null;
 
   var aiEl = null;
@@ -8557,6 +8680,7 @@
   };
 
   var pmCount = 0;
+  var zCount = 0;
   var normValue = 0;
   var multValue = 0;
   var healthState = 'ok';
@@ -8585,6 +8709,7 @@
       '#ches-hud .ches-hud-pm{color:#F5F7FB;font-weight:700;font-size:12px}',
       '#ches-hud .ches-hud-mult{color:#3B82F6;font-weight:700;font-size:12px;letter-spacing:.3px;flex-shrink:0}',
       '#ches-hud .ches-hud-mult.ches-hud-mult-off{display:none}',
+      '#ches-hud .ches-hud-z{color:#22C55E;font-weight:700;font-size:12px;flex-shrink:0}',
       /* AI panel — левый нижний угол */
       '#ches-ai{position:fixed;bottom:16px;left:16px;z-index:100000;width:min(360px,calc(100vw - 32px));max-height:42vh;display:none;flex-direction:column;background:rgba(11,14,20,.94);border:1px solid #2B3443;border-radius:12px;padding:12px 14px;color:#F5F7FB;font:12px/1.4 "Open Sans","Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 10px 28px rgba(0,0,0,.4);backdrop-filter:blur(8px);opacity:0;transform:translateY(8px);transition:opacity .22s ease,transform .22s ease}',
       '#ches-ai.ches-ai-visible{display:flex;opacity:1;transform:translateY(0)}',
@@ -8735,6 +8860,7 @@
       '<div class="ches-hud-nick">—</div>',
       '<div class="ches-hud-pm-row">',
       '  <span class="ches-hud-pm">PM: —</span>',
+      '  <span class="ches-hud-z">Z: —</span>',
       '  <span class="ches-hud-mult ches-hud-mult-off"></span>',
       '</div>'
     ].join('');
@@ -8743,6 +8869,7 @@
     hudDotEl = hudEl.querySelector('.ches-hud-dot');
     hudNickEl = hudEl.querySelector('.ches-hud-nick');
     hudPmEl = hudEl.querySelector('.ches-hud-pm');
+    hudZEl = hudEl.querySelector('.ches-hud-z');
     hudMultEl = hudEl.querySelector('.ches-hud-mult');
     applyHudVisibility();
     updateHud();
@@ -8757,7 +8884,30 @@
     }
   }
 
+  /* Админ-замок (HUD): до «Вы вошли как администратор» блокируем все элементы и панель.
+     Источники: in-game-чат (мгновенно) и hud_state.json от AHK (стриховка 1с). */
+  function isAdminUnlocked() {
+    return !!(window.ChesNovaGate && window.ChesNovaGate.unlocked);
+  }
+
+  function setAdminUnlocked(v) {
+    if (!window.ChesNovaGate) window.ChesNovaGate = { unlocked: false };
+    window.ChesNovaGate.unlocked = !!v;
+  }
+
+  function lockUi() {
+    try {
+      if (window.ChesPanel && typeof window.ChesPanel.hide === 'function') window.ChesPanel.hide();
+    } catch (e) {}
+    hudVisible = false;
+    applyHudVisibility();
+    try { hideAiPanel(); } catch (e) {}
+    try { setThinking(false); } catch (e) {}
+    if (notesPanelVisible) hideNotesPanel();
+  }
+
   function setHudVisible(on) {
+    if (on && !isAdminUnlocked()) return;
     hudVisible = !!on;
     applyHudVisibility();
   }
@@ -8925,6 +9075,7 @@
     }
     if (hudNickEl) hudNickEl.textContent = settings.nick || '—';
     if (hudPmEl) hudPmEl.textContent = 'PM: ' + (pmCount != null ? pmCount : '—');
+    if (hudZEl) hudZEl.textContent = 'Z: ' + (zCount != null ? zCount : 0);
     if (hudMultEl) {
       var m = multValue;
       if (m == null || isNaN(m)) m = 0;
@@ -9024,6 +9175,17 @@
 
   function applyState(data) {
     if (!data || typeof data !== 'object') return;
+    /* Админ-замок: AHK подтверждает «вошёл с админкой» → открываем;
+       подключение без админки → запираем обратно. */
+    if (data.adminUnlocked === 1 || data.adminUnlocked === '1' || data.adminUnlocked === true) {
+      setAdminUnlocked(true);
+    } else if ((data.adminUnlocked === 0 || data.adminUnlocked === '0' || data.adminUnlocked === false) &&
+               (data.adminConnected === 1 || data.adminConnected === '1' || data.adminConnected === true)) {
+      if (isAdminUnlocked()) {
+        setAdminUnlocked(false);
+        lockUi();
+      }
+    }
     if (data.panelToggle != null) {
       var pt = parseInt(data.panelToggle, 10);
       if (!isNaN(pt) && pt > 0) {
@@ -9079,6 +9241,13 @@
     if (data.pm != null) {
       var n = parseInt(data.pm, 10);
       if (!isNaN(n)) pmCount = n;
+    }
+    if (data.zCount != null) {
+      var zn = parseInt(data.zCount, 10);
+      if (!isNaN(zn)) zCount = zn;
+    }
+    if (data.zAwaitAnswer != null) {
+      window.__chesZAwaitAnswer = (data.zAwaitAnswer === 1 || data.zAwaitAnswer === '1' || data.zAwaitAnswer === true);
     }
     if (data.norm != null) {
       var nv = parseInt(data.norm, 10);
@@ -9180,8 +9349,10 @@
   }
 
   function toggleNotesPanel() {
+    if (!isAdminUnlocked()) return;
     notesPanelVisible = !notesPanelVisible;
     if (!notesPanelEl) {
+      ensureStyles();
       notesPanelEl = document.createElement('div');
       notesPanelEl.id = 'ches-notes-panel';
       notesPanelEl.innerHTML =
@@ -9291,6 +9462,7 @@
     hideAi: hideAiPanel,
     setVisible: setHudVisible,
     toggle: toggleHud,
+    toggleNotes: toggleNotesPanel,
     update: updateHud,
     poll: pollHud,
     resetPos: function () {
@@ -9309,6 +9481,16 @@
   };
 
   function tick() {
+    if (!isAdminUnlocked()) {
+      // HUD спит до входа с админкой; хук и поллинг продолжают работать и «разбудят» его.
+      if (!document.body) {
+        setTimeout(tick, 50);
+        return;
+      }
+      try { installChatHook(); } catch (e) {}
+      setTimeout(tick, 200);
+      return;
+    }
     if (!document.body) {
       setTimeout(tick, 50);
       return;
@@ -9322,10 +9504,12 @@
   }
 
   setInterval(function () {
-    ensureHud();
-    ensureAiPanel();
-    ensureThink();
-    ensureNotice();
+    if (isAdminUnlocked()) {
+      ensureHud();
+      ensureAiPanel();
+      ensureThink();
+      ensureNotice();
+    }
     installChatHook();
     pollHud();
   }, POLL_MS);
